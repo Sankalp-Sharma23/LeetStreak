@@ -157,3 +157,4 @@ Tests:       128 passed, 128 total
 * **Offline Independence**: Personal streak calculation, problem queue, daily challenges, and analytics remain 100% offline and do not require Supabase authentication.
 * **Authentication Quarantine**: Supabase authentication remains strictly isolated to the 1v1 Battle page.
 * **Row-Level Security**: No RLS policies were bypassed or weakened; all database operations enforce authenticated UID boundaries via `SECURITY DEFINER` RPCs with parameter validation and explicit search path.
+

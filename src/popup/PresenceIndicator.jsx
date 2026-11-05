@@ -111,3 +111,4 @@ export function AvatarWithPresence({
 }
 
 export default PresenceIndicator;
+

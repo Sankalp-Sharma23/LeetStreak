@@ -25,3 +25,4 @@ DROP FUNCTION IF EXISTS public.heartbeat_presence(TEXT);
 ALTER TABLE public.user_presence 
     DROP COLUMN IF EXISTS in_battle,
     DROP COLUMN IF EXISTS active_battle_id;
+
