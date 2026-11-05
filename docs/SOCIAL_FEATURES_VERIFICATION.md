@@ -135,6 +135,27 @@ PASS tests/unit/social-presence.test.js
       ✓ updates presence timestamp on heartbeat
       ✓ sets presence to offline immediately upon sign out
 
+PASS tests/unit/account-recovery-persistence.test.js
+  Permanent Friendship Persistence, Account Recovery & Privacy
+    1. Friendship Persistence Across Extension Uninstallation & Reinstallation
+      ✓ restores all accepted friends after complete extension wipe and sign-in
+      ✓ recovers same UUID and friends from any new device/browser
+    2. Decoupling of Presence and Friendship Persistence
+      ✓ friend remains in friend list even when friend uninstalls or goes offline
+      ✓ new presence session is re-established when friend reinstalls and heartbeats
+    3. Idempotent Profile Initialization & Restoration
+      ✓ does not overwrite existing profile when user signs in repeatedly
+      ✓ creates initial profile only when user profile does not exist yet
+    4. Strict Email Privacy & Data Isolation
+      ✓ getAcceptedFriends NEVER exposes email addresses
+      ✓ getOwnProfile returns public attributes and never exposes email
+      ✓ email is stored strictly in authentication provider record
+    5. Friendship Removal & Persistence
+      ✓ permanently removes friendship in database when explicitly requested
+    6. Account Deletion vs Extension Uninstallation Distinction
+      ✓ uninstalling extension preserves cloud data; only explicit deletion removes it
+
+PASS tests/unit/social-presence.test.js
 PASS tests/unit/roast-delivery.test.js
 PASS tests/security/auth-rls.test.js
 PASS tests/unit/hardcore-blocker.test.js
@@ -147,8 +168,8 @@ PASS tests/unit/improvement-rule.test.js
 PASS tests/unit/leetcode-stats.test.js
 PASS tests/unit/initialization-and-auth.test.js
 
-Test Suites: 12 passed, 12 total
-Tests:       128 passed, 128 total
+Test Suites: 13 passed, 13 total
+Tests:       139 passed, 139 total
 ```
 
 ---
@@ -157,4 +178,48 @@ Tests:       128 passed, 128 total
 * **Offline Independence**: Personal streak calculation, problem queue, daily challenges, and analytics remain 100% offline and do not require Supabase authentication.
 * **Authentication Quarantine**: Supabase authentication remains strictly isolated to the 1v1 Battle page.
 * **Row-Level Security**: No RLS policies were bypassed or weakened; all database operations enforce authenticated UID boundaries via `SECURITY DEFINER` RPCs with parameter validation and explicit search path.
+
+---
+
+## 6. Permanent Friendship Persistence & Account Recovery Architecture
+
+### 6.1 Server-Side Single Source of Truth
+Friendships are permanently stored in Supabase `public.friendships` using authenticated UUIDs:
+```
+auth.users.id
+      │
+      ▼
+public.profiles.id
+      │
+      ▼
+public.friendships (requester_id, addressee_id, status)
+```
+- **Uninstallation Survival**: When a user uninstalls LeetStreak, Chrome deletes `chrome.storage.local`. The remote Supabase database remains 100% intact.
+- **Reinstall & Sign-in Recovery**:
+  1. The user reinstalls LeetStreak and enters their email/password on the Battle page.
+  2. Supabase Auth validates credentials and returns the identical, permanent `user_id` (UUID).
+  3. `restoreAccountSocialData()` executes automatically:
+     - Fetches own profile by UUID (`get_own_profile()`) and sets `my_leetcode_username` in storage.
+     - Calls `get_accepted_friends()` RPC to pull all permanent friends.
+     - Hydrates `friends_cache` and `friends_list` into local storage.
+  4. The user immediately sees all their previous friends in the UI without re-sending friend requests.
+
+### 6.2 Presence and Friendship Decoupling
+- **Permanent vs Ephemeral**: Friendship is permanent relational data; presence is temporary heartbeat data.
+- **Offline Friends**: When User B uninstalls or goes offline for days, their presence status transitions to `'offline'`.
+- **Invariance**: User B remains in User A's friend list with a `⚪ Offline` dot. Friendship records are **never** dropped or altered due to session or presence expiration.
+
+### 6.3 Strict Email Privacy & Data Isolation
+- **Storage Location**: Emails reside exclusively in Supabase's private identity table (`auth.users.email`).
+- **Zero Exposure**:
+  - `public.profiles` does NOT contain an `email` column.
+  - `public.friendships` does NOT contain an `email` column.
+  - `get_accepted_friends()` and `get_online_friends()` RPCs NEVER query or return email addresses.
+  - No opponent or peer can discover another user's email via network calls, profiles, or roasts.
+  - Tokens and sessions are stored in `chrome.storage.local` under `'supabase_auth_session'` in background extension contexts and are never injected into web pages or accessible to content scripts.
+
+### 6.4 Extension Uninstallation vs Explicit Account Deletion
+- **Uninstallation**: Removing the Chrome extension only clears client local cache. All user account records, profiles, friendships, and battle logs remain intact in Supabase.
+- **Account Deletion**: Only an explicit, authenticated user action can trigger account deletion. Offline timeouts or uninstalls never trigger deletion.
+
 

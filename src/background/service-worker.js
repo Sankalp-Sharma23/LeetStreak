@@ -37,7 +37,10 @@ import {
   signOut,
   getOnlineFriends,
   setPresenceOffline,
-  syncFriendship
+  syncFriendship,
+  syncFriendships,
+  removeFriendship,
+  restoreAccountSocialData
 } from '../shared/supabase-client.js';
 import {
   createBattle,
@@ -363,18 +366,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       signInWithEmail(message.email, message.password)
         .then(async session => {
           try {
-            const stored = await chrome.storage.local.get(['my_leetcode_username', 'friends_cache']);
+            // Restore entire social account: own profile + all accepted friendships from Supabase!
+            // Survives extension uninstall, browser change, or local cache clearing.
+            await restoreAccountSocialData();
+
+            const stored = await chrome.storage.local.get(['my_leetcode_username']);
             if (stored.my_leetcode_username) {
               await updatePresence(stored.my_leetcode_username, 'online');
             }
-            if (stored.friends_cache) {
-              const names = Object.keys(stored.friends_cache);
-              await Promise.all(names.map(name => syncFriendship(name).catch(() => {})));
-            }
-          } catch {}
+          } catch (restoreErr) {
+            console.warn('[ServiceWorker] Social account restore error:', restoreErr);
+          }
           sendResponse({ success: true, session: { user_id: session.user_id, email: session.email } });
         })
         .catch(err => sendResponse({ success: false, error: err.message, isRateLimited: isAuthRateLimited() }));
+      return true;
+
+    case 'RESTORE_ACCOUNT_DATA':
+      restoreAccountSocialData()
+        .then(res => sendResponse(res))
+        .catch(err => sendResponse({ success: false, error: err.message }));
       return true;
 
     case 'SIGN_UP_EMAIL':
@@ -560,6 +571,13 @@ async function handleAddFriend(username) {
     const processed = await processUserData(rawData);
     await saveFriend(normalized, processed);
 
+    // If authenticated in Supabase, sync friendship permanently to server
+    if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
+      syncFriendship(normalized).catch(err => {
+        console.warn('[ServiceWorker] Cloud syncFriendship failed:', err);
+      });
+    }
+
     return { success: true, message: `${original} added successfully`, data: processed };
   } catch (error) {
     console.error('[ServiceWorker] handleAddFriend error:', error);
@@ -573,6 +591,11 @@ async function handleAddFriend(username) {
 async function handleRemoveFriend(username) {
   try {
     await removeFriend(username);
+    if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
+      removeFriendship(username).catch(err => {
+        console.warn('[ServiceWorker] Cloud removeFriendship failed:', err);
+      });
+    }
     return { success: true, message: `${username} removed` };
   } catch (error) {
     return { success: false, error: error.message };
@@ -584,7 +607,13 @@ async function handleRemoveFriend(username) {
  */
 async function handleGetFriends() {
   try {
-    const friends = await getAllFriends();
+    let friends = await getAllFriends();
+    // If user is authenticated and local friend cache is empty (e.g. after reinstall),
+    // restore permanent friendships from Supabase
+    if (getAuthState() === AUTH_STATES.AUTHENTICATED && (!friends || Object.keys(friends).length === 0)) {
+      await restoreAccountSocialData();
+      friends = await getAllFriends();
+    }
     return { success: true, friends };
   } catch (error) {
     return { success: false, error: error.message };

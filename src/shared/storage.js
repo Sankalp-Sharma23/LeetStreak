@@ -9,6 +9,8 @@
 import {
   getProfile,
   getProfiles,
+  getAcceptedFriends,
+  removeFriendship,
   upsertProfile,
   getUserSettings,
   upsertUserSettings,
@@ -92,42 +94,48 @@ export async function getAllFriends() {
     }
 
     // If unauthenticated or no cloud connection, return local cache immediately
-    if (getAuthState() !== AUTH_STATES.AUTHENTICATED || !myUsername) {
+    if (getAuthState() !== AUTH_STATES.AUTHENTICATED) {
       return result;
     }
 
-    // Opportunistically refresh friend profiles from Supabase if authenticated
+    // Opportunistically restore and refresh friend profiles from Supabase if authenticated
     try {
-      let cloudFriendsList = localFriendsList;
-      const settings = await getUserSettings();
-      if (settings?.friends_list && Array.isArray(settings.friends_list)) {
-        cloudFriendsList = [...new Set([...localFriendsList, ...settings.friends_list])];
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({ friends_list: cloudFriendsList }).catch(() => {});
-        }
-      }
-
-      if (cloudFriendsList.length > 0) {
-        const profiles = await getProfiles(cloudFriendsList);
-        if (profiles && profiles.length > 0) {
-          profiles.forEach(p => {
-            const username = p.leetcode_username || p.username;
-            if (username && p.leetcode_data) {
-              result[username] = {
-                ...p.leetcode_data,
-                lastUpdated: p.last_synced_at ? new Date(p.last_synced_at).getTime() : Date.now()
-              };
-            }
-          });
-
-          // Update local cache
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            chrome.storage.local.set({ friends_cache: result }).catch(() => {});
+      const accepted = await getAcceptedFriends();
+      if (Array.isArray(accepted) && accepted.length > 0) {
+        let hasNew = false;
+        accepted.forEach(f => {
+          const uName = (f.leetcode_username || '').toLowerCase();
+          if (uName && !result[uName]) {
+            result[uName] = {
+              username: uName,
+              profile: {
+                username: uName,
+                realName: f.display_name || uName,
+                avatar: f.avatar_url || ''
+              },
+              stats: {
+                total: f.total_solved || 0,
+                easy: f.easy_solved || 0,
+                medium: f.medium_solved || 0,
+                hard: f.hard_solved || 0,
+                streak: f.current_streak || 0,
+                longestStreak: f.longest_streak || 0
+              },
+              contest: { rating: f.contest_rating || 0 },
+              friend_id: f.friend_id,
+              friendship_id: f.friendship_id,
+              lastUpdated: f.last_synced_at ? new Date(f.last_synced_at).getTime() : Date.now()
+            };
+            hasNew = true;
           }
+        });
+
+        if (hasNew && typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ friends_cache: result }).catch(() => {});
         }
       }
     } catch (cloudErr) {
-      console.warn('[Storage] Cloud friends refresh skipped/failed:', cloudErr.message);
+      console.warn('[Storage] Permanent friends refresh skipped/failed:', cloudErr.message);
     }
 
     return result;
@@ -237,6 +245,7 @@ export async function removeFriend(username) {
     }
 
     if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
+      removeFriendship(username).catch(() => {});
       getUserSettings().then(settings => {
         if (settings?.friends_list) {
           const updated = settings.friends_list.filter(u => u.toLowerCase() !== username.toLowerCase());

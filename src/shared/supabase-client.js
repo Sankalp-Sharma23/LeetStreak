@@ -659,6 +659,187 @@ export async function syncFriendship(targetUsername) {
 }
 
 /**
+ * Batch synchronize friendships for an array of usernames
+ */
+export async function syncFriendships(usernames) {
+  if (!Array.isArray(usernames) || usernames.length === 0) return { success: true, synced: 0 };
+  let count = 0;
+  for (const name of usernames) {
+    const res = await syncFriendship(name);
+    if (res?.success) count++;
+  }
+  return { success: true, synced: count };
+}
+
+/**
+ * Permanently remove friendship from Supabase
+ */
+export async function removeFriendship(targetUsername) {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE' || !targetUsername) return { success: false };
+  try {
+    const res = await callRpc('remove_friendship', { p_target_username: targetUsername.toLowerCase() });
+    return res || { success: false };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Retrieve all permanent accepted friends from Supabase (survives reinstall / storage wipe)
+ * Does NOT return private email addresses.
+ */
+export async function getAcceptedFriends() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return [];
+  try {
+    const res = await callRpc('get_accepted_friends');
+    if (Array.isArray(res)) return res;
+    if (res && Array.isArray(res.data)) return res.data;
+    return [];
+  } catch (err) {
+    console.error('[SupabaseClient] getAcceptedFriends error:', err);
+    return [];
+  }
+}
+
+/**
+ * Get own profile by authenticated UUID from Supabase (does NOT return email)
+ */
+export async function getOwnProfile() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return null;
+  try {
+    const res = await callRpc('get_own_profile');
+    if (res && typeof res === 'object' && res.id) return res;
+
+    // Fallback to REST GET by auth session user_id
+    const session = await getAuthSession();
+    if (!session?.user_id) return null;
+
+    const headers = await getAuthHeaders();
+    const response = await fetch(
+      `${BASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(session.user_id)}&select=*`,
+      { method: 'GET', headers }
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data && data.length > 0 ? data[0] : null;
+  } catch (err) {
+    console.error('[SupabaseClient] getOwnProfile error:', err);
+    return null;
+  }
+}
+
+/**
+ * Restore complete social account data (survives reinstall, browser change, or storage wipe)
+ * 1. Fetches own profile and stores to local storage.
+ * 2. Fetches all permanent accepted friends from Supabase.
+ * 3. Hydrates friends_cache and friends_list in local storage.
+ * 4. Syncs any pre-existing local friends to Supabase.
+ */
+export async function restoreAccountSocialData() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return { success: false };
+
+  try {
+    const session = await getAuthSession();
+    if (!session?.user_id) {
+      return { success: false, error: 'No authenticated session' };
+    }
+
+    // 1. Fetch own profile from Supabase
+    const ownProf = await getOwnProfile();
+    if (ownProf?.leetcode_username && typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({
+        my_leetcode_username: ownProf.leetcode_username,
+        own_profile: {
+          username: ownProf.leetcode_username,
+          profile: {
+            username: ownProf.leetcode_username,
+            realName: ownProf.display_name || ownProf.leetcode_username,
+            avatar: ownProf.avatar_url || ''
+          },
+          stats: {
+            total: ownProf.total_solved || 0,
+            easy: ownProf.easy_solved || 0,
+            medium: ownProf.medium_solved || 0,
+            hard: ownProf.hard_solved || 0,
+            streak: ownProf.current_streak || 0,
+            longestStreak: ownProf.longest_streak || 0
+          },
+          contest: {
+            rating: ownProf.contest_rating || 0
+          },
+          lastUpdated: ownProf.last_synced_at ? new Date(ownProf.last_synced_at).getTime() : Date.now()
+        }
+      });
+    }
+
+    // 2. Fetch all permanent accepted friends from Supabase
+    const acceptedFriends = await getAcceptedFriends();
+    
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get(['friends_cache', 'friends_list']);
+      const currentCache = stored.friends_cache || {};
+      const currentList = stored.friends_list || [];
+
+      const updatedCache = { ...currentCache };
+      const friendUsernames = new Set(currentList);
+
+      for (const f of acceptedFriends) {
+        const uName = (f.leetcode_username || '').toLowerCase();
+        if (!uName) continue;
+
+        friendUsernames.add(uName);
+        updatedCache[uName] = {
+          username: uName,
+          profile: {
+            username: uName,
+            realName: f.display_name || uName,
+            avatar: f.avatar_url || ''
+          },
+          stats: {
+            total: f.total_solved || 0,
+            easy: f.easy_solved || 0,
+            medium: f.medium_solved || 0,
+            hard: f.hard_solved || 0,
+            streak: f.current_streak || 0,
+            longestStreak: f.longest_streak || 0
+          },
+          contest: {
+            rating: f.contest_rating || 0
+          },
+          friend_id: f.friend_id,
+          friendship_id: f.friendship_id,
+          lastUpdated: f.last_synced_at ? new Date(f.last_synced_at).getTime() : Date.now()
+        };
+      }
+
+      await chrome.storage.local.set({
+        friends_cache: updatedCache,
+        friends_list: Array.from(friendUsernames)
+      });
+
+      // 3. Sync any local-only friends added before login to Supabase
+      const localOnly = Object.keys(currentCache).filter(
+        name => !acceptedFriends.some(af => (af.leetcode_username || '').toLowerCase() === name.toLowerCase())
+      );
+      if (localOnly.length > 0) {
+        for (const localUser of localOnly) {
+          syncFriendship(localUser).catch(() => {});
+        }
+      }
+    }
+
+    return {
+      success: true,
+      restoredCount: acceptedFriends.length,
+      ownProfile: ownProf
+    };
+  } catch (err) {
+    console.error('[SupabaseClient] restoreAccountSocialData error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Create battle challenge via server-authoritative RPC
  */
 export async function createBattleChallenge(challengedUsername, language = 'javascript') {

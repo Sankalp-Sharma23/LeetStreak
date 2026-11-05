@@ -588,6 +588,7 @@ function App() {
                     const next = target || authRedirectTarget;
                     setAuthRedirectTarget(null);
                     if (next) setView(next);
+                    fetchStats(true);
                   }}
                 />
               ) : (

@@ -173,6 +173,8 @@ Versioned migrations are located under `supabase/migrations/`:
 1. **Security & Relational Schema:** [`supabase/migrations/20261105000001_security_and_relational_schema.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000001_security_and_relational_schema.sql)
 2. **Presence & Social Remediation:** [`supabase/migrations/20261105000002_presence_and_social_remediation.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000002_presence_and_social_remediation.sql)
    - Rollback Script: [`supabase/migrations/20261105000002_presence_and_social_remediation.down.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000002_presence_and_social_remediation.down.sql)
+3. **Permanent Friendship Persistence & Account Recovery:** [`supabase/migrations/20261105000003_permanent_friendship_and_recovery.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000003_permanent_friendship_and_recovery.sql)
+   - Rollback Script: [`supabase/migrations/20261105000003_permanent_friendship_and_recovery.down.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000003_permanent_friendship_and_recovery.down.sql)
 
 ### Migration Order & Deployment Instructions
 ```bash
