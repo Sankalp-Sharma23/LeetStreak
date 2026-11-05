@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Moon, Sun, Bell, RotateCcw, LogOut, AlertTriangle, X } from 'lucide-react';
+import { ChevronLeft, Moon, Sun, Bell, RotateCcw, LogOut, AlertTriangle, X, Flame, Shield, KeyRound, CheckCircle2, Cloud, Loader2, Swords } from 'lucide-react';
 
 function ConfirmDialog({ title, message, confirmText, cancelText, onConfirm, onCancel, isDangerous }) {
   return (
@@ -48,18 +48,24 @@ function ConfirmDialog({ title, message, confirmText, cancelText, onConfirm, onC
   );
 }
 
-function SettingsPanel({ onBack, theme, onThemeChange }) {
+function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationFrequency, setNotificationFrequency] = useState('all');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [autoSyncInterval, setAutoSyncInterval] = useState(30);
+  const [hardcoreModeEnabled, setHardcoreModeEnabled] = useState(false);
+  const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [username, setUsername] = useState('');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showClearDataConfirm, setShowClearDataConfirm] = useState(false);
 
+  // Supabase Cloud Account state
+  const [authState, setAuthState] = useState('SESSION_LOADING');
+  const [authSession, setAuthSession] = useState(null);
+
   useEffect(() => {
     // Load settings from storage
-    chrome.storage.local.get(['my_leetcode_username', 'notifications_enabled', 'notification_frequency', 'auto_sync_enabled', 'auto_sync_interval'], (data) => {
+    chrome.storage.local.get(['my_leetcode_username', 'notifications_enabled', 'notification_frequency', 'auto_sync_enabled', 'auto_sync_interval', 'hardcore_mode_enabled'], (data) => {
       if (data.my_leetcode_username) {
         setUsername(data.my_leetcode_username);
       }
@@ -74,6 +80,18 @@ function SettingsPanel({ onBack, theme, onThemeChange }) {
       }
       if (data.auto_sync_interval) {
         setAutoSyncInterval(data.auto_sync_interval);
+      }
+      if (data.hardcore_mode_enabled !== undefined) {
+        setHardcoreModeEnabled(data.hardcore_mode_enabled);
+      }
+    });
+
+    // Check Cloud auth state
+    chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, (res) => {
+      if (res && res.success) {
+        setAuthState(res.state);
+        setAuthSession(res.session);
+        setCooldownSeconds(res.cooldownSeconds || 0);
       }
     });
   }, []);
@@ -106,6 +124,24 @@ function SettingsPanel({ onBack, theme, onThemeChange }) {
     chrome.storage.local.set({ auto_sync_interval: minutes });
   };
 
+  const handleHardcoreModeToggle = async () => {
+    const nextState = !hardcoreModeEnabled;
+    setHardcoreModeEnabled(nextState);
+    await chrome.storage.local.set({ hardcore_mode_enabled: nextState });
+    if (chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ type: 'SYNC_BLOCKER_RULES' }).catch(() => {});
+    }
+  };
+
+  const requestTabsPermission = async () => {
+    setShowPermissionDialog(false);
+    setHardcoreModeEnabled(true);
+    await chrome.storage.local.set({ hardcore_mode_enabled: true });
+    if (chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ type: 'SYNC_BLOCKER_RULES' }).catch(() => {});
+    }
+  };
+
   const handleClearData = async () => {
     setShowClearDataConfirm(false);
     const { clearAllData } = await import('../shared/storage.js');
@@ -118,6 +154,16 @@ function SettingsPanel({ onBack, theme, onThemeChange }) {
     setShowLogoutConfirm(false);
     await chrome.storage.local.remove(['my_leetcode_username', 'friends']);
     window.location.reload();
+  };
+
+  const handleSignOutCloud = async () => {
+    try {
+      await new Promise(resolve => chrome.runtime.sendMessage({ type: 'SIGN_OUT' }, resolve));
+      setAuthState('AUTH_REQUIRED');
+      setAuthSession(null);
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
   };
 
   return (
@@ -337,6 +383,83 @@ function SettingsPanel({ onBack, theme, onThemeChange }) {
           )}
         </div>
 
+        {/* Hardcore Motivation Section */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-red-400 uppercase tracking-wide flex items-center gap-2">
+            <Flame className="w-4 h-4" /> Productivity
+          </h3>
+          <button
+            onClick={handleHardcoreModeToggle}
+            className="w-full flex items-center justify-between p-4 bg-red-500/10 hover:bg-red-500/15 rounded-xl border border-red-500/30 transition-all duration-200 group"
+          >
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg transition-all ${hardcoreModeEnabled ? 'bg-red-500/20' : 'bg-surfaceHover/50'}`}>
+                <Flame className={`w-4 h-4 ${hardcoreModeEnabled ? 'text-red-400' : 'text-text-muted'}`} />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-red-400">Hardcore Motivation Mode</p>
+                <p className="text-xs text-text-muted mt-1">Guilt-trips you when you open Netflix, YouTube, etc. without solving a problem today.</p>
+              </div>
+            </div>
+            <div className={`relative inline-flex items-center w-12 h-7 rounded-full transition-all duration-300 ml-2 ${hardcoreModeEnabled ? 'bg-red-500' : 'bg-surfaceHover'}`}>
+              <div className={`absolute w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${hardcoreModeEnabled ? 'right-1' : 'left-1'}`}></div>
+            </div>
+          </button>
+        </div>
+
+        {/* Supabase Cloud Account Section */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-text-muted uppercase tracking-wide flex items-center gap-2">
+              <Cloud className="w-4 h-4 text-primary" /> Cloud Features & Battles
+            </h3>
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+              authState === 'AUTHENTICATED'
+                ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                : 'bg-zinc-700/30 text-zinc-400 border border-zinc-700/50'
+            }`}>
+              {authState === 'AUTHENTICATED' ? 'Connected' : 'Offline Mode'}
+            </span>
+          </div>
+
+          <div className="bg-surface/40 rounded-2xl p-4 border border-surfaceHover/30 space-y-3">
+            {authState === 'AUTHENTICATED' ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-500/10 rounded-xl text-green-400">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-text-main truncate">
+                      {authSession?.email || 'Cloud Account Active'}
+                    </p>
+                    <p className="text-[11px] text-text-muted">1v1 Battles & friend cloud sync enabled</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleSignOutCloud}
+                  className="w-full py-2.5 px-4 bg-surface hover:bg-surfaceHover border border-surfaceHover/60 text-xs font-medium text-text-muted hover:text-text-main rounded-xl transition-all"
+                >
+                  Disconnect Cloud Account
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-text-muted leading-relaxed">
+                  Personal streaks and progress work <span className="text-text-main font-semibold">100% offline</span>. Sign in to your account for 1v1 Battles, friends leaderboard, and roasts.
+                </p>
+
+                <button
+                  onClick={onNavigateToBattle}
+                  className="w-full py-3 px-4 bg-primary hover:bg-primaryHover text-inverted text-xs font-semibold rounded-xl transition-all shadow-md hover:shadow-primary/20 flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Swords className="w-4 h-4" /> Go to 1v1 Battle to Sign In / Create Account →
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Actions Section */}
         <div className="space-y-3 pt-6 border-t border-surfaceHover/30">
           <h3 className="text-sm font-bold text-text-muted uppercase tracking-wide">Danger Zone</h3>
@@ -396,6 +519,19 @@ function SettingsPanel({ onBack, theme, onThemeChange }) {
           onConfirm={handleClearData}
           onCancel={() => setShowClearDataConfirm(false)}
           isDangerous={true}
+        />
+      )}
+
+      {/* Tabs Permission Confirmation Dialog */}
+      {showPermissionDialog && (
+        <ConfirmDialog
+          title="Enable Hardcore Mode"
+          message="To know when you're procrastinating, LeetStreak needs the 'tabs' permission to see what websites you visit (like Netflix or YouTube). We only check URLs locally against a blacklist and NEVER send your browsing history anywhere. Do you allow this?"
+          confirmText="Allow & Enable"
+          cancelText="Decline"
+          onConfirm={requestTabsPermission}
+          onCancel={() => setShowPermissionDialog(false)}
+          isDangerous={false}
         />
       )}
 

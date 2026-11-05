@@ -1,9 +1,11 @@
 # Feature Blueprint: SMS Notifications & Friend Activity Alerts
 
 **Date:** December 28, 2025  
-**Status:** FEASIBILITY ANALYSIS  
-**Author:** GitHub Copilot  
+**Status:** DEFERRED PROPOSAL (Exploratory Feasibility Only — Not Implemented in Scope)  
 **Version:** 1.0
+
+> [!NOTE] ARCHITECTURAL DECISION ON SCOPE
+> SMS Streak Alerts are explicitly **DEFERRED**. The project does NOT collect phone numbers, integrate third-party paid SMS providers (e.g. Twilio, AWS SNS), or require paid cloud infrastructure. Friend activity notifications remain implemented via browser notifications and in-app fallback.
 
 ---
 

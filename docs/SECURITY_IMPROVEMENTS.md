@@ -1,250 +1,45 @@
-# Security Improvements Summary
+# LeetStreak Security Improvements & Hardening Log
 
 ## Overview
-Comprehensive security enhancements have been implemented across the LeetStreak Chrome extension to protect against common web vulnerabilities and ensure secure handling of user data and API credentials.
+This document logs the comprehensive security enhancements implemented across the LeetStreak codebase, resolving legacy vulnerabilities, eliminating unsafe third-party token handling, and establishing database isolation.
 
-## Changes Made
+---
 
-### 1. Content Security Policy (CSP) ✅
-**File:** `public/manifest.json`
+## 1. Eliminated Plaintext Token Storage Vulnerability
+- **Previous Risk:** The legacy GitHub integration stored personal access tokens and OAuth credentials in `chrome.storage.local`. The encryption implementation in `secure-token-manager.js` co-located the static AES-GCM password in plaintext alongside the ciphertext.
+- **Remediation:** Completely removed GitHub integration and all associated token storage mechanisms. Stored user credentials for third-party git services no longer exist within the extension.
 
-Added strict Content Security Policy to the manifest:
-- Restricts script sources to extension only (no external scripts)
-- Blocks all object embeds (Flash, Java applets)
-- Prevents form submissions to external sites
-- Blocks iframe embedding (clickjacking protection)
-- Enforces HTTPS upgrades for all requests
+---
 
-### 2. Security Utilities Module ✅
-**File:** `src/shared/security-utils.js` (NEW - 335 lines)
+## 2. Manifest V3 CSP Compliance & Remote Script Removal
+- **Previous Risk:** The Code Screenshot utility previously attempted to inject external script tags from `cdnjs.cloudflare.com` (`html2canvas.min.js`), causing Chrome Manifest V3 Content Security Policy violations and introducing remote supply-chain risk.
+- **Remediation:** Replaced external library injection with an autonomous, native HTML5 `<canvas>` rendering engine located directly in `src/content/leetcode-integration.js`. Screenshots are rendered entirely offline and locally within the browser.
 
-Created comprehensive security utilities library with:
+---
 
-#### Input Validation
-- `validateUsername()` - Validates and normalizes usernames (alphanumeric, underscore, hyphen only)
-- `isValidGitHubToken()` - Validates GitHub Personal Access Token format
-- `isValidUrl()` - Validates URLs with protocol and host whitelisting
-- `safeJsonParse()` - Validates JSON with optional schema checking
+## 3. Row-Level Security & Database Isolation
+- **Previous Risk:** `DATABASE_DESIGN.md` formerly defined global open policies (`USING (true)` / `WITH CHECK (true)`), allowing unauthenticated and unauthorized parties to read private user settings, overwrite another user's friends list, tamper with match winners, and modify competition scores.
+- **Remediation:** Implemented PostgreSQL Row-Level Security across all 8 relational tables (`supabase/migrations/20261105000001_security_and_relational_schema.sql`):
+  - `user_settings`: Restricted exclusively to `auth.uid() = user_id`.
+  - `friendships`: Restricted to mutual participants.
+  - `roast_messages`: Restricted to sender and recipient with friendship relationship validation.
+  - `battles` & `battle_results`: Restricted to verified participants.
+  - Winner assignment and scoring transitions are encapsulated in atomic `SECURITY DEFINER` database functions (`confirm_battle_ready`, `record_battle_submission`, `forfeit_battle`, `evaluate_and_finalize_battle`).
 
-#### HTML Sanitization
-- `escapeHtml()` - Escapes HTML special characters (&, <, >, ", ', /)
-- `sanitizeText()` - Strips all HTML tags aggressively
-- `sanitizeCommitMessage()` - Sanitizes commit messages for GitHub
-- `createSafeElement()` - Creates DOM elements safely without innerHTML
+---
 
-#### Rate Limiting
-- `RateLimiter` class - Token bucket rate limiting
-  - Configurable max calls and time window
-  - `isAllowed()` - Checks if request is allowed
-  - `getTimeUntilReset()` - Returns wait time until next call
+## 4. Idempotent Submission Verification
+- **Previous Risk:** Re-submitting an already-solved problem in 1v1 battle mode could trigger race conditions or duplicate point awards.
+- **Remediation:** Enforced composite uniqueness constraints on `(battle_id, user_id, problem_slug, leetcode_submission_id)` and a unique partial index for accepted solves. Replay attempts are handled idempotently (`ON CONFLICT DO NOTHING`), preventing duplicate points.
 
-#### Encryption (Web Crypto API)
-- `SecureStorage` class - AES-256-GCM encryption
-  - `encrypt()` - Encrypts data with PBKDF2 key derivation
-  - `decrypt()` - Decrypts data
-  - 100,000 PBKDF2 iterations
-  - Random salt and IV for each encryption
+---
 
-#### Security Helpers
-- `isTrustedOrigin()` - Validates message origins
-- `generateSecureRandom()` - Cryptographically secure random strings
+## 5. Network Protocol Enforcement & HSTS Auditing
+- **Previous Risk:** Advisory documentation claimed custom certificate pinning, whereas the code only logged warnings and used placeholder fingerprints.
+- **Remediation:** Reconciled documentation and code into `src/shared/https-enforcement.js`. Pre-flight network checks enforce strict HTTPS transport, and response auditing verifies `Strict-Transport-Security` headers on communication with `leetcode.com`.
 
-### 3. Enhanced Input Validation ✅
-**File:** `src/shared/validation.js` (UPDATED)
+---
 
-Refactored to use security-utils module:
-- Imports and re-exports security functions
-- Maintains backwards compatibility
-- Adds type safety and error messages
-
-### 4. XSS Prevention ✅
-**File:** `src/content/leetcode-integration.js` (UPDATED)
-
-Replaced all dangerous `innerHTML` usage with safe DOM manipulation:
-
-**Before (Vulnerable):**
-```javascript
-button.innerHTML = `<span>${icon}</span><span>${text}</span>`;
-content.innerHTML = generateScreenshotHTML(problemData, code, language);
-```
-
-**After (Secure):**
-```javascript
-const iconSpan = document.createElement('span');
-iconSpan.innerHTML = icon; // SVG from static code - safe
-const textSpan = document.createElement('span');
-textSpan.textContent = text; // Auto-escapes
-button.appendChild(iconSpan);
-button.appendChild(textSpan);
-
-// New function builds DOM elements directly
-const screenshotElement = generateScreenshotElement(problemData, code, language);
-content.appendChild(screenshotElement);
-```
-
-Created new `generateScreenshotElement()` function that:
-- Builds 135 lines of safe DOM elements
-- Uses `textContent` instead of `innerHTML`
-- Safely attaches event listeners
-- No template strings with user data
-
-### 5. Rate Limiting ✅
-**Files:** 
-- `src/background/leetcode-api.js` (UPDATED)
-- `src/shared/github-sync.js` (UPDATED)
-
-Implemented rate limiting on all external API calls:
-
-#### LeetCode API
-- 30 requests per minute
-- Prevents request before rate limit check
-- Returns error with wait time
-
-#### GitHub API
-- 60 requests per hour (matches GitHub's limits)
-- URL validation before each request
-- Error messages with reset time
-
-### 6. GitHub Token Security ✅
-**Files:**
-- `src/popup/GitHubSync.jsx` (UPDATED)
-- `src/shared/github-sync.js` (UPDATED)
-
-Enhanced token handling:
-- Validates token format before API calls
-- Supports both Personal Access Tokens (ghp_...) and Fine-grained tokens (github_pat_...)
-- Rejects malformed tokens immediately
-- Clears token input after successful save
-- Added comment about encryption for production
-
-### 7. URL Validation ✅
-**File:** `src/shared/github-sync.js` (UPDATED)
-
-Added URL validation in `request()` method:
-- Validates HTTPS protocol
-- Whitelist for api.github.com only
-- Prevents SSRF attacks
-
-### 8. Documentation ✅
-**File:** `docs/SECURITY.md` (NEW - 350 lines)
-
-Comprehensive security documentation covering:
-- All implemented security features
-- Code examples and usage
-- Threat model (what's protected, what's not)
-- Security best practices for developers and users
-- Security audit checklist
-- Incident response procedure
-- Future security enhancements
-- References to OWASP and Chrome security docs
-
-## Security Features Summary
-
-| Feature | Status | Protection Against |
-|---------|--------|-------------------|
-| Content Security Policy | ✅ Implemented | XSS, Code Injection, Clickjacking |
-| Input Validation | ✅ Implemented | Injection Attacks, Malformed Input |
-| HTML Sanitization | ✅ Implemented | XSS, HTML Injection |
-| Rate Limiting | ✅ Implemented | DoS, API Abuse |
-| Token Validation | ✅ Implemented | Malformed Credentials |
-| URL Validation | ✅ Implemented | SSRF, Unauthorized Requests |
-| Secure DOM Manipulation | ✅ Implemented | XSS via innerHTML |
-| HTTPS Enforcement | ✅ Implemented | MITM Attacks |
-| Encryption Utilities | ✅ Available | Data Theft (when used) |
-| Origin Validation | ✅ Implemented | Message Spoofing |
-
-## Testing
-
-All changes have been tested for:
-- ✅ No syntax errors
-- ✅ ESLint compliance (reduced from 53 to manageable errors)
-- ✅ Backwards compatibility maintained
-- ✅ No breaking changes to existing functionality
-
-## Migration Notes
-
-### For Existing Users
-- No changes required - all improvements are transparent
-- GitHub tokens remain functional
-- No data migration needed
-
-### For Developers
-- Use `createSafeElement()` instead of `innerHTML` for new components
-- Import validation functions from `security-utils.js`
-- Check rate limits before external API calls
-- Validate all user inputs before processing
-
-## Files Modified
-
-1. ✅ `public/manifest.json` - Added CSP
-2. ✅ `src/shared/security-utils.js` - NEW (335 lines)
-3. ✅ `src/shared/validation.js` - Refactored to use security-utils
-4. ✅ `src/content/leetcode-integration.js` - XSS fixes, safe DOM manipulation
-5. ✅ `src/background/leetcode-api.js` - Rate limiting
-6. ✅ `src/shared/github-sync.js` - Rate limiting, URL validation, token validation
-7. ✅ `src/popup/GitHubSync.jsx` - Token format validation
-8. ✅ `docs/SECURITY.md` - NEW (350 lines)
-
-## Performance Impact
-
-- Minimal performance impact
-- Rate limiting prevents excessive API usage
-- Input validation adds <1ms per operation
-- DOM manipulation is equivalent to innerHTML performance
-
-## Next Steps (Optional)
-
-For production deployment, consider:
-
-1. **Token Encryption**
-   ```javascript
-   const encrypted = await SecureStorage.encrypt(token, userPassword);
-   await chrome.storage.local.set({ github_token_encrypted: encrypted });
-   ```
-
-2. **CSP Violation Reporting**
-   - Add CSP report-uri to monitor attacks
-
-3. **Automated Security Scanning**
-   - Integrate SAST tools in CI/CD
-   - Regular dependency audits
-
-4. **Certificate Pinning**
-   - Pin GitHub and LeetCode certificates
-
-## Security Audit Results
-
-✅ **Before:** 8 potential security vulnerabilities
-✅ **After:** 0 critical vulnerabilities, 1 recommendation (token encryption)
-
-### Vulnerabilities Fixed
-1. ✅ XSS via innerHTML
-2. ✅ Unvalidated user input
-3. ✅ Missing CSP headers
-4. ✅ No rate limiting
-5. ✅ Unvalidated GitHub tokens
-6. ✅ No URL validation
-7. ✅ Missing HTML escaping
-8. ✅ No origin validation
-
-### Recommendations
-1. ⚠️ Consider encrypting GitHub tokens (utilities provided)
-
-## Compliance
-
-The extension now follows:
-- ✅ OWASP Top 10 best practices
-- ✅ Chrome Extension Security Guidelines
-- ✅ CWE/SANS Top 25 Most Dangerous Software Errors
-- ✅ Web Crypto API standards
-
-## Conclusion
-
-LeetStreak is now significantly more secure with:
-- **8 vulnerabilities fixed**
-- **335 lines of security utilities**
-- **350 lines of security documentation**
-- **7 files enhanced with security features**
-- **0 breaking changes**
-
-All security improvements are production-ready and maintain full backwards compatibility.
+## 6. DOM XSS Remediation
+- **Previous Risk:** Content script HUD and button injectors previously used string concatenation with `innerHTML`.
+- **Remediation:** Replaced all `innerHTML` usage with programmatic DOM node creation (`document.createElement`) and `textContent` assignment, neutralizing HTML injection vectors.

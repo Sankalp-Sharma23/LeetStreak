@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Flame, Sparkles, BarChart2 } from 'lucide-react';
-import { calculateMutualStreak } from '../shared/mutual-streak-calculator';
+import { Flame, Sparkles, BarChart2, Trophy, Award } from 'lucide-react';
+import { sendRoast } from '../shared/storage';
 
 // Helper function to check if solved today
 function isSolvingToday(submissionCalendar) {
@@ -55,11 +55,76 @@ function formatLastActive(lastActiveDate) {
   return `${Math.floor(diffDays / 365)} years ago`;
 }
 
-function FriendCard({ friend, isExpanded, onClick, isCurrentUser, mySubmissionCalendar, timeFilter = 'all', rank = 0 }) {
+function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, mySubmissionCalendar, rank = 0, sortBy = 'total', onRequireAuth }) {
   const [allSubmissionsExpanded, setAllSubmissionsExpanded] = useState(false);
   const [showSubmissionsSection, setShowSubmissionsSection] = useState(false);
   const [hoveredCell, setHoveredCell] = useState(null);
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0); // 0 = current month, 1 = last month, etc.
+
+  const [isRoasting, setIsRoasting] = useState(false);
+  const [roastMessage, setRoastMessage] = useState('');
+  const [isSendingRoast, setIsSendingRoast] = useState(false);
+  const [roastSuccess, setRoastSuccess] = useState(false);
+
+  const quickRoasts = [
+    "Bro forgot how to code 💀",
+    "Streak at 0? Yikes 😬",
+    "Are you even trying?"
+  ];
+
+  const handleStartRoast = (e) => {
+    e.stopPropagation();
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, (res) => {
+        if (!res || res.state !== 'AUTHENTICATED') {
+          if (onRequireAuth) {
+            onRequireAuth('leaderboard');
+          } else {
+            alert('Roasting friends requires signing in. Please open the Battle page to sign in.');
+          }
+          return;
+        }
+        setIsRoasting(true);
+      });
+    } else {
+      setIsRoasting(true);
+    }
+  };
+
+  const handleSendRoast = async (e) => {
+    e.stopPropagation();
+    if (!myUsername || !roastMessage.trim()) return;
+    
+    setIsSendingRoast(true);
+    try {
+      const authRes = await new Promise(resolve => {
+        chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, resolve);
+      });
+      if (!authRes || authRes.state !== 'AUTHENTICATED') {
+        if (onRequireAuth) {
+          onRequireAuth('leaderboard');
+        }
+        setIsSendingRoast(false);
+        return;
+      }
+
+      const success = await sendRoast(friend.profile.username, myUsername, roastMessage);
+      if (success) {
+        setRoastSuccess(true);
+        setTimeout(() => {
+          setIsRoasting(false);
+          setRoastSuccess(false);
+          setRoastMessage('');
+        }, 2000);
+      } else {
+        alert('Failed to send roast. Make sure their profile is registered.');
+      }
+    } catch (err) {
+      console.error('Error roasting:', err);
+    } finally {
+      setIsSendingRoast(false);
+    }
+  };
 
   // Get last submission time - calculate once with useMemo (MUST be before any early returns)
   const lastSubmissionText = useMemo(() => {
@@ -97,21 +162,31 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, mySubmissionCa
     }
   }, [friend?.recentSubmissions]);
 
-  // Safety check
-  if (!friend || !friend.profile || !friend.stats) {
+  // Safety check with safe fallback normalization
+  if (!friend) {
     return null;
   }
 
-  const { profile, stats, contest, badges, recentSubmissions, submissionCalendar, friendshipStartDate, contestRanking } = friend;
+  const profile = friend.profile || { username: friend.username || 'Coder', avatar: '', ranking: 0, realName: '' };
+  const stats = friend.stats || {
+    total: friend.total_solved || 0,
+    easy: friend.easy_solved || 0,
+    medium: friend.medium_solved || 0,
+    hard: friend.hard_solved || 0,
+    streak: friend.current_streak || 0,
+    longestStreak: friend.longest_streak || 0
+  };
+  const contest = friend.contest || {
+    rating: friend.contest_rating || friend.contestRanking?.rating || 0,
+    attended: friend.contestRanking?.attendedContestsCount || 0,
+    ranking: friend.contestRanking?.globalRanking || 0
+  };
+  const { badges, recentSubmissions, submissionCalendar, contestRanking } = friend;
 
-  // Calculate mutual streak (friendship streak)
-  // For current user: show personal LeetCode streak
-  // For friends: show mutual streak (days both solved together)
-  const mutualStreak = isCurrentUser 
-    ? (stats.streak || 0) 
-    : (mySubmissionCalendar && submissionCalendar && friendshipStartDate
-        ? calculateMutualStreak(mySubmissionCalendar, submissionCalendar, friendshipStartDate)
-        : 0);
+  // Personal LeetCode streak for this user
+  const personalStreak = stats.streak || 0;
+  const totalSolved = stats.total ?? (stats.easy + stats.medium + stats.hard);
+  const contestRating = contest.rating || 0;
 
   // Get rank badge emoji
   const getRankBadge = (rank) => {
@@ -298,11 +373,23 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, mySubmissionCa
             )}
           </div>
 
-          {/* Streak Badge */}
-          <div className="flex items-center gap-1 bg-gradient-to-r from-primary to-primaryHover text-inverted px-3 py-2 rounded-full shadow-lg shadow-primary/20">
-            <Flame className="w-5 h-5 text-orange-500" />
-            <span className="text-base font-bold">{mutualStreak}</span>
-          </div>
+          {/* Active Ranking Metric Badge */}
+          {sortBy === 'total' ? (
+            <div className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-[#18181B] px-3 py-1.5 rounded-full shadow-md" title={`Total Solved: ${totalSolved}`}>
+              <Trophy className="w-4 h-4 text-[#18181B] fill-current" />
+              <span className="text-sm font-black">{totalSolved}</span>
+            </div>
+          ) : sortBy === 'rating' ? (
+            <div className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-3 py-1.5 rounded-full shadow-md" title={`Contest Rating: ${contestRating > 0 ? contestRating : 'Unrated'}`}>
+              <Award className="w-4 h-4 text-amber-300" />
+              <span className="text-sm font-black">{contestRating > 0 ? contestRating : 'Unrated'}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 bg-gradient-to-r from-primary to-primaryHover text-inverted px-3 py-1.5 rounded-full shadow-lg shadow-primary/20" title={`Current Personal Streak: ${personalStreak} days`}>
+              <Flame className="w-4 h-4 text-orange-500 fill-orange-500" />
+              <span className="text-sm font-black">{personalStreak}</span>
+            </div>
+          )}
         </div>
 
         {/* Stats Row */}
@@ -319,20 +406,19 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, mySubmissionCa
             <div className="text-base font-bold text-leetcode-hard">{stats.hard || 0}</div>
             <div className="text-[10px] text-text-muted font-medium">Hard</div>
           </div>
-          <div className="text-center py-2 bg-surfaceHover rounded-2xl border border-surfaceHover">
-            <div className="text-base font-bold text-text-main">{stats.total || 0}</div>
-            <div className="text-[10px] text-text-muted font-medium">
-              {timeFilter === 'week' ? 'This Week' : timeFilter === 'month' ? 'This Month' : 'Total'}
+          <div className={`text-center py-2 rounded-2xl border transition-all ${
+            sortBy === 'total' 
+              ? 'bg-amber-500/15 border-amber-500/40 ring-1 ring-amber-500/30' 
+              : 'bg-surfaceHover border-surfaceHover'
+          }`}>
+            <div className={`text-base font-bold ${sortBy === 'total' ? 'text-amber-400' : 'text-text-main'}`}>
+              {totalSolved}
             </div>
+            <div className="text-[10px] text-text-muted font-medium">Total</div>
           </div>
         </div>
 
-        {/* Time Filter Info */}
-        {timeFilter !== 'all' && stats._filteredByTime && (
-          <div className="mt-2 text-center text-[10px] text-text-muted">
-            {timeFilter === 'week' ? '📅 Showing problems solved this week (Mon-Sun)' : '📅 Showing problems solved this month'}
-          </div>
-        )}
+
 
         {/* Submissions Section Collapse */}
         {(lastSubmissionText || (recentSubmissions && recentSubmissions.length > 0)) && (
@@ -427,6 +513,78 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, mySubmissionCa
                     )}
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* New Roast UI Section (Main Card) */}
+        {!isCurrentUser && (
+          <div className="mt-3 relative">
+            {!isRoasting ? (
+              <button
+                onClick={handleStartRoast}
+                className="w-full py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 font-semibold rounded-xl transition-all duration-300 text-xs border border-orange-500/20 active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Flame className="w-3.5 h-3.5" /> Roast Friend
+              </button>
+            ) : (
+              <div 
+                onClick={(e) => e.stopPropagation()}
+                className="bg-surface/80 backdrop-blur-md rounded-xl p-3 border border-orange-500/30 animate-slide-up shadow-lg shadow-orange-500/5 relative overflow-hidden"
+              >
+                {/* Success Overlay */}
+                {roastSuccess && (
+                  <div className="absolute inset-0 bg-green-500/90 z-10 flex flex-col items-center justify-center animate-fade-in backdrop-blur-sm">
+                    <div className="text-white text-3xl mb-1 animate-bounce">🔥</div>
+                    <div className="text-white font-bold text-sm">Roast Delivered!</div>
+                  </div>
+                )}
+                
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-semibold text-orange-400 flex items-center gap-1.5">
+                    <Flame className="w-3 h-3" /> Select your weapon
+                  </span>
+                  <button 
+                    onClick={() => setIsRoasting(false)}
+                    className="text-text-muted hover:text-text-main p-1 rounded-md hover:bg-surfaceHover transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+                
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {quickRoasts.map((roast, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setRoastMessage(roast)}
+                      className={`text-[10px] px-2 py-1 rounded-lg border transition-all duration-200 ${
+                        roastMessage === roast 
+                          ? 'bg-orange-500/20 border-orange-500/50 text-orange-400 scale-[0.98]' 
+                          : 'bg-surfaceHover border-surfaceHover/50 text-text-muted hover:text-text-main hover:bg-surfaceHover/80'
+                      }`}
+                    >
+                      {roast}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Type custom roast..."
+                    value={roastMessage}
+                    onChange={(e) => setRoastMessage(e.target.value)}
+                    className="flex-1 bg-background/50 border border-surfaceHover focus:border-orange-500/50 rounded-lg px-3 py-1.5 text-xs text-text-main placeholder-text-muted/50 outline-none transition-colors"
+                  />
+                  <button
+                    onClick={handleSendRoast}
+                    disabled={!roastMessage.trim() || isSendingRoast}
+                    className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 disabled:from-surfaceHover disabled:to-surfaceHover disabled:text-text-muted text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-1"
+                  >
+                    {isSendingRoast ? '...' : 'Send'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -1,17 +1,17 @@
-function ce(e, t = 1, r = 50) {
-  return !e || typeof e != "string" ? { valid: !1, error: "Username is required" } : (e = e.trim(), e.length < t || e.length > r ? { valid: !1, error: `Username must be ${t}-${r} characters` } : /^[a-zA-Z0-9_-]+$/.test(e) ? { valid: !0, username: e.toLowerCase() } : { valid: !1, error: "Username contains invalid characters" });
+function Ve(e, r = 1, t = 50) {
+  return !e || typeof e != "string" ? { valid: !1, error: "Username is required" } : (e = e.trim(), e.length < r || e.length > t ? { valid: !1, error: `Username must be ${r}-${t} characters` } : /^[a-zA-Z0-9_-]+$/.test(e) ? { valid: !0, username: e.toLowerCase() } : { valid: !1, error: "Username contains invalid characters" });
 }
-class le {
-  constructor(t, r) {
-    this.maxCalls = t, this.windowMs = r, this.calls = [];
+class Ke {
+  constructor(r, t) {
+    this.maxCalls = r, this.windowMs = t, this.calls = [];
   }
   /**
    * Check if call is allowed
    * @returns {boolean} True if allowed
    */
   isAllowed() {
-    const t = Date.now();
-    return this.calls = this.calls.filter((r) => t - r < this.windowMs), this.calls.length < this.maxCalls ? (this.calls.push(t), !0) : !1;
+    const r = Date.now();
+    return this.calls = this.calls.filter((t) => r - t < this.windowMs), this.calls.length < this.maxCalls ? (this.calls.push(r), !0) : !1;
   }
   /**
    * Get time until next call is allowed
@@ -19,213 +19,69 @@ class le {
    */
   getTimeUntilReset() {
     if (this.calls.length === 0) return 0;
-    const t = Date.now(), r = this.calls[0], s = this.windowMs - (t - r);
+    const r = Date.now(), t = this.calls[0], s = this.windowMs - (r - t);
     return Math.max(0, s);
   }
 }
-class Q {
-  /**
-   * Derive encryption key from password
-   * @param {string} password - Password to derive key from
-   * @param {Uint8Array} salt - Salt for key derivation
-   * @returns {Promise<CryptoKey>} Derived key
-   */
-  static async deriveKey(t, r) {
-    const s = new TextEncoder(), o = await crypto.subtle.importKey(
-      "raw",
-      s.encode(t),
-      "PBKDF2",
-      !1,
-      ["deriveBits", "deriveKey"]
-    );
-    return crypto.subtle.deriveKey(
-      {
-        name: "PBKDF2",
-        salt: r,
-        iterations: 1e5,
-        hash: "SHA-256"
-      },
-      o,
-      { name: "AES-GCM", length: 256 },
-      !1,
-      ["encrypt", "decrypt"]
-    );
-  }
-  /**
-   * Encrypt data
-   * @param {string} data - Data to encrypt
-   * @param {string} password - Password for encryption
-   * @returns {Promise<string>} Base64 encoded encrypted data
-   */
-  static async encrypt(t, r) {
-    const s = new TextEncoder(), o = crypto.getRandomValues(new Uint8Array(16)), n = crypto.getRandomValues(new Uint8Array(12)), c = await this.deriveKey(r, o), i = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: n },
-      c,
-      s.encode(t)
-    ), a = new Uint8Array(o.length + n.length + i.byteLength);
-    return a.set(o, 0), a.set(n, o.length), a.set(new Uint8Array(i), o.length + n.length), btoa(String.fromCharCode(...a));
-  }
-  /**
-   * Decrypt data
-   * @param {string} encryptedData - Base64 encoded encrypted data
-   * @param {string} password - Password for decryption
-   * @returns {Promise<string>} Decrypted data
-   */
-  static async decrypt(t, r) {
-    const s = new TextDecoder(), o = Uint8Array.from(atob(t), (d) => d.charCodeAt(0)), n = o.slice(0, 16), c = o.slice(16, 28), i = o.slice(28), a = await this.deriveKey(r, n), u = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: c },
-      a,
-      i
-    );
-    return s.decode(u);
-  }
-}
-const ue = {
-  "api.github.com": [
-    // GitHub's certificate fingerprints (example - update with actual values)
-    // Primary certificate
-    "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    // Backup certificate
-    "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-  ],
-  "leetcode.com": [
-    // LeetCode's certificate fingerprints (example - update with actual values)
-    "SHA256:CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
-    "SHA256:DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
-  ]
-};
-class de {
-  constructor() {
-    this.violationCount = 0, this.lastViolation = null;
-  }
-  /**
-   * Validate certificate for a request
-   * Note: Chrome extensions have limited access to certificate details
-   * This is a best-effort validation
-   * 
-   * @param {string} url - URL being requested
-   * @param {Response} response - Fetch response (after connection)
-   * @returns {Promise<{valid: boolean, reason?: string}>}
-   */
-  async validateCertificate(t, r) {
-    try {
-      const o = new URL(t).hostname, n = ue[o];
-      if (!n || n.length === 0)
-        return console.info(`No certificate pins for ${o}, allowing`), { valid: !0 };
-      const c = this.validateSecurityHeaders(r, o);
-      return c.valid ? !r.ok && r.status === 0 ? {
-        valid: !1,
-        reason: "Network error - possible connection interception"
-      } : { valid: !0 } : c;
-    } catch (s) {
-      return console.error("Certificate validation error:", s), {
-        valid: !1,
-        reason: `Validation error: ${s.message}`
-      };
-    }
-  }
-  /**
-   * Validate security headers
-   * @param {Response} response
-   * @param {string} hostname
-   * @returns {{valid: boolean, reason?: string}}
-   */
-  validateSecurityHeaders(t, r) {
-    if (!t.url.startsWith("https://"))
-      return {
-        valid: !1,
-        reason: "Non-HTTPS connection detected"
-      };
-    const s = t.headers.get("strict-transport-security");
-    return (r === "api.github.com" || r === "leetcode.com") && (s || console.warn(`Missing HSTS header for ${r}`)), { valid: !0 };
-  }
-  /**
-   * Record certificate violation
-   * @param {string} url
-   * @param {string} reason
-   */
-  async recordViolation(t, r) {
-    this.violationCount++, this.lastViolation = {
-      url: t,
-      reason: r,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    }, console.error("🔒 Certificate validation failed:", {
-      url: t,
-      reason: r,
-      count: this.violationCount
-    });
-    try {
-      const o = (await chrome.storage.local.get("cert_violations")).cert_violations || [];
-      o.push(this.lastViolation), o.length > 50 && o.splice(0, o.length - 50), await chrome.storage.local.set({ cert_violations: o });
-    } catch (s) {
-      console.error("Failed to store certificate violation:", s);
-    }
-  }
-  /**
-   * Get violation statistics
-   * @returns {Object}
-   */
-  getStats() {
+const Xe = /* @__PURE__ */ new Set([
+  "leetcode.com",
+  "assets.leetcode.com"
+]);
+function Ze(e, r) {
+  try {
+    const t = new URL(e);
+    return t.protocol !== "https:" ? {
+      valid: !1,
+      reason: `Insecure transport: ${e} does not use HTTPS`
+    } : (!Xe.has(t.hostname) && !t.hostname.endsWith(".supabase.co") && console.warn(`[SecurityAuditor] Request to external domain: ${t.hostname}`), !r.headers?.get("strict-transport-security") && t.hostname === "leetcode.com" && console.warn(`[SecurityAuditor] Warning: Missing HSTS header on response from ${t.hostname}`), { valid: !0 });
+  } catch (t) {
     return {
-      totalViolations: this.violationCount,
-      lastViolation: this.lastViolation
+      valid: !1,
+      reason: `Transport security audit failed: ${t.message}`
     };
   }
 }
-const $ = new de();
-async function fe(e, t = {}) {
-  try {
-    if (new URL(e).protocol !== "https:")
-      throw new Error("Only HTTPS requests are allowed");
-    const s = await fetch(e, {
-      ...t,
-      // Add security headers
-      headers: {
-        ...t.headers
-      }
-    }), o = await $.validateCertificate(e, s);
-    if (!o.valid)
-      throw await $.recordViolation(e, o.reason), new Error(`Certificate validation failed: ${o.reason}`);
-    return s;
-  } catch (r) {
-    throw (r.message.includes("certificate") || r.message.includes("Certificate")) && await $.recordViolation(e, r.message), r;
-  }
+async function et(e, r = {}) {
+  if (!e.startsWith("https://"))
+    throw new Error(`Security Violation: Insecure HTTP request blocked for ${e}`);
+  const t = await fetch(e, r), s = Ze(e, t);
+  return s.valid || console.error(`[SecurityAuditor] Security policy failed: ${s.reason}`), t;
 }
-const v = "https://leetcode.com/graphql", ge = 2, I = 6e3, M = new le(30, 6e4);
-function G(e) {
-  return new Promise((t) => setTimeout(t, e));
+const G = "https://leetcode.com/graphql", tt = 2, X = 6e3, he = new Ke(30, 6e4);
+function _e(e) {
+  return new Promise((r) => setTimeout(r, e));
 }
-async function he(e, t, r = ge) {
+async function rt(e, r, t = tt) {
   let s;
-  if (!M.isAllowed()) {
-    const o = M.getTimeUntilReset();
-    throw new Error(`Rate limit exceeded. Please wait ${Math.ceil(o / 1e3)} seconds.`);
+  if (!he.isAllowed()) {
+    const a = he.getTimeUntilReset();
+    throw new Error(`Rate limit exceeded. Please wait ${Math.ceil(a / 1e3)} seconds.`);
   }
-  for (let o = 0; o < r; o++)
+  for (let a = 0; a < t; a++)
     try {
       if (typeof navigator < "u" && !navigator.onLine)
         throw new Error("No internet connection. Please check your network.");
-      const n = new AbortController(), c = setTimeout(() => n.abort(), I), i = await fe(e, {
-        ...t,
-        signal: n.signal
+      const o = new AbortController(), n = setTimeout(() => o.abort(), X), c = await et(e, {
+        ...r,
+        signal: o.signal
       });
-      if (clearTimeout(c), i.status === 429) {
-        const a = parseInt(i.headers.get("Retry-After")) || Math.pow(2, o);
-        console.log(`[API] Rate limited. Retrying after ${a}s`), await G(a * 1e3);
+      if (clearTimeout(n), c.status === 429) {
+        const i = parseInt(c.headers.get("Retry-After")) || Math.pow(2, a);
+        console.log(`[API] Rate limited. Retrying after ${i}s`), await _e(i * 1e3);
         continue;
       }
-      return i;
-    } catch (n) {
-      if (s = n, n.name === "AbortError" && (console.error(`[API] Request timeout (${I}ms)`), s = new Error(`Request timed out after ${I / 1e3} seconds`)), n.message.includes("No internet connection"))
-        throw n;
-      if (o < r - 1) {
-        const c = Math.pow(2, o) * 1e3;
-        console.log(`[API] Retry ${o + 1}/${r} in ${c}ms`), await G(c);
+      return c;
+    } catch (o) {
+      if (s = o, o.name === "AbortError" && (console.error(`[API] Request timeout (${X}ms)`), s = new Error(`Request timed out after ${X / 1e3} seconds`)), o.message.includes("No internet connection"))
+        throw o;
+      if (a < t - 1) {
+        const n = Math.pow(2, a) * 1e3;
+        console.log(`[API] Retry ${a + 1}/${t} in ${n}ms`), await _e(n);
       }
     }
   throw s || new Error("Network request failed after multiple retries");
 }
-const me = `
+const st = `
   query getUserProfile($username: String!) {
     matchedUser(username: $username) {
       username
@@ -248,7 +104,7 @@ const me = `
       globalRanking
     }
   }
-`, pe = `
+`, at = `
   query getUserBadges($username: String!) {
     matchedUser(username: $username) {
       badges {
@@ -258,7 +114,7 @@ const me = `
       }
     }
   }
-`, ye = `
+`, ot = `
   query getRecentSubmissions($username: String!) {
     recentSubmissionList(username: $username, limit: 15) {
       title
@@ -268,7 +124,7 @@ const me = `
       lang
     }
   }
-`, be = `
+`, nt = `
   query allSubmissions($username: String!) {
     matchedUser(username: $username) {
       recentAcSubmissions(limit: 1000) {
@@ -280,1415 +136,2218 @@ const me = `
     }
   }
 `;
-async function k(e) {
+async function x(e) {
   try {
     console.log(`[API] Fetching data for user: ${e}`);
-    const t = await he(v, {
+    const r = await rt(G, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        query: me,
+        query: st,
         variables: { username: e }
       })
     });
-    if (console.log(`[API] Profile response status: ${t.status}`), !t.ok) {
-      const a = await t.text();
-      throw console.error("[API] Profile request failed:", t.status, a), new Error(`API request failed: ${t.status}`);
+    if (console.log(`[API] Profile response status: ${r.status}`), !r.ok) {
+      const i = await r.text();
+      throw console.error("[API] Profile request failed:", r.status, i), new Error(`API request failed: ${r.status}`);
     }
-    const r = await t.json();
-    if (console.log("[API] Profile data received:", r), r.errors)
-      throw console.error("[API] GraphQL errors:", r.errors), new Error(r.errors[0]?.message || "GraphQL error");
-    if (!r.data?.matchedUser)
+    const t = await r.json();
+    if (console.log("[API] Profile data received:", t), t.errors)
+      throw console.error("[API] GraphQL errors:", t.errors), new Error(t.errors[0]?.message || "GraphQL error");
+    if (!t.data?.matchedUser)
       throw console.error("[API] No matched user in response"), new Error("User not found or profile is private");
-    const s = r.data.matchedUser, o = s.submissionCalendar ? JSON.parse(s.submissionCalendar) : {};
-    let n = [];
+    const s = t.data.matchedUser, a = s.submissionCalendar ? JSON.parse(s.submissionCalendar) : {};
+    let o = [];
     try {
-      const a = await fetch(v, {
+      const i = await fetch(G, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          query: pe,
+          query: at,
           variables: { username: e }
         })
       });
-      a.ok && (n = (await a.json()).data?.matchedUser?.badges || []);
-    } catch (a) {
-      console.warn("[API] Failed to fetch badges:", a);
+      i.ok && (o = (await i.json()).data?.matchedUser?.badges || []);
+    } catch (i) {
+      console.warn("[API] Failed to fetch badges:", i);
+    }
+    let n = [];
+    try {
+      const i = await fetch(G, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          query: ot,
+          variables: { username: e }
+        })
+      });
+      i.ok && (n = (await i.json()).data?.recentSubmissionList || []);
+    } catch (i) {
+      console.warn("[API] Failed to fetch recent submissions:", i);
     }
     let c = [];
     try {
-      const a = await fetch(v, {
+      const i = await fetch(G, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          query: ye,
+          query: nt,
           variables: { username: e }
         })
       });
-      a.ok && (c = (await a.json()).data?.recentSubmissionList || []);
-    } catch (a) {
-      console.warn("[API] Failed to fetch recent submissions:", a);
-    }
-    let i = [];
-    try {
-      const a = await fetch(v, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          query: be,
-          variables: { username: e }
-        })
-      });
-      if (a.ok) {
-        const u = await a.json();
-        u.errors ? console.warn("[API] All submissions query error:", u.errors) : (i = u.data?.matchedUser?.recentAcSubmissions || [], console.log(`[API] Fetched ${i.length} all-time accepted submissions (limit 1000)`), i.length > 0 && console.log("[API] Sample submissions:", i.slice(0, 5).map((d) => d.titleSlug)));
+      if (i.ok) {
+        const l = await i.json();
+        l.errors ? console.warn("[API] All submissions query error:", l.errors) : (c = l.data?.matchedUser?.recentAcSubmissions || [], console.log(`[API] Fetched ${c.length} all-time accepted submissions (limit 1000)`), c.length > 0 && console.log("[API] Sample submissions:", c.slice(0, 5).map((u) => u.titleSlug)));
       }
-    } catch (a) {
-      console.warn("[API] Failed to fetch all submissions:", a);
+    } catch (i) {
+      console.warn("[API] Failed to fetch all submissions:", i);
     }
     return console.log(`[API] Successfully fetched data for ${e}`), {
       profile: {
         ...s,
-        badges: n,
-        recentSubmissions: c
+        badges: o,
+        recentSubmissions: n
       },
-      allAcceptedSubmissions: i,
-      contestRanking: r.data.userContestRanking,
-      submissionCalendar: o
+      allAcceptedSubmissions: c,
+      contestRanking: t.data.userContestRanking,
+      submissionCalendar: a
     };
-  } catch (t) {
-    throw console.error("Error fetching LeetCode data:", t), t;
+  } catch (r) {
+    throw console.error("Error fetching LeetCode data:", r), r;
   }
 }
-class we {
-  constructor() {
-    this.queue = [], this.processing = !1;
-  }
-  /**
-   * Add operation to queue
-   * @param {Function} operation - Async operation to execute
-   * @returns {Promise} Result of the operation
-   */
-  async enqueue(t) {
-    return new Promise((r, s) => {
-      this.queue.push({ operation: t, resolve: r, reject: s }), this.processQueue();
-    });
-  }
-  /**
-   * Process queued operations sequentially
-   */
-  async processQueue() {
-    if (!(this.processing || this.queue.length === 0)) {
-      for (this.processing = !0; this.queue.length > 0; ) {
-        const { operation: t, resolve: r, reject: s } = this.queue.shift();
-        try {
-          const o = await t();
-          r(o);
-        } catch (o) {
-          s(o);
-        }
-      }
-      this.processing = !1;
+const we = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Re = typeof import.meta < "u" && we ? we : typeof process < "u" && process.env ? process.env : {}, w = Re.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", B = Re.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", y = w.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), d = {
+  SESSION_LOADING: "SESSION_LOADING",
+  AUTHENTICATED: "AUTHENTICATED",
+  AUTH_REQUIRED: "AUTH_REQUIRED",
+  SESSION_EXPIRED: "SESSION_EXPIRED",
+  AUTH_ERROR: "AUTH_ERROR"
+};
+let k = null, Z = d.SESSION_LOADING, ge = null, F = 0;
+const ct = /* @__PURE__ */ new Set();
+function h(e, r = null) {
+  Z = e, ge = r;
+  for (const t of ct)
+    try {
+      t(Z, k, ge);
+    } catch (s) {
+      console.warn("[SupabaseClient] Error in auth listener callback:", s);
     }
-  }
 }
-const Y = new we(), _ = "leetfriends_data", _e = 5 * 1024 * 1024, Se = 0.8;
-async function Ae() {
-  try {
-    return await chrome.storage.local.getBytesInUse(null);
-  } catch (e) {
-    return console.error("Error calculating storage usage:", e), 0;
-  }
+function H() {
+  return Z;
+}
+function $() {
+  return Date.now() < F;
+}
+function se() {
+  return Math.max(0, Math.ceil((F - Date.now()) / 1e3));
+}
+function ae(e = 60) {
+  F = Date.now() + e * 1e3, typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ supabase_auth_cooldown_until: F }).catch(() => {
+  });
 }
 async function L() {
-  console.log("[Storage] Running cleanup of old submissions...");
-  const e = await y(), t = Math.floor(Date.now() / 1e3) - 365 * 24 * 60 * 60;
-  let r = 0;
-  return Object.entries(e).forEach(([s, o]) => {
-    o.submissionCalendar && Object.keys(o.submissionCalendar).forEach((n) => {
-      parseInt(n) < t && (delete o.submissionCalendar[n], r++);
-    });
-  }), r > 0 && (await chrome.storage.local.set({ [_]: { friends: e } }), console.log(`[Storage] Cleaned ${r} old submission entries`)), r;
-}
-async function B() {
-  const e = await Ae(), t = e / _e * 100;
-  return {
-    bytes: e,
-    megabytes: (e / 1024 / 1024).toFixed(2),
-    percent: t.toFixed(1),
-    nearLimit: t > Se * 100,
-    atLimit: t > 95
-  };
-}
-async function y() {
-  try {
-    return (await chrome.storage.local.get(_))[_]?.friends || {};
-  } catch (e) {
-    return console.error("Error getting friends from storage:", e), {};
-  }
-}
-async function z(e) {
-  return (await y())[e] || null;
-}
-async function W(e, t) {
-  return Y.enqueue(async () => {
+  if (k && k.expires_at > Date.now())
+    return k;
+  if (typeof chrome < "u" && chrome.storage?.local)
     try {
-      const r = await B();
-      if (r.atLimit && (console.warn("[Storage] Quota at limit, attempting cleanup..."), await L(), (await B()).atLimit))
-        throw new Error("Storage quota exceeded. Please remove some friends or clear old data.");
-      r.nearLimit && console.warn(`[Storage] Usage: ${r.megabytes}MB (${r.percent}%)`);
-      const s = await y(), o = !s[e];
-      return s[e] = {
-        ...t,
-        lastUpdated: Date.now(),
-        friendshipStartDate: s[e]?.friendshipStartDate || (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
-      }, await chrome.storage.local.set({
-        [_]: { friends: s }
-      }), { success: !0, storageHealth: r };
-    } catch (r) {
-      if (console.error("Error saving friend to storage:", r), r.message && (r.message.includes("QUOTA_EXCEEDED") || r.message.includes("quota")))
-        try {
-          await L();
-          const s = await y();
-          return s[e] = { ...t, lastUpdated: Date.now() }, await chrome.storage.local.set({ [_]: { friends: s } }), { success: !0, warning: "Storage was full but cleaned up successfully" };
-        } catch {
-          return { success: !1, error: "Storage quota exceeded. Please remove some friends." };
-        }
-      return { success: !1, error: r.message };
+      const e = await chrome.storage.local.get(["supabase_auth_session"]);
+      if (e.supabase_auth_session && e.supabase_auth_session.expires_at > Date.now())
+        return k = e.supabase_auth_session, k;
+    } catch {
     }
-  });
+  return null;
 }
-async function ve(e) {
-  return Y.enqueue(async () => {
+async function M(e) {
+  if (k = e, typeof chrome < "u" && chrome.storage?.local)
     try {
-      const t = await y();
-      return delete t[e], await chrome.storage.local.set({
-        [_]: { friends: t }
-      }), !0;
-    } catch (t) {
-      return console.error("Error removing friend from storage:", t), !1;
+      e ? await chrome.storage.local.set({ supabase_auth_session: e }) : await chrome.storage.local.remove(["supabase_auth_session"]);
+    } catch {
     }
-  });
 }
-async function Ce() {
-  const e = await y();
-  return Object.keys(e);
-}
-function Ee(e) {
-  const t = ce(e);
-  if (!t.valid)
-    throw new Error(t.error);
-  return t.username;
-}
-function Te(e) {
-  if (!e || typeof e != "object")
-    return 0;
-  const t = /* @__PURE__ */ new Set();
-  if (Object.entries(e).forEach(([d, g]) => {
-    if (g > 0) {
-      const h = new Date(parseInt(d) * 1e3).toISOString().split("T")[0];
-      t.add(h);
-    }
-  }), t.size === 0)
-    return 0;
-  const r = Array.from(t).sort((d, g) => g.localeCompare(d)), s = /* @__PURE__ */ new Date(), o = s.toISOString().split("T")[0], n = r[0], c = new Date(s);
-  c.setUTCDate(c.getUTCDate() - 1);
-  const i = c.toISOString().split("T")[0];
-  if (n !== o && n !== i)
-    return 0;
-  let a = 0, u = /* @__PURE__ */ new Date(n + "T00:00:00Z");
-  for (let d = 0; d < r.length; d++) {
-    const g = u.toISOString().split("T")[0];
-    if (r[d] === g)
-      a++, u.setUTCDate(u.getUTCDate() - 1);
-    else
-      break;
-  }
-  return a;
-}
-function $e(e) {
-  const t = { easy: 0, medium: 0, hard: 0, total: 0 };
-  return Array.isArray(e) && e.forEach((r) => {
-    const s = r.count || 0;
-    switch (r.difficulty) {
-      case "Easy":
-        t.easy = s;
-        break;
-      case "Medium":
-        t.medium = s;
-        break;
-      case "Hard":
-        t.hard = s;
-        break;
-      case "All":
-        t.total = s;
-        break;
-    }
-  }), t;
-}
-function Ie(e) {
-  if (!e) return !0;
-  const t = 900 * 1e3;
-  return Date.now() - e > t;
-}
-const D = "leetfriends_notifications";
-async function E() {
+async function it() {
+  h(d.SESSION_LOADING);
   try {
-    return (await chrome.storage.local.get(D))[D] || {
-      mutedUntilUTC: null,
-      lastNotified: {}
-    };
-  } catch (e) {
-    return console.error("Error getting notification state:", e), { mutedUntilUTC: null, lastNotified: {} };
-  }
-}
-async function Ue(e) {
-  const t = await E();
-  t.mutedUntilUTC = e, await chrome.storage.local.set({ [D]: t });
-}
-async function C() {
-  const e = await E();
-  if (!e.mutedUntilUTC) return !1;
-  const t = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  return e.mutedUntilUTC >= t;
-}
-async function J(e) {
-  if (e.length === 0) {
-    console.log("No events to notify");
-    return;
-  }
-  if (await C()) {
-    console.log("Notifications are muted");
-    return;
-  }
-  console.log("Processing", e.length, "notification(s)");
-  try {
-    const r = (await chrome.storage.local.get("unread_notifications")).unread_notifications || [], s = Date.now(), o = e.map((a, u) => ({
-      ...a,
-      id: `${s}-${u}`,
-      timestamp: s
-    })), n = [...r, ...o], c = s - 1440 * 60 * 1e3, i = n.filter((a) => a.timestamp > c).slice(-20);
-    await chrome.storage.local.set({ unread_notifications: i }), console.log("✅ Notifications stored successfully for popup display");
-    for (const a of e)
-      (a.type === "new_submission" || a.type === "milestone") && (await chrome.notifications.create({
-        type: "basic",
-        iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-        title: a.type === "new_submission" ? "🎯 LeetStreak - New Submission!" : "🔥 LeetStreak - Milestone!",
-        message: a.message,
-        priority: 2,
-        requireInteraction: !1
-      }), console.log("✅ Browser notification sent for:", a.username));
-  } catch (t) {
-    console.error("❌ Error sending notification:", t), console.error("Notification details:", { eventsCount: e.length });
-  }
-}
-const De = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  batchNotify: J,
-  getNotificationState: E,
-  isNotificationMuted: C,
-  setNotificationMuted: Ue
-}, Symbol.toStringTag, { value: "Module" })), ke = () => (/* @__PURE__ */ new Date()).toISOString().split("T")[0], Ne = () => {
-  const e = /* @__PURE__ */ new Date();
-  return e.setUTCDate(e.getUTCDate() - 1), e.toISOString().split("T")[0];
-};
-function Re(e) {
-  if (!e || typeof e != "object")
-    return !1;
-  const t = ke();
-  for (const [r, s] of Object.entries(e))
-    if (s > 0 && new Date(parseInt(r) * 1e3).toISOString().split("T")[0] === t)
-      return !0;
-  return !1;
-}
-function Oe(e) {
-  return [7, 30, 100].includes(e);
-}
-function He(e, t) {
-  if (t === 0) return !1;
-  const r = Ne();
-  if (Re(e)) return !1;
-  let o = !1;
-  for (const [n, c] of Object.entries(e))
-    if (c > 0 && new Date(parseInt(n) * 1e3).toISOString().split("T")[0] === r) {
-      o = !0;
-      break;
-    }
-  return !o && t > 0;
-}
-function Pe(e, t, r) {
-  switch (t) {
-    case "solved_today":
-      return `${e} solved today! 🎯`;
-    case "milestone":
-      return `${e} hit ${r.streak} day streak! 🔥`;
-    case "streak_at_risk":
-      return `Your ${r.streak} day streak needs attention! ⚠️`;
-    default:
-      return `${e} updated their progress`;
-  }
-}
-const F = 1.7, j = 30, q = 19, x = 4, V = "schedule_preferences";
-async function T() {
-  try {
-    return (await chrome.storage.local.get(V))[V] || {
-      activeInterval: F,
-      quietInterval: j,
-      activeStartHour: q,
-      activeEndHour: x
-    };
-  } catch (e) {
-    return console.error("Error loading schedule preferences:", e), {
-      activeInterval: F,
-      quietInterval: j,
-      activeStartHour: q,
-      activeEndHour: x
-    };
-  }
-}
-async function N(e = null) {
-  e || (e = await T());
-  const r = (/* @__PURE__ */ new Date()).getHours(), { activeStartHour: s, activeEndHour: o } = e;
-  return s > o ? r >= s || r < o : r >= s && r < o;
-}
-async function R() {
-  const e = await T();
-  return await N(e) ? e.activeInterval : e.quietInterval;
-}
-async function Me() {
-  const e = await T(), t = /* @__PURE__ */ new Date(), r = t.getHours(), s = t.getMinutes();
-  let o;
-  await N(e) ? o = e.activeEndHour : o = e.activeStartHour;
-  let n = o - r;
-  return n < 0 && (n += 24), n === 0 && s > 0 && (n = 24), n * 60 - s;
-}
-async function O() {
-  const e = await T(), t = await R(), r = await N(e), s = K(e.activeStartHour), o = K(e.activeEndHour);
-  return r ? `Active Mode: Checking every ${t} minutes (${s} - ${o})` : `Quiet Mode: Checking every ${t} minutes`;
-}
-async function Ge() {
-  const e = await R(), t = await Me(), r = Math.min(e, t);
-  return {
-    intervalMinutes: r,
-    description: await O(),
-    isTransitionCheck: r === t && r < e
-  };
-}
-function K(e) {
-  return e === 0 ? "12:00 AM" : e < 12 ? `${e}:00 AM` : e === 12 ? "12:00 PM" : `${e - 12}:00 PM`;
-}
-async function X() {
-  const e = chrome.runtime.id, t = navigator.userAgent;
-  return `${e}-${t.slice(0, 50)}`;
-}
-async function Z(e, t) {
-  try {
-    if (!t || typeof t != "string")
-      throw new Error("Invalid token");
-    const r = await X(), s = await Q.encrypt(t, r);
-    return await chrome.storage.local.set({
-      [`${e}_encrypted`]: s,
-      [`${e}_version`]: 1
-      // For future migration if encryption changes
-    }), await chrome.storage.local.remove(e), !0;
-  } catch (r) {
-    throw console.error("Failed to store encrypted token:", r), new Error("Token encryption failed");
-  }
-}
-async function b(e) {
-  try {
-    const t = await chrome.storage.local.get([
-      `${e}_encrypted`,
-      `${e}_version`,
-      e
-      // Check for legacy plain text
-    ]);
-    if (t[`${e}_encrypted`]) {
-      const r = await X();
-      return await Q.decrypt(
-        t[`${e}_encrypted`],
-        r
-      );
-    }
-    return t[e] ? (console.warn(`Found plain text token for ${e}, migrating to encrypted...`), await Z(e, t[e]), t[e]) : null;
-  } catch (t) {
-    console.error("Failed to retrieve encrypted token:", t);
-    const r = await chrome.storage.local.get(e);
-    return r[e] ? (console.warn("Decryption failed, using plain text fallback"), r[e]) : null;
-  }
-}
-const Le = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  retrieveEncryptedToken: b,
-  storeEncryptedToken: Z
-}, Symbol.toStringTag, { value: "Module" })), A = "leetfriends_sync", Be = "schedule_transition_check", Fe = 500;
-self.addEventListener("error", (e) => {
-  console.error("💥 UNCAUGHT SERVICE WORKER ERROR:", e.error), console.error("Stack:", e.error?.stack);
-});
-self.addEventListener("unhandledrejection", (e) => {
-  console.error("💥 UNCAUGHT PROMISE REJECTION:", e.reason), console.error("Stack:", e.reason?.stack);
-});
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("LeetFriends installed - setting up dynamic sync alarm"), H(), je();
-});
-async function je() {
-  try {
-    const e = await chrome.storage.local.get(["synced_problems", "synced_submissions"]);
-    e.synced_problems && !e.synced_submissions && (console.log(`Migrating ${e.synced_problems.length} synced problems to new storage key`), await chrome.storage.local.set({
-      synced_submissions: e.synced_problems
-    }), console.log("✅ Migration complete: synced_problems → synced_submissions"));
-  } catch (e) {
-    console.error("Error migrating sync data:", e);
-  }
-}
-async function H() {
-  const e = Ge();
-  if (!e || !e.intervalMinutes) {
-    console.warn("Invalid alarm config, using default 30 minute interval"), await chrome.alarms.clear(A), chrome.alarms.create(A, {
-      delayInMinutes: 30,
-      periodInMinutes: 30
-    });
-    return;
-  }
-  console.log(`Setting up alarm: ${e.description}`), console.log(`Next check in ${e.intervalMinutes.toFixed(1)} minutes`), await chrome.alarms.clear(A), await chrome.alarms.clear(Be), chrome.alarms.create(A, {
-    delayInMinutes: e.intervalMinutes,
-    periodInMinutes: e.intervalMinutes
-  }), await chrome.storage.local.set({
-    current_schedule: {
-      interval: e.intervalMinutes,
-      description: e.description,
-      updatedAt: Date.now()
-    }
-  });
-}
-async function qe() {
-  const t = (await chrome.storage.local.get("current_schedule")).current_schedule, r = R();
-  (!t || Math.abs(t.interval - r) > 0.1) && (console.log(`Schedule transition detected! Switching to ${O()}`), await H());
-}
-chrome.alarms.onAlarm.addListener(async (e) => {
-  e.name === A && (console.log(`Background sync triggered - ${O()}`), await qe(), await ee());
-});
-chrome.runtime.onMessage.addListener((e, t, r) => {
-  if (console.log("📨 Message received from", t.url ? "content script" : "popup", ":", e.type), console.log("📦 Message object:", JSON.stringify(e, null, 2)), e.type === "PING") {
-    console.log("🏓 Service worker pinged - keeping alive"), r({ pong: !0 });
-    return;
-  }
-  switch (e.type) {
-    case "FETCH_STATS":
-      return xe(e.forceRefresh).then(r), !0;
-    // Async response
-    case "ADD_FRIEND":
-      return Ve(e.username).then(r), !0;
-    case "REMOVE_FRIEND":
-      return Qe(e.username).then(r), !0;
-    case "GET_FRIENDS":
-      return Ye().then(r), !0;
-    case "MUTE_NOTIFICATIONS":
-      return ze(e.untilUTC).then(r), !0;
-    case "GET_NOTIFICATION_STATE":
-      return We().then(r), !0;
-    case "ADD_TO_QUEUE":
-      return Ke(e.problemData).then(r), !0;
-    case "GITHUB_SYNC_SUBMISSION":
-      return console.log("🔥 GITHUB_SYNC_SUBMISSION message handler triggered!"), console.log("📋 Submission details:", { submissionId: e.submissionId, hasProblemTitle: !!e.submission?.problemTitle }), rt(e.submission, e.submissionId).then(r).catch((s) => {
-        console.error("💥 Error in GITHUB_SYNC_SUBMISSION:", s), r({ success: !1, error: s.message });
-      }), !0;
-    case "GITHUB_SYNC_ENABLED":
-      return tt().then(r), !0;
-    case "MANUAL_SYNC_REQUESTED":
-      return st().then(r), !0;
-    case "RETRY_FAILED_SYNCS":
-      return ot().then(r), !0;
-    // ===== Device Flow Authentication =====
-    case "GITHUB_DEVICE_CODE_REQUEST":
-      return nt().then(r), !0;
-    case "GITHUB_DEVICE_POLL":
-      return at(e.deviceCode).then(r), !0;
-    case "GITHUB_VALIDATE_TOKEN":
-      return it(e.token).then(r), !0;
-    case "GITHUB_STORE_CREDENTIALS":
-      return ct(e.token, e.username, e.repo).then(r), !0;
-    case "GITHUB_CLEAR_CREDENTIALS":
-      return lt().then(r), !0;
-    case "GITHUB_GET_STATUS":
-      return ut().then(r), !0;
-    case "GITHUB_ENSURE_REPO":
-      return dt(e.token, e.username, e.repo).then(r), !0;
-    case "SHOW_NOTIFICATION":
-      return chrome.notifications.create({
-        type: "basic",
-        iconUrl: "icons/icon128.png",
-        title: e.title || "LeetStreak",
-        message: e.message || "",
-        priority: 2,
-        requireInteraction: !0
-      }), r({ success: !0 }), !0;
-    case "GET_STORAGE_STATUS":
-      return r({ bytesInUse: 0, quota: chrome.storage.local.QUOTA_BYTES }), !0;
-    case "CSP_VIOLATION":
-      return gt(e.violation, t), r({ received: !0 }), !0;
-    case "RESCHEDULE_ALARMS":
-      return H().then(() => {
-        r({ success: !0 });
-      }), !0;
-    default:
-      r({ success: !1, error: "Unknown message type" });
-  }
-});
-async function xe(e = !1) {
-  try {
-    const t = await y(), r = Object.keys(t);
-    if (r.length === 0)
-      return { success: !0, friends: {}, message: "No friends added yet" };
-    let s = e;
-    if (!e) {
-      for (const o of r)
-        if (Ie(t[o].lastUpdated)) {
-          s = !0;
-          break;
-        }
-    }
-    return s ? (console.log("Data stale - triggering sync"), await ee(), { success: !0, friends: await y(), refreshed: !0 }) : { success: !0, friends: t, cached: !0 };
-  } catch (t) {
-    return console.error("Error in handleFetchStats:", t), { success: !1, error: t.message };
-  }
-}
-async function Ve(e) {
-  try {
-    const t = e;
-    let r;
-    try {
-      r = Ee(e);
-    } catch (c) {
-      return { success: !1, error: c.message };
-    }
-    if (console.log(`Adding friend: ${t} (normalized: ${r})`), await z(r))
-      return { success: !1, error: `${t} is already in your friends list` };
-    const o = await k(t), n = te(o);
-    return await W(r, n), { success: !0, message: `${t} added successfully`, data: n };
-  } catch (t) {
-    return console.error("Error adding friend:", t), { success: !1, error: t.message || "User not found or profile is private" };
-  }
-}
-async function Ke(e) {
-  try {
+    let e = null;
+    if (typeof chrome < "u" && chrome.storage?.local) {
+      const r = await chrome.storage.local.get(["supabase_auth_session", "supabase_auth_cooldown_until"]);
+      r.supabase_auth_cooldown_until && r.supabase_auth_cooldown_until > Date.now() && (F = r.supabase_auth_cooldown_until), e = r.supabase_auth_session;
+    } else
+      e = k;
     if (!e)
-      return { success: !1, error: "Problem data is required" };
-    const r = (await chrome.storage.local.get("problem_queue")).problem_queue || [];
-    if (r.some((i) => i.slug === e.slug || i.id === e.slug || i.url && i.url === e.url))
-      return { success: !1, error: "Already in queue!", alreadyExists: !0 };
-    let o = e.status || "pending";
-    if (o !== "completed")
-      try {
-        const i = await chrome.storage.local.get(["my_leetcode_username", "friends_data"]), { my_leetcode_username: a } = i, u = i.friends_data || {};
-        if (a) {
-          const d = u[a];
-          if (d) {
-            const l = (d.recentSubmissions || []).some((m) => (m.titleSlug === e.slug || m.slug === e.slug) && m.statusDisplay === "Accepted"), f = (d.allAcceptedSubmissions || []).some((m) => m.titleSlug === e.slug || m.slug === e.slug);
-            (l || f) && (o = "completed", console.log(`Problem ${e.slug} already submitted - marking as completed`));
-          }
-        }
-      } catch (i) {
-        console.error("Error checking submission status:", i);
-      }
-    else
-      console.log(`Problem ${e.slug} marked as completed from page detection`);
-    const n = r.map((i) => (i.id || (i.id = i.slug || `problem-${Date.now()}-${Math.random()}`), i)), c = {
-      ...e,
-      id: e.slug || `problem-${Date.now()}-${Math.random()}`,
-      addedAt: Date.now(),
-      status: o
-      // pending, in-progress, or completed (if already submitted)
+      return h(d.AUTH_REQUIRED), null;
+    if (e.expires_at && e.expires_at > Date.now() + 6e4)
+      return k = e, h(d.AUTHENTICATED), k;
+    if (e.refresh_token) {
+      if ($())
+        return h(d.AUTH_ERROR, "Authentication temporarily rate-limited. Please wait."), null;
+      const r = await lt(e.refresh_token);
+      if (r)
+        return r;
+    }
+    return await M(null), h(d.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
+  } catch (e) {
+    return console.warn("[SupabaseClient] Error restoring session:", e), h(d.AUTH_ERROR, e.message), null;
+  }
+}
+async function lt(e) {
+  if ($())
+    return h(d.AUTH_ERROR, "Rate limited"), null;
+  try {
+    const r = await fetch(`${y}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: B
+      },
+      body: JSON.stringify({ refresh_token: e })
+    });
+    if (r.status === 429)
+      return ae(60), h(d.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
+    if (!r.ok)
+      return await M(null), h(d.SESSION_EXPIRED, "Session expired or revoked."), null;
+    const t = await r.json(), s = {
+      access_token: t.access_token,
+      refresh_token: t.refresh_token,
+      user_id: t.user?.id,
+      email: t.user?.email,
+      expires_at: Date.now() + (t.expires_in ? t.expires_in * 1e3 : 3600 * 1e3)
     };
-    return n.push(c), await chrome.storage.local.set({ problem_queue: n }), console.log(`Problem added to queue with status: ${o}`), { success: !0, message: "Added to queue!", status: o };
-  } catch (t) {
-    return console.error("Error adding to queue:", t), { success: !1, error: t.message || "Failed to add to queue" };
+    return await M(s), h(d.AUTHENTICATED), s;
+  } catch (r) {
+    return console.warn("[SupabaseClient] Network error during token refresh:", r), h(d.AUTH_ERROR, r.message), null;
   }
 }
-async function Qe(e) {
+async function ut(e, r) {
+  if ($()) {
+    const t = se();
+    throw new Error(`Rate limit cooldown active. Please wait ${t} seconds.`);
+  }
+  if (!e || !r)
+    throw new Error("Email and password are required");
   try {
-    return await ve(e), { success: !0, message: `${e} removed` };
+    const t = await fetch(`${y}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: B
+      },
+      body: JSON.stringify({ email: e, password: r })
+    });
+    if (t.status === 429)
+      throw ae(60), h(d.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
+    if (!t.ok) {
+      const o = await t.text();
+      let n = "Invalid email or password";
+      try {
+        const c = JSON.parse(o);
+        n = c.error_description || c.msg || n;
+      } catch {
+      }
+      throw new Error(n);
+    }
+    const s = await t.json(), a = {
+      access_token: s.access_token,
+      refresh_token: s.refresh_token,
+      user_id: s.user?.id,
+      email: s.user?.email || e,
+      expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 3600 * 1e3)
+    };
+    return await M(a), h(d.AUTHENTICATED), a;
   } catch (t) {
-    return console.error("Error removing friend:", t), { success: !1, error: t.message };
+    throw h(d.AUTH_ERROR, t.message), t;
   }
 }
-async function Ye() {
+async function dt(e, r) {
+  if ($()) {
+    const t = se();
+    throw new Error(`Rate limit cooldown active. Please wait ${t} seconds.`);
+  }
+  if (!e || !r)
+    throw new Error("Email and password are required");
   try {
-    return { success: !0, friends: await y() };
+    const t = await fetch(`${y}/auth/v1/signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: B
+      },
+      body: JSON.stringify({ email: e, password: r })
+    });
+    if (t.status === 429)
+      throw ae(60), h(d.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
+    if (!t.ok) {
+      const a = await t.text();
+      let o = "Failed to create account";
+      try {
+        const n = JSON.parse(a);
+        o = n.error_description || n.msg || o;
+      } catch {
+      }
+      throw new Error(o);
+    }
+    const s = await t.json();
+    if (s.access_token) {
+      const a = {
+        access_token: s.access_token,
+        refresh_token: s.refresh_token,
+        user_id: s.user?.id,
+        email: s.user?.email || e,
+        expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 36e5)
+      };
+      return await M(a), h(d.AUTHENTICATED), { success: !0, session: a };
+    }
+    return h(d.AUTH_REQUIRED), {
+      success: !0,
+      confirmationRequired: !0,
+      user: s.user,
+      message: "Account created. Please check your inbox to confirm your email before signing in."
+    };
+  } catch (t) {
+    throw h(d.AUTH_ERROR, t.message), t;
+  }
+}
+async function ft() {
+  try {
+    const e = await L();
+    e?.access_token && fetch(`${y}/auth/v1/logout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: B,
+        Authorization: `Bearer ${e.access_token}`
+      }
+    }).catch(() => {
+    });
+  } catch {
+  }
+  return await M(null), h(d.AUTH_REQUIRED), { success: !0 };
+}
+async function b() {
+  const r = (await L())?.access_token || B;
+  return {
+    "Content-Type": "application/json",
+    apikey: B,
+    Authorization: `Bearer ${r}`,
+    Prefer: "return=representation"
+  };
+}
+async function Q(e, r = {}) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+  try {
+    const t = await b(), s = await fetch(`${y}/rest/v1/rpc/${e}`, {
+      method: "POST",
+      headers: t,
+      body: JSON.stringify(r)
+    });
+    if (!s.ok) {
+      const a = await s.text();
+      return console.error(`[SupabaseClient] RPC ${e} error:`, s.status, a), { success: !1, error: a };
+    }
+    return await s.json();
+  } catch (t) {
+    return console.error(`[SupabaseClient] RPC ${e} exception:`, t), { success: !1, error: t.message };
+  }
+}
+async function De(e) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return null;
+  try {
+    const r = await b(), t = await fetch(
+      `${y}/rest/v1/profiles?leetcode_username=ilike.${encodeURIComponent(e)}&select=*`,
+      { method: "GET", headers: r }
+    );
+    if (!t.ok) return null;
+    const s = await t.json();
+    return s && s.length > 0 ? s[0] : null;
+  } catch (r) {
+    return console.error("Supabase getProfile error:", r), null;
+  }
+}
+async function mt(e) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e?.length) return [];
+  try {
+    const r = await b(), t = e.map((a) => `"${a.toLowerCase()}"`).join(","), s = await fetch(
+      `${y}/rest/v1/profiles?leetcode_username=in.(${t})&select=*`,
+      { method: "GET", headers: r }
+    );
+    return s.ok ? await s.json() : [];
+  } catch (r) {
+    return console.error("Supabase getProfiles error:", r), [];
+  }
+}
+async function ve(e, r) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return !1;
+  try {
+    const t = await L();
+    if (!t?.user_id)
+      return !1;
+    const s = await b(), a = r?.stats || {}, o = r?.profile || {}, n = r?.contest || {}, c = {
+      id: t.user_id,
+      leetcode_username: e.toLowerCase(),
+      display_name: o.realName || e,
+      avatar_url: o.avatar || "",
+      total_solved: a.total || 0,
+      easy_solved: a.easy || 0,
+      medium_solved: a.medium || 0,
+      hard_solved: a.hard || 0,
+      current_streak: a.streak || 0,
+      longest_streak: a.longestStreak || 0,
+      contest_rating: n.rating || 0,
+      last_synced_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    return (await fetch(`${y}/rest/v1/profiles`, {
+      method: "POST",
+      headers: {
+        ...s,
+        Prefer: "resolution=merge-duplicates,return=representation"
+      },
+      body: JSON.stringify(c)
+    })).ok;
+  } catch (t) {
+    return console.error("Supabase upsertProfile error:", t), !1;
+  }
+}
+async function j() {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+  try {
+    const e = await L();
+    if (!e?.user_id) return null;
+    const r = await b(), t = await fetch(
+      `${y}/rest/v1/user_settings?user_id=eq.${e.user_id}&select=*`,
+      { method: "GET", headers: r }
+    );
+    if (!t.ok) return null;
+    const s = await t.json();
+    return s && s.length > 0 ? s[0] : null;
   } catch (e) {
-    return console.error("Error getting friends:", e), { success: !1, error: e.message };
+    return console.error("Supabase getUserSettings error:", e), null;
   }
 }
-async function ze(e) {
+async function Le(e) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE") return !1;
   try {
-    const { setNotificationMuted: t } = await Promise.resolve().then(() => De);
-    return await t(e), { success: !0, message: `Notifications muted until ${e}` };
-  } catch (t) {
-    return console.error("Error muting notifications:", t), { success: !1, error: t.message };
+    const r = await L();
+    if (!r?.user_id) return !1;
+    const t = await b();
+    return (await fetch(`${y}/rest/v1/user_settings`, {
+      method: "POST",
+      headers: {
+        ...t,
+        Prefer: "resolution=merge-duplicates,return=representation"
+      },
+      body: JSON.stringify({
+        user_id: r.user_id,
+        ...e,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      })
+    })).ok;
+  } catch (r) {
+    return console.error("Supabase upsertUserSettings error:", r), !1;
   }
 }
-async function We() {
+async function Ue(e, r, t) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e || !t) return !1;
   try {
-    return { success: !0, state: await E() };
+    const s = await L();
+    if (!s?.user_id)
+      return console.warn("[Roast] Authentication required to send cloud roasts"), !1;
+    const a = await De(e);
+    if (!a?.id)
+      return console.warn(`[Roast] Target user ${e} has not registered on Supabase`), !1;
+    const o = await b();
+    return (await fetch(`${y}/rest/v1/roast_messages`, {
+      method: "POST",
+      headers: {
+        ...o,
+        Prefer: "return=representation"
+      },
+      body: JSON.stringify({
+        sender_id: s.user_id,
+        recipient_id: a.id,
+        sender_username: r,
+        recipient_username: e.toLowerCase(),
+        content: t.substring(0, 500),
+        status: "sent",
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      })
+    })).ok;
+  } catch (s) {
+    return console.error("Error sending roast:", s), !1;
+  }
+}
+async function Oe(e) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return [];
+  try {
+    if (!await L()) return [];
+    const t = await b(), s = await fetch(
+      `${y}/rest/v1/roast_messages?recipient_username=eq.${e.toLowerCase()}&status=neq.read&order=created_at.desc&limit=20`,
+      { method: "GET", headers: t }
+    );
+    return s.ok ? await s.json() : [];
+  } catch (r) {
+    return console.warn("Error fetching unread roasts:", r), [];
+  }
+}
+async function ht(e) {
+  if (!(!e?.length || w === "YOUR_SUPABASE_PROJECT_URL_HERE"))
+    try {
+      const r = await b(), t = e.map((s) => `"${s}"`).join(",");
+      await fetch(`${y}/rest/v1/roast_messages?id=in.(${t})`, {
+        method: "PATCH",
+        headers: r,
+        body: JSON.stringify({
+          status: "delivered",
+          delivered_at: (/* @__PURE__ */ new Date()).toISOString()
+        })
+      });
+    } catch {
+    }
+}
+async function _t(e) {
+  if (!(!e?.length || w === "YOUR_SUPABASE_PROJECT_URL_HERE"))
+    try {
+      const r = await b(), t = e.map((s) => `"${s}"`).join(",");
+      await fetch(`${y}/rest/v1/roast_messages?id=in.(${t})`, {
+        method: "PATCH",
+        headers: r,
+        body: JSON.stringify({
+          status: "read",
+          read_at: (/* @__PURE__ */ new Date()).toISOString()
+        })
+      });
+    } catch {
+    }
+}
+async function Ie(e) {
+  if (!e || w === "YOUR_SUPABASE_PROJECT_URL_HERE") return !0;
+  try {
+    const r = await Oe(e);
+    if (!r || r.length === 0) return !0;
+    const t = r.map((s) => s.id);
+    return await _t(t), !0;
+  } catch (r) {
+    return console.error("Error clearing roasts:", r), !1;
+  }
+}
+async function J() {
+  return typeof chrome > "u" || !chrome.storage?.local ? null : (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username || null;
+}
+async function oe() {
+  if (typeof chrome > "u" || !chrome.storage?.local) return null;
+  try {
+    return (await chrome.storage.local.get(["own_profile"])).own_profile || null;
   } catch (e) {
-    return console.error("Error getting notification state:", e), { success: !1, error: e.message };
+    return console.error("Error reading own profile from storage:", e), null;
+  }
+}
+async function V(e) {
+  if (typeof chrome > "u" || !chrome.storage?.local) return !1;
+  try {
+    await chrome.storage.local.set({
+      own_profile: e,
+      last_own_profile_sync: Date.now()
+    });
+    const r = await J();
+    return r && H() === d.AUTHENTICATED && ve(r, e).catch((t) => {
+      console.warn("[Storage] Cloud sync for own profile failed (non-blocking):", t);
+    }), !0;
+  } catch (r) {
+    return console.error("Error saving own profile to storage:", r), !1;
   }
 }
 async function ee() {
   try {
-    const e = await Ce();
-    console.log(`Syncing ${e.length} friends...`), await C() && console.log("Notifications muted - skipping notification detection");
-    const t = [], s = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
-    for (const o of e)
-      try {
-        const n = await z(o), c = await k(o), i = te(c);
-        if (await W(o, i), !await C()) {
-          const a = await Je(o, n, i);
-          t.push(...a), s && o === s && He(i.submissionCalendar, i.stats.streak) && t.push({
-            username: "You",
-            type: "streak_at_risk",
-            message: Pe("You", "streak_at_risk", { streak: i.stats.streak }),
-            priority: 3
+    const e = await J(), r = typeof chrome < "u" && chrome.storage?.local ? await chrome.storage.local.get(["friends_cache", "own_profile", "friends_list"]) : {}, t = r.friends_cache || {}, s = r.own_profile || null, a = r.friends_list || [], o = { ...t };
+    if (e && s && (o[e] = s), H() !== d.AUTHENTICATED || !e)
+      return o;
+    try {
+      let n = a;
+      const c = await j();
+      if (c?.friends_list && Array.isArray(c.friends_list) && (n = [.../* @__PURE__ */ new Set([...a, ...c.friends_list])], typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_list: n }).catch(() => {
+      })), n.length > 0) {
+        const i = await mt(n);
+        i && i.length > 0 && (i.forEach((l) => {
+          const u = l.leetcode_username || l.username;
+          u && l.leetcode_data && (o[u] = {
+            ...l.leetcode_data,
+            lastUpdated: l.last_synced_at ? new Date(l.last_synced_at).getTime() : Date.now()
           });
-        }
-        await w(Fe);
-      } catch (n) {
-        console.error(`Error syncing ${o}:`, n);
+        }), typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_cache: o }).catch(() => {
+        }));
       }
-    t.length > 0 ? (console.log(`Sending ${t.length} notification(s):`, t), await J(t)) : console.log("No notification events detected"), console.log("Sync completed");
+    } catch (n) {
+      console.warn("[Storage] Cloud friends refresh skipped/failed:", n.message);
+    }
+    return o;
   } catch (e) {
-    console.error("Error in syncAllFriends:", e);
+    return console.error("Error getting friends:", e), {};
   }
 }
-async function Je(e, t, r) {
-  const s = [];
-  console.log(`🔍 Checking events for ${e}...`);
-  const n = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
-  if (e && n && e.toLowerCase() === n.toLowerCase())
-    return console.log(`⏭️  Skipping personal notifications for your own account (${e})`), s;
-  if (t && t.stats && r.stats) {
-    const c = t.stats.total || 0, i = r.stats.total || 0;
-    if (i > c) {
-      const a = i - c;
-      console.log(`🎯 ${e} submitted ${a} new problem(s)!`);
-      let u = "a problem";
-      r.recentSubmissions && r.recentSubmissions.length > 0 && (u = r.recentSubmissions[0].title || u), s.push({
-        username: e,
-        type: "new_submission",
-        message: `${e} just solved ${a === 1 ? u : `${a} problems`}! 🎯`,
-        priority: 1
+async function ne(e) {
+  if (!e) return null;
+  try {
+    const r = await J();
+    if (r && e.toLowerCase() === r.toLowerCase())
+      return await oe();
+    if (typeof chrome < "u" && chrome.storage?.local) {
+      const a = await chrome.storage.local.get(["friends_cache"]);
+      if (a.friends_cache && a.friends_cache[e])
+        return a.friends_cache[e];
+    }
+    const t = await De(e);
+    if (!t) return null;
+    const s = t.leetcode_data || {};
+    return s.lastUpdated = t.last_synced_at ? new Date(t.last_synced_at).getTime() : Date.now(), s;
+  } catch (r) {
+    return console.error("Error getting single friend:", r), null;
+  }
+}
+async function ce(e, r) {
+  if (!e || !r) return { success: !1 };
+  try {
+    const t = await J();
+    if (t && e.toLowerCase() === t.toLowerCase())
+      return await V(r), { success: !0 };
+    if (typeof chrome < "u" && chrome.storage?.local) {
+      const a = await chrome.storage.local.get(["friends_cache", "friends_list"]), o = a.friends_cache || {}, n = a.friends_list || [];
+      o[e] = r;
+      const c = n.includes(e) ? n : [...n, e];
+      await chrome.storage.local.set({
+        friends_cache: o,
+        friends_list: c
       });
     }
+    return H() === d.AUTHENTICATED && (ve(e, r).catch(() => {
+    }), t && j().then((a) => {
+      const o = a?.friends_list || [];
+      o.includes(e) || Le({ friends_list: [...o, e] }).catch(() => {
+      });
+    }).catch(() => {
+    })), { success: !0 };
+  } catch (t) {
+    return console.error("Error saving friend:", t), { success: !1, error: t.message };
   }
-  if (Oe(r.stats.streak)) {
-    const c = t?.stats?.streak || 0;
-    r.stats.streak > c && (console.log(`🎉 ${e} reached milestone: ${r.stats.streak} day streak!`), s.push({
-      username: e,
-      type: "milestone",
-      message: `${e} hit ${r.stats.streak} day streak! 🔥`,
-      priority: 2
-    }));
-  }
-  return s.length > 0 && console.log(`📊 Found ${s.length} event(s) for ${e}`), s;
 }
-function te(e) {
-  const { profile: t, contestRanking: r, submissionCalendar: s, allAcceptedSubmissions: o } = e, n = Te(s), c = $e(t.submitStats.acSubmissionNum);
-  return {
-    profile: {
-      username: t.username,
-      realName: t.profile.realName,
-      avatar: t.profile.userAvatar,
-      ranking: t.profile.ranking
-    },
-    stats: {
-      ...c,
-      streak: n
-    },
-    contest: {
-      rating: r?.rating || 0,
-      attended: r?.attendedContestsCount || 0,
-      ranking: r?.globalRanking || 0
-    },
-    badges: t.badges || [],
-    recentSubmissions: t.recentSubmissions || [],
-    allAcceptedSubmissions: o || [],
-    submissionCalendar: s,
-    lastUpdated: Date.now()
+async function wt(e) {
+  if (!e) return !1;
+  try {
+    if (typeof chrome < "u" && chrome.storage?.local) {
+      const r = await chrome.storage.local.get(["friends_cache", "friends_list"]), t = r.friends_cache || {}, s = r.friends_list || [];
+      delete t[e];
+      const a = s.filter((o) => o.toLowerCase() !== e.toLowerCase());
+      await chrome.storage.local.set({
+        friends_cache: t,
+        friends_list: a
+      });
+    }
+    return H() === d.AUTHENTICATED && j().then((r) => {
+      if (r?.friends_list) {
+        const t = r.friends_list.filter((s) => s.toLowerCase() !== e.toLowerCase());
+        Le({ friends_list: t }).catch(() => {
+        });
+      }
+    }).catch(() => {
+    }), !0;
+  } catch (r) {
+    return console.error("Error removing friend:", r), !1;
+  }
+}
+async function Ne() {
+  try {
+    if (typeof chrome < "u" && chrome.storage?.local) {
+      const e = await chrome.storage.local.get(["friends_list"]);
+      if (e.friends_list && Array.isArray(e.friends_list))
+        return e.friends_list;
+    }
+    if (H() === d.AUTHENTICATED) {
+      const e = await j();
+      if (e?.friends_list)
+        return typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_list: e.friends_list }).catch(() => {
+        }), e.friends_list;
+    }
+    return [];
+  } catch (e) {
+    return console.error("Error getting friends list:", e), [];
+  }
+}
+async function gt(e, r, t) {
+  return await Ue(e, r, t);
+}
+async function Pe() {
+  const e = await J();
+  return e ? await Ie(e) : !1;
+}
+const yt = w.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), ie = /* @__PURE__ */ new Set([
+  "completed",
+  "declined",
+  "expired",
+  "cancelled",
+  "forfeited"
+]), g = {
+  PENDING: "pending",
+  SELECTING: "selecting",
+  READY_CHECK: "ready_check",
+  COUNTDOWN: "countdown",
+  COMPLETED: "completed",
+  DECLINED: "declined",
+  EXPIRED: "expired",
+  CANCELLED: "cancelled",
+  FORFEITED: "forfeited"
+}, pt = 7200, St = 1440 * 60, ye = 10;
+async function S(e, r = {}) {
+  if (w === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+  try {
+    const t = await b(), s = await fetch(`${yt}/rest/v1/${e}`, {
+      headers: { ...t, ...r.headers || {} },
+      ...r
+    });
+    return s.ok ? s.json() : (console.error(`[Battle] Supabase error ${s.status} on ${e}:`, await s.text()), null);
+  } catch (t) {
+    return console.error("[Battle] Supabase fetch error:", t), null;
+  }
+}
+async function Et(e, r, t = "javascript") {
+  if (!e || !r)
+    return { success: !1, error: "Challenger and opponent usernames are required" };
+  if (e.toLowerCase() === r.toLowerCase())
+    return { success: !1, error: "Cannot challenge yourself" };
+  const [s, a] = await Promise.all([
+    z(e),
+    z(r)
+  ]);
+  if (s)
+    return { success: !1, error: "You already have an active battle in progress" };
+  if (a)
+    return { success: !1, error: `${r} is currently in an active battle` };
+  const o = Date.now(), n = new Date(o + St * 1e3).toISOString(), c = await S(`profiles?leetcode_username=in.("${e.toLowerCase()}","${r.toLowerCase()}")&select=id,leetcode_username`), i = c?.find((_) => _.leetcode_username.toLowerCase() === e.toLowerCase()), l = c?.find((_) => _.leetcode_username.toLowerCase() === r.toLowerCase()), u = {
+    challenger_username: e,
+    challenged_username: r,
+    language: t.toLowerCase(),
+    status: g.PENDING,
+    expires_at: n
+  };
+  i?.id && l?.id && (u.challenger_id = i.id, u.challenged_id = l.id);
+  const m = await S("battles", {
+    method: "POST",
+    body: JSON.stringify(u)
+  });
+  return !m || m.length === 0 ? { success: !1, error: "Failed to create battle room" } : { success: !0, battle: m[0] };
+}
+async function z(e) {
+  if (!e) return null;
+  const r = Array.from(ie).join(","), t = e.toLowerCase(), s = await S(
+    `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=not.in.(${r})&order=created_at.desc&limit=1`
+  );
+  return s && s.length > 0 ? s[0] : null;
+}
+async function R(e) {
+  if (!e) return null;
+  const r = await S(`battles?id=eq.${e}&select=*`);
+  return r && r.length > 0 ? r[0] : null;
+}
+async function le(e) {
+  return e ? await S(`battle_results?battle_id=eq.${e}&select=*`) || [] : [];
+}
+async function bt(e, r, t) {
+  const s = await R(e);
+  if (!s) return { success: !1, error: "Battle not found" };
+  if ((s.challenged_username || s.challenged).toLowerCase() !== r.toLowerCase())
+    return { success: !1, error: "You are not the invited opponent for this battle" };
+  if (s.status !== g.PENDING)
+    return { success: !1, error: `Battle is no longer pending (current: ${s.status})` };
+  if (new Date(s.expires_at) < /* @__PURE__ */ new Date())
+    return await q(e, g.EXPIRED), { success: !1, error: "Challenge has expired" };
+  if (!t)
+    return await q(e, g.DECLINED), { success: !0, battle: { ...s, status: g.DECLINED } };
+  const o = /* @__PURE__ */ new Date(), n = await S(`battles?id=eq.${e}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: g.SELECTING,
+      accepted_at: o.toISOString()
+    })
+  });
+  return !n || n.length === 0 ? { success: !1, error: "Failed to accept battle" } : { success: !0, battle: n[0] };
+}
+async function Tt(e, r, t, s) {
+  const a = await R(e);
+  if (!a) return { success: !1, error: "Battle not found" };
+  if (a.status !== g.SELECTING)
+    return { success: !1, error: "Battle is not in the problem selection phase" };
+  const o = await $e(t);
+  if (!o.valid)
+    return { success: !1, error: o.error || "Invalid LeetCode problem" };
+  const c = (a.challenger_username || a.challenger).toLowerCase() === r.toLowerCase(), i = c ? "challenger_pick" : "challenged_pick", l = c ? "challenger_pick_title" : "challenged_pick_title", u = c ? a.challenged_pick : a.challenger_pick, m = c ? a.challenged_pick_title : a.challenger_pick_title, _ = {
+    [i]: o.slug,
+    [l]: o.title || s || o.slug
+  };
+  u && Object.assign(_, {
+    problem_1: o.slug,
+    problem_1_title: o.title,
+    problem_2: u,
+    problem_2_title: m || u,
+    status: g.READY_CHECK,
+    challenger_ready: !1,
+    challenged_ready: !1
+  });
+  const p = await S(`battles?id=eq.${e}`, {
+    method: "PATCH",
+    body: JSON.stringify(_)
+  });
+  return !p || p.length === 0 ? { success: !1, error: "Failed to save problem selection" } : {
+    success: !0,
+    battle: p[0],
+    bothPicked: !!u
   };
 }
-function w(e) {
-  return new Promise((t) => setTimeout(t, e));
-}
-function Xe(e) {
-  const {
-    questionNumber: t,
-    problemSlug: r,
-    language: s,
-    difficulty: o = "Medium",
-    topics: n = []
-  } = e, i = {
-    python: "py",
-    python3: "py",
-    javascript: "js",
-    typescript: "ts",
-    java: "java",
-    cpp: "cpp",
-    "c++": "cpp",
-    c: "c",
-    csharp: "cs",
-    go: "go",
-    rust: "rs",
-    swift: "swift",
-    kotlin: "kt",
-    ruby: "rb",
-    scala: "scala",
-    php: "php",
-    sql: "sql",
-    mysql: "sql",
-    bash: "sh",
-    r: "r"
-  }[s?.toLowerCase()] || "txt", a = n && n.length > 0 ? U(n[0]) : "Unsorted", u = U(o || "Medium"), d = String(t || 0).padStart(4, "0"), g = U(r || "solution");
-  return `${a}/${u}/${d}-${g}.${i}`;
-}
-function Ze(e) {
-  const {
-    questionNumber: t,
-    problemTitle: r,
-    difficulty: s,
-    topics: o = [],
-    runtime: n,
-    runtimePercentile: c,
-    memory: i,
-    memoryPercentile: a,
-    acceptanceRate: u,
-    problemUrl: d,
-    language: g,
-    code: l
-  } = e, f = {
-    python: "#",
-    python3: "#",
-    ruby: "#",
-    r: "#",
-    bash: "#",
-    sql: "--",
-    mysql: "--"
-  }[g?.toLowerCase()] || "//", m = "═".repeat(65), p = [
-    `${f} ${m}`,
-    `${f} ${t}. ${r}`,
-    `${f} ${m}`,
-    `${f} Difficulty: ${s || "Medium"}`,
-    `${f} Topics: ${o.join(", ") || "N/A"}`,
-    `${f}`
-  ];
-  if (n) {
-    const S = c ? ` (Beats ${c}%)` : "";
-    p.push(`${f} Runtime: ${n}${S}`);
+async function At(e, r) {
+  const t = await Q("confirm_battle_ready", { p_battle_id: e });
+  if (t && t.success)
+    return { success: !0, battle: await R(e), bothReady: t.status === g.COUNTDOWN };
+  const s = await R(e);
+  if (!s) return { success: !1, error: "Battle not found" };
+  const o = (s.challenger_username || s.challenger).toLowerCase() === r.toLowerCase(), n = o ? { challenger_ready: !0 } : { challenged_ready: !0 }, c = o ? s.challenged_ready : s.challenger_ready;
+  if (c) {
+    const l = Date.now(), u = new Date(l).toISOString(), m = new Date(l + ye * 1e3).toISOString(), _ = new Date(l + (ye + pt) * 1e3).toISOString();
+    Object.assign(n, {
+      status: g.COUNTDOWN,
+      countdown_starts: u,
+      match_starts_at: m,
+      match_deadline: _
+    });
   }
-  if (i) {
-    const S = a ? ` (Beats ${a}%)` : "";
-    p.push(`${f} Memory: ${i}${S}`);
+  const i = await S(`battles?id=eq.${e}`, {
+    method: "PATCH",
+    body: JSON.stringify(n)
+  });
+  return !i || i.length === 0 ? { success: !1, error: "Failed to record readiness" } : { success: !0, battle: i[0], bothReady: !!c };
+}
+async function kt(e, r, t) {
+  const {
+    problemSlug: s,
+    submissionId: a,
+    accepted: o,
+    runtime_ms: n,
+    memory_mb: c,
+    language: i,
+    timeTakenSeconds: l
+  } = t, u = await R(e);
+  if (!u) return { success: !1, error: "Battle not found" };
+  if (ie.has(u.status))
+    return { success: !1, error: `Battle is already closed (${u.status})` };
+  const m = u.match_starts_at ? new Date(u.match_starts_at).getTime() : Date.now(), _ = l ?? Math.max(0, Math.floor((Date.now() - m) / 1e3)), p = await Q("record_battle_submission", {
+    p_battle_id: e,
+    p_problem_slug: s,
+    p_submission_id: a || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    p_accepted: !!o,
+    p_time_taken: _,
+    p_runtime_ms: n || null,
+    p_memory_mb: c || null,
+    p_language: i || u.language || "javascript"
+  });
+  if (p && p.success)
+    return { success: !0, result: p };
+  const U = await S("battle_results", {
+    method: "POST",
+    body: JSON.stringify({
+      battle_id: e,
+      username: r,
+      problem_slug: s,
+      leetcode_submission_id: a || `sub_${Date.now()}`,
+      accepted: !!o,
+      submitted_at: (/* @__PURE__ */ new Date()).toISOString(),
+      time_taken_seconds: _,
+      runtime_ms: n || null,
+      memory_mb: c || null,
+      language: i || u.language || "javascript",
+      attempts: 1,
+      points: o ? 1 : 0
+    })
+  });
+  return await Ct(e), { success: !0, result: U?.[0] };
+}
+async function Ct(e) {
+  const r = await Q("evaluate_and_finalize_battle", { p_battle_id: e });
+  if (r && r.finalized)
+    return r;
+  const t = await R(e);
+  if (!t || ie.has(t.status)) return null;
+  const s = await le(e), a = t.challenger_username || t.challenger, o = t.challenged_username || t.challenged;
+  let n = 0, c = 0, i = 0, l = 0, u = !1, m = !1, _ = !1, p = !1;
+  for (const f of s)
+    f.accepted && (f.username.toLowerCase() === a.toLowerCase() ? (n += f.points || 1, i += f.time_taken_seconds || 0, f.problem_slug === t.problem_1 && (u = !0), f.problem_slug === t.problem_2 && (m = !0)) : f.username.toLowerCase() === o.toLowerCase() && (c += f.points || 1, l += f.time_taken_seconds || 0, f.problem_slug === t.problem_1 && (_ = !0), f.problem_slug === t.problem_2 && (p = !0)));
+  const U = u && m && _ && p, O = t.match_deadline && Date.now() >= new Date(t.match_deadline).getTime();
+  if (U || O) {
+    let f = "draw", T = "draw";
+    return n > c ? (f = a, T = "points") : c > n ? (f = o, T = "points") : n > 0 ? i < l ? (f = a, T = "tiebreaker_time") : l < i ? (f = o, T = "tiebreaker_time") : (f = "draw", T = "draw") : (f = "draw", T = "draw"), await q(e, g.COMPLETED, {
+      winner_username: f,
+      win_reason: T,
+      completed_at: (/* @__PURE__ */ new Date()).toISOString()
+    }), { finalized: !0, winner: f, winReason: T };
   }
-  return u && p.push(`${f} Acceptance Rate: ${u}%`), p.push(`${f}`), p.push(`${f} LeetCode: ${d || "N/A"}`), p.push(`${f} Synced: ${(/* @__PURE__ */ new Date()).toISOString()}`), p.push(`${f} ${m}`), p.push(""), p.push(l || "// No code captured"), p.join(`
-`);
+  return null;
 }
-function et(e, t = !1) {
-  const { questionNumber: r, problemTitle: s, difficulty: o, language: n } = e, c = t ? "Update" : "Add";
-  return `${{ Easy: "🟢", Medium: "🟡", Hard: "🔴" }[o] || "📝"} ${c}: ${r}. ${s} (${n})`;
+async function Rt(e, r) {
+  const t = await Q("forfeit_battle", { p_battle_id: e });
+  if (t && t.success)
+    return t;
+  const s = await R(e);
+  if (!s) return { success: !1, error: "Battle not found" };
+  const a = s.challenger_username || s.challenger, o = s.challenged_username || s.challenged, n = a.toLowerCase() === r.toLowerCase() ? o : a;
+  return await q(e, g.FORFEITED, {
+    winner_username: n,
+    win_reason: "forfeit",
+    completed_at: (/* @__PURE__ */ new Date()).toISOString()
+  }), { success: !0, winner: n };
 }
-async function re(e, t, r = 3) {
-  const s = [1e3, 3e3, 9e3];
-  for (let o = 0; o < r; o++)
-    try {
-      const n = Xe(e), c = Ze(e), i = et(e, !1);
-      console.log("📁 File path:", n), console.log("📝 Commit message:", i);
-      const a = await oe(
-        t.github_token,
-        t.github_username,
-        t.github_repo,
-        n,
-        c,
-        i
-      );
-      if (a.success)
-        return await se(e, n, a.fileUrl), a;
-      if (a.error?.includes("rate limit")) {
-        await w(6e4);
-        continue;
-      }
-      o < r - 1 && await w(s[o]);
-    } catch (n) {
-      if (o === r - 1)
-        return { success: !1, error: n.message };
-      await w(s[o]);
+async function Dt(e, r) {
+  const t = await R(e);
+  return t ? (t.challenger_username || t.challenger).toLowerCase() !== r.toLowerCase() ? { success: !1, error: "Only the challenger can cancel a pending match" } : t.status !== g.PENDING ? { success: !1, error: "Can only cancel pending challenges" } : (await q(e, g.CANCELLED), { success: !0 }) : { success: !1, error: "Battle not found" };
+}
+async function vt(e, r = 10) {
+  if (!e) return [];
+  const t = e.toLowerCase(), s = await S(
+    `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=in.(completed,forfeited)&order=created_at.desc&limit=${r}`
+  );
+  return !s || s.length === 0 ? [] : await Promise.all(s.map(async (o) => {
+    const n = await le(o.id), c = o.challenger_username || o.challenger, i = o.challenged_username || o.challenged, l = c.toLowerCase() === e.toLowerCase() ? i : c, u = o.winner_username || o.winner;
+    let m = "draw";
+    return u && (u === "draw" ? m = "draw" : u.toLowerCase() === e.toLowerCase() ? m = "win" : m = "loss"), {
+      ...o,
+      opponent: l,
+      outcome: m,
+      results: n
+    };
+  }));
+}
+async function $e(e) {
+  try {
+    let r = e.trim();
+    if (r.includes("leetcode.com/problems/")) {
+      const o = r.match(/problems\/([^/?#]+)/);
+      if (!o) return { valid: !1, error: "Invalid LeetCode URL structure" };
+      r = o[1].replace(/\/$/, "");
     }
-  return { success: !1, error: "Max retries exceeded" };
-}
-function U(e) {
-  return e.replace(/[<>:"/\\|?*]/g, "-").replace(/\s+/g, "-").replace(/--+/g, "-").replace(/^-|-$/g, "");
-}
-async function se(e, t, r) {
-  try {
-    const s = await chrome.storage.local.get(["synced_submissions", "recent_syncs"]), o = s.synced_submissions || [], n = s.recent_syncs || [];
-    o.push({
-      problemSlug: e.problemSlug,
-      problemTitle: e.problemTitle,
-      language: e.language,
-      filePath: t,
-      fileUrl: r,
-      timestamp: Date.now()
-    }), n.unshift({
-      problemTitle: e.problemTitle,
-      language: e.language,
-      status: "success",
-      timestamp: Date.now()
-    }), await chrome.storage.local.set({
-      synced_submissions: o,
-      recent_syncs: n.slice(0, 20)
-    }), console.log(`✅ Recorded successful sync: ${e.problemTitle}. Total synced: ${o.length}`);
-  } catch (s) {
-    console.error("Failed to record sync:", s);
-  }
-}
-async function tt() {
-  return console.log("GitHub sync enabled - initializing cleanup alarm"), chrome.alarms.create("github_cleanup", {
-    periodInMinutes: 60
-    // Every hour
-  }), { success: !0 };
-}
-async function rt(e, t) {
-  try {
-    console.log("📤 GitHub auto-sync triggered for submission:", t);
-    const r = await chrome.storage.local.get([
-      "github_sync_enabled",
-      "github_username",
-      "github_repo"
-    ]);
-    if (!r.github_sync_enabled)
-      return console.log("ℹ️ GitHub sync disabled, skipping"), { success: !1, error: "GitHub sync not enabled" };
-    if (!r.github_username || !r.github_repo)
-      return console.log("⚠️ GitHub not configured properly"), { success: !1, error: "GitHub not configured" };
-    const s = await b("github_token");
-    if (!s)
-      return console.error("❌ No GitHub token found"), { success: !1, error: "GitHub token not found. Please reconnect." };
-    r.github_token = s;
-    const o = await re(e, r, 3);
-    return o.success ? (console.log("✅ Auto-sync successful!"), await se(e, o.filePath || "", o.fileUrl || ""), { success: !0, message: "Synced to GitHub" }) : (console.error("❌ Auto-sync failed:", o.error), { success: !1, error: o.error || "Sync failed" });
+    if (!/^[a-z0-9-]+$/i.test(r))
+      return { valid: !1, error: "Invalid problem slug format" };
+    const t = await fetch("https://leetcode.com/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query getProblem($slug: String!) {
+          question(titleSlug: $slug) {
+            title
+            difficulty
+            isPaidOnly
+          }
+        }`,
+        variables: { slug: r.toLowerCase() }
+      })
+    });
+    if (!t.ok) return { valid: !1, error: "Failed to contact LeetCode API" };
+    const a = (await t.json())?.data?.question;
+    return a ? a.isPaidOnly ? { valid: !1, error: "Premium problem — please select a free problem" } : {
+      valid: !0,
+      slug: r.toLowerCase(),
+      title: a.title,
+      difficulty: a.difficulty,
+      url: `https://leetcode.com/problems/${r.toLowerCase()}/`
+    } : { valid: !1, error: "Problem not found on LeetCode" };
   } catch (r) {
-    return console.error("❌ Error in handleGitHubSyncSubmission:", r), { success: !1, error: r.message };
+    return console.warn("[Battle] validateLeetCodeProblem error:", r), { valid: !1, error: "Connection error while validating problem" };
   }
 }
-async function st() {
-  try {
-    console.log("🔄 Starting manual sync of all solutions...");
-    const e = await chrome.storage.local.get([
-      "github_username",
-      "github_repo",
-      "github_sync_enabled",
-      "my_leetcode_username"
-    ]);
-    if (!e.github_sync_enabled)
-      return console.error("❌ GitHub sync not enabled"), { success: !1, error: "GitHub sync not enabled" };
-    if (!e.my_leetcode_username || !e.github_username || !e.github_repo)
-      return console.error("❌ Missing required GitHub settings"), { success: !1, error: "GitHub settings incomplete. Please configure username and repository." };
-    const t = await b("github_token");
-    if (console.log("🔐 Token retrieved:", !!t), !t)
-      return console.error("❌ GitHub token not found"), { success: !1, error: "GitHub token not found. Please configure GitHub sync settings." };
-    const { my_leetcode_username: r, github_username: s, github_repo: o } = e;
-    console.log("✅ GitHub sync enabled with user:", s), console.log("🔍 Fetching LeetCode user data:", r), console.log("🔐 Validating GitHub repository access...");
+async function Lt(e) {
+  if (!(!e || !w || w === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      const l = `https://api.github.com/repos/${s}/${o}`, h = await fetch(l, {
-        headers: {
-          Authorization: `token ${t}`,
-          Accept: "application/vnd.github.v3+json"
+      await S("user_presence", {
+        method: "POST",
+        body: JSON.stringify({ username: e.toLowerCase(), last_seen: (/* @__PURE__ */ new Date()).toISOString() })
+      });
+    } catch {
+    }
+}
+async function Ut(e) {
+  const r = /* @__PURE__ */ new Map();
+  if (!e?.length || !w || w === "YOUR_SUPABASE_PROJECT_URL_HERE") return r;
+  try {
+    const t = e.map((o) => `"${o.toLowerCase()}"`).join(","), s = await S(`user_presence?username=in.(${t})&select=username,last_seen`), a = Date.now() - 600 * 1e3;
+    for (const o of s || []) {
+      const n = new Date(o.last_seen).getTime() > a;
+      r.set(o.username, { isOnline: n, last_seen: o.last_seen });
+    }
+  } catch {
+  }
+  return r;
+}
+async function q(e, r, t = {}) {
+  await S(`battles?id=eq.${e}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: r, ...t })
+  });
+}
+function Ot(e) {
+  const r = Ve(e);
+  if (!r.valid)
+    throw new Error(r.error);
+  return r.username;
+}
+function D(e, r) {
+  const t = typeof e == "string" ? parseInt(e, 10) : e;
+  if (isNaN(t) || t <= 0) return "";
+  const s = r || (typeof Intl < "u" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC") || "UTC";
+  try {
+    const a = new Date(t * 1e3);
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: s,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(a);
+  } catch {
+    return new Date(t * 1e3).toISOString().split("T")[0];
+  }
+}
+function Be(e = [], r = null, t = null) {
+  const s = /* @__PURE__ */ new Set();
+  if (Array.isArray(e)) {
+    for (const a of e)
+      if (a && a.timestamp) {
+        const o = D(a.timestamp, t);
+        o && s.add(o);
+      }
+  }
+  if (r)
+    try {
+      const a = typeof r == "string" ? JSON.parse(r) : r;
+      if (a && typeof a == "object") {
+        for (const [o, n] of Object.entries(a))
+          if (parseInt(n, 10) > 0) {
+            const c = D(o, t);
+            c && s.add(c);
+          }
+      }
+    } catch (a) {
+      console.warn("[StreakCalculator] Error parsing submissionCalendar:", a);
+    }
+  return Array.from(s).sort();
+}
+function It(e, r = null, t = null) {
+  let s = [], a = null;
+  Array.isArray(e) ? (s = e, a = r) : e && typeof e == "object" && (a = e, typeof r == "string" && (t = r));
+  const o = Be(s, a, t);
+  if (o.length === 0)
+    return {
+      currentStreak: 0,
+      longestStreak: 0,
+      isAtRisk: !1,
+      solvedToday: !1,
+      solveDates: []
+    };
+  function n(E, I) {
+    const ze = /* @__PURE__ */ new Date(E + "T00:00:00Z"), Qe = /* @__PURE__ */ new Date(I + "T00:00:00Z");
+    return Math.round((Qe - ze) / 864e5);
+  }
+  let c = 1, i = 1;
+  for (let E = 1; E < o.length; E++) {
+    const I = n(o[E - 1], o[E]);
+    I === 1 ? (i++, i > c && (c = i)) : I > 1 && (i = 1);
+  }
+  const l = Math.floor(Date.now() / 1e3), u = D(l, t), m = Math.floor((Date.now() - 864e5) / 1e3), _ = D(m, t), p = o.includes(u), U = o[o.length - 1];
+  if (U !== u && U !== _)
+    return {
+      currentStreak: 0,
+      longestStreak: c,
+      isAtRisk: !1,
+      solvedToday: !1,
+      solveDates: o
+    };
+  let O = 0, f = /* @__PURE__ */ new Date(U + "T00:00:00Z");
+  for (let E = o.length - 1; E >= 0; E--) {
+    const I = f.toISOString().split("T")[0];
+    if (o[E] === I)
+      O++, f.setUTCDate(f.getUTCDate() - 1);
+    else if (o[E] < I)
+      break;
+  }
+  O > c && (c = O);
+  const T = O > 0 && !p;
+  return {
+    currentStreak: O,
+    longestStreak: c,
+    isAtRisk: T,
+    solvedToday: p,
+    solveDates: o
+  };
+}
+function Me(e, r = null, t = null) {
+  const s = Be(e, r, t), a = Math.floor(Date.now() / 1e3), o = D(a, t);
+  return s.includes(o);
+}
+function Nt(e) {
+  const r = { easy: 0, medium: 0, hard: 0, total: 0 };
+  if (!Array.isArray(e)) return r;
+  for (const t of e) {
+    const s = typeof t.count == "number" ? t.count : parseInt(t.count, 10) || 0;
+    switch (t.difficulty) {
+      case "Easy":
+        r.easy = s;
+        break;
+      case "Medium":
+        r.medium = s;
+        break;
+      case "Hard":
+        r.hard = s;
+        break;
+      case "All":
+        r.total = s;
+        break;
+    }
+  }
+  return r.total === 0 && (r.easy > 0 || r.medium > 0 || r.hard > 0) && (r.total = r.easy + r.medium + r.hard), r;
+}
+function te(e) {
+  return e ? Date.now() - e > 900 * 1e3 : !0;
+}
+const W = "leetfriends_notifications", pe = {
+  QUEUED: "QUEUED",
+  DISPLAY_REQUESTED: "DISPLAY_REQUESTED",
+  FAILED: "FAILED",
+  IN_APP_ONLY: "IN_APP_ONLY",
+  DISMISSED: "DISMISSED",
+  CLICKED: "CLICKED"
+};
+async function He() {
+  try {
+    return (await chrome.storage.local.get(W))[W] || {
+      mutedUntilUTC: null,
+      snoozedUntil: null,
+      quietHours: { enabled: !1, start: "22:00", end: "08:00" },
+      lastNotified: {},
+      recentHashes: {}
+    };
+  } catch (e) {
+    return console.error("[NotificationManager] Error getting notification state:", e), {
+      mutedUntilUTC: null,
+      snoozedUntil: null,
+      quietHours: { enabled: !1, start: "22:00", end: "08:00" },
+      lastNotified: {},
+      recentHashes: {}
+    };
+  }
+}
+async function xe() {
+  try {
+    const e = await chrome.storage.local.get([
+      "notifications_enabled",
+      W
+    ]);
+    if (e.notifications_enabled === !1)
+      return !0;
+    const r = e[W];
+    if (!r) return !1;
+    const t = Date.now();
+    if (r.snoozedUntil && t < r.snoozedUntil)
+      return !0;
+    if (r.mutedUntilUTC) {
+      const s = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      if (r.mutedUntilUTC >= s) return !0;
+    }
+    if (r.quietHours && r.quietHours.enabled) {
+      const s = (/* @__PURE__ */ new Date()).getHours() * 60 + (/* @__PURE__ */ new Date()).getMinutes(), [a, o] = (r.quietHours.start || "22:00").split(":").map(Number), [n, c] = (r.quietHours.end || "08:00").split(":").map(Number), i = a * 60 + o, l = n * 60 + c;
+      if (i > l) {
+        if (s >= i || s < l)
+          return !0;
+      } else if (s >= i && s < l)
+        return !0;
+    }
+    return !1;
+  } catch (e) {
+    return console.warn("[NotificationManager] isNotificationMuted error:", e), !1;
+  }
+}
+async function Pt(e) {
+  const r = await He();
+  r.mutedUntilUTC = e, await chrome.storage.local.set({ [W]: r });
+}
+async function Fe(e) {
+  if (!(!Array.isArray(e) || e.length === 0))
+    try {
+      const r = await xe(), t = Date.now(), a = (await chrome.storage.local.get("unread_notifications")).unread_notifications || [], o = e.map((i, l) => ({
+        ...i,
+        id: `${t}-${l}`,
+        timestamp: t,
+        deliveryState: r ? pe.IN_APP_ONLY : pe.DISPLAY_REQUESTED
+      })), n = t - 1440 * 60 * 1e3, c = [...a, ...o].filter((i) => i.timestamp > n).slice(-30);
+      if (await chrome.storage.local.set({ unread_notifications: c }), r) {
+        console.log("[NotificationManager] Notifications muted; recorded for in-app display only.");
+        return;
+      }
+      for (const i of e)
+        try {
+          let l = "LeetStreak";
+          i.type === "new_submission" ? l = "🎯 Friend Solved a Problem!" : i.type === "milestone" ? l = "🔥 Streak Milestone Reached!" : i.type === "streak_at_risk" ? l = "⚠️ Streak At Risk!" : i.type === "battle_invite" ? l = "⚔️ 1v1 Battle Challenge!" : i.type === "battle_opponent_solved" ? l = "⚔️ Opponent Solved a Problem!" : i.type === "roast" && (l = "🔥 Motivation Roast Received!");
+          const u = `leetstreak-${i.type}-${t}-${Math.floor(Math.random() * 1e3)}`;
+          await chrome.notifications.create(u, {
+            type: "basic",
+            iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+            title: l,
+            message: i.message || "",
+            priority: i.priority || 2,
+            requireInteraction: i.type === "streak_at_risk" || i.type === "battle_invite"
+          });
+        } catch (l) {
+          console.warn("[NotificationManager] chrome.notifications.create failed:", l);
+        }
+    } catch (r) {
+      console.error("[NotificationManager] Error in batchNotify:", r);
+    }
+}
+const $t = () => (/* @__PURE__ */ new Date()).toISOString().split("T")[0], Bt = () => {
+  const e = /* @__PURE__ */ new Date();
+  return e.setUTCDate(e.getUTCDate() - 1), e.toISOString().split("T")[0];
+};
+function Mt(e) {
+  return [7, 30, 100].includes(e);
+}
+function Ht(e, r) {
+  if (r === 0) return !1;
+  const t = Bt(), s = $t();
+  return !(Array.isArray(e) ? e : []).some((n) => {
+    const c = parseInt(n.timestamp, 10);
+    if (isNaN(c) || c <= 0) return !1;
+    const i = new Date(c * 1e3).toISOString().split("T")[0];
+    return i === s || i === t;
+  });
+}
+function xt(e, r, t) {
+  switch (r) {
+    case "solved_today":
+      return `${e} solved today! 🎯`;
+    case "milestone":
+      return `${e} hit ${t.streak} day streak! 🔥`;
+    case "streak_at_risk":
+      return `Your ${t.streak} day streak needs attention! ⚠️`;
+    default:
+      return `${e} updated their progress`;
+  }
+}
+const Se = 1.7, Ee = 30, be = 19, Te = 4, Ae = "schedule_preferences";
+async function K() {
+  try {
+    return (await chrome.storage.local.get(Ae))[Ae] || {
+      activeInterval: Se,
+      quietInterval: Ee,
+      activeStartHour: be,
+      activeEndHour: Te
+    };
+  } catch (e) {
+    return console.error("Error loading schedule preferences:", e), {
+      activeInterval: Se,
+      quietInterval: Ee,
+      activeStartHour: be,
+      activeEndHour: Te
+    };
+  }
+}
+async function ue(e = null) {
+  e || (e = await K());
+  const t = (/* @__PURE__ */ new Date()).getHours(), { activeStartHour: s, activeEndHour: a } = e;
+  return s > a ? t >= s || t < a : t >= s && t < a;
+}
+async function de() {
+  const e = await K();
+  return await ue(e) ? e.activeInterval : e.quietInterval;
+}
+async function Ft() {
+  const e = await K(), r = /* @__PURE__ */ new Date(), t = r.getHours(), s = r.getMinutes();
+  let a;
+  await ue(e) ? a = e.activeEndHour : a = e.activeStartHour;
+  let o = a - t;
+  return o < 0 && (o += 24), o === 0 && s > 0 && (o = 24), o * 60 - s;
+}
+async function fe() {
+  const e = await K(), r = await de(), t = await ue(e), s = ke(e.activeStartHour), a = ke(e.activeEndHour);
+  return t ? `Active Mode: Checking every ${r} minutes (${s} - ${a})` : `Quiet Mode: Checking every ${r} minutes`;
+}
+async function qt() {
+  const e = await de(), r = await Ft(), t = Math.min(e, r);
+  return {
+    intervalMinutes: t,
+    description: await fe(),
+    isTransitionCheck: t === r && t < e
+  };
+}
+function ke(e) {
+  return e === 0 ? "12:00 AM" : e < 12 ? `${e}:00 AM` : e === 12 ? "12:00 PM" : `${e - 12}:00 PM`;
+}
+const qe = [
+  // Messaging & Chat Distractions
+  "whatsapp.com",
+  "web.whatsapp.com",
+  "telegram.org",
+  "web.telegram.org",
+  "discord.com",
+  "messenger.com",
+  "snapchat.com",
+  // Social Feeds & Doomscrolling
+  "tiktok.com",
+  "instagram.com",
+  "twitter.com",
+  "x.com",
+  "threads.net",
+  "reddit.com",
+  "old.reddit.com",
+  "9gag.com",
+  "pinterest.com",
+  "bsky.app",
+  "tumblr.com",
+  // Streaming & Live Video
+  "netflix.com",
+  "twitch.tv",
+  "kick.com",
+  "hotstar.com",
+  "disneyplus.com",
+  "primevideo.com",
+  "hulu.com",
+  "max.com",
+  "crunchyroll.com",
+  // Casual Gaming & Distractions
+  "chess.com",
+  "lichess.org",
+  "geoguessr.com",
+  "store.steampowered.com",
+  "roblox.com"
+], We = [
+  {
+    domain: "youtube.com",
+    paths: ["/shorts", "/feed/explore"],
+    label: "YouTube Shorts"
+  },
+  {
+    domain: "m.youtube.com",
+    paths: ["/shorts", "/feed/explore"],
+    label: "YouTube Shorts (Mobile)"
+  },
+  {
+    domain: "facebook.com",
+    paths: ["/reel", "/watch"],
+    label: "Facebook Reels"
+  },
+  {
+    domain: "m.facebook.com",
+    paths: ["/reel", "/watch"],
+    label: "Facebook Reels (Mobile)"
+  },
+  {
+    domain: "linkedin.com",
+    paths: ["/feed"],
+    label: "LinkedIn Feed"
+  }
+], Ye = [
+  {
+    domain: "youtube.com",
+    allowedPrefixes: ["/watch", "/playlist", "/@", "/channel", "/c"]
+  },
+  {
+    domain: "m.youtube.com",
+    allowedPrefixes: ["/watch", "/playlist", "/@", "/channel", "/c"]
+  },
+  {
+    domain: "linkedin.com",
+    allowedPrefixes: ["/jobs", "/messaging", "/in"]
+  }
+];
+function N(e) {
+  return e ? e.toLowerCase().replace(/^(www\.|m\.)/, "") : "";
+}
+function C(e, r = {}) {
+  const { customBlocked: t = [], allowlist: s = [] } = r;
+  if (!e || typeof e != "string")
+    return { isDistraction: !1, reason: "INVALID_URL", label: "" };
+  if (e.includes("blocked.html") || e.startsWith("chrome-extension:") || e.startsWith("chrome:"))
+    return { isDistraction: !1, reason: "SYSTEM_INTERNAL_PAGE", label: "" };
+  let a;
+  try {
+    a = new URL(e);
+  } catch {
+    return { isDistraction: !1, reason: "PARSE_ERROR", label: "" };
+  }
+  if (a.protocol !== "http:" && a.protocol !== "https:")
+    return { isDistraction: !1, reason: "NON_HTTP_PROTOCOL", label: "" };
+  const o = a.hostname.toLowerCase(), n = N(o);
+  if (n.includes("leetcode.com"))
+    return { isDistraction: !1, reason: "SYSTEM_ALLOW_LEETCODE", label: "LeetCode" };
+  for (const c of s) {
+    if (!c) continue;
+    const i = c.trim().toLowerCase();
+    if (e.toLowerCase().includes(i) || n === N(i))
+      return { isDistraction: !1, reason: "USER_ALLOWLIST", label: c };
+  }
+  for (const c of Ye)
+    if (n === N(c.domain)) {
+      for (const i of c.allowedPrefixes)
+        if (a.pathname.startsWith(i))
+          return { isDistraction: !1, reason: "EDUCATIONAL_EXCEPTION", label: `${c.domain}${i}` };
+    }
+  for (const c of We)
+    if (n === N(c.domain)) {
+      for (const i of c.paths)
+        if (a.pathname.startsWith(i))
+          return { isDistraction: !0, reason: "PATH_DISTRACTION", label: c.label };
+    }
+  for (const c of t) {
+    if (!c) continue;
+    const i = N(c.trim().toLowerCase());
+    if (n === i || n.endsWith("." + i))
+      return { isDistraction: !0, reason: "CUSTOM_BLOCKED_DOMAIN", label: i };
+  }
+  for (const c of qe) {
+    const i = N(c);
+    if (n === i || n.endsWith("." + i))
+      return { isDistraction: !0, reason: "DEFAULT_BLOCKED_DOMAIN", label: i };
+  }
+  return { isDistraction: !1, reason: "UNRESTRICTED", label: "" };
+}
+function Wt(e = {}) {
+  const { customBlocked: r = [], allowlist: t = [] } = e, s = [];
+  let a = 1e3;
+  s.push({
+    id: a++,
+    priority: 10,
+    action: { type: "allow" },
+    condition: {
+      requestDomains: ["leetcode.com"],
+      resourceTypes: ["main_frame"]
+    }
+  });
+  for (const n of t) {
+    if (!n || !n.trim()) continue;
+    const c = n.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    s.push({
+      id: a++,
+      priority: 5,
+      action: { type: "allow" },
+      condition: {
+        requestDomains: [c],
+        resourceTypes: ["main_frame"]
+      }
+    });
+  }
+  for (const n of Ye)
+    for (const c of n.allowedPrefixes)
+      s.push({
+        id: a++,
+        priority: 3,
+        action: { type: "allow" },
+        condition: {
+          requestDomains: [n.domain],
+          urlFilter: `*${c}*`,
+          resourceTypes: ["main_frame"]
         }
       });
-      if (!h.ok)
-        return console.error(`❌ Cannot access GitHub repo (${h.status}):`, l), h.status === 404 ? { success: !1, error: `Repository not found: ${s}/${o}` } : h.status === 401 ? { success: !1, error: "GitHub token is invalid or expired." } : h.status === 403 ? { success: !1, error: "Access denied to repository. Check token permissions." } : { success: !1, error: `Cannot access repository (${h.status})` };
-      const f = await h.json();
-      console.log("✅ GitHub repo accessible:", f.name), console.log("📍 Repo URL:", f.html_url);
-    } catch (l) {
-      return console.error("❌ Error validating GitHub repo:", l), { success: !1, error: `Failed to validate GitHub repo: ${l.message}` };
-    }
-    let n;
-    try {
-      n = await k(r), console.log("✅ User data fetched from LeetCode API");
-    } catch (l) {
-      return console.error("❌ Failed to fetch LeetCode user data:", l.message), { success: !1, error: `Failed to fetch LeetCode data: ${l.message}` };
-    }
-    if (!n)
-      return { success: !1, error: "User data is empty. Username may be incorrect." };
-    console.log("✅ User data loaded");
-    const c = n.allAcceptedSubmissions || [], i = n.profile?.recentSubmissions || [];
-    if (console.log("📋 Submissions data - all:", c.length, "recent:", i.length), c.length === 0 && i.length === 0)
-      return { success: !1, error: "No accepted submissions found" };
-    console.log(`📊 Found ${c.length} all-time submissions and ${i.length} recent`);
-    const a = /* @__PURE__ */ new Map();
-    i.forEach((l) => {
-      l.statusDisplay === "Accepted" && a.set(l.titleSlug, l);
-    }), c.forEach((l) => {
-      a.has(l.titleSlug) || a.set(l.titleSlug, l);
-    });
-    const u = Array.from(a.values());
-    console.log(`✅ Total unique solved problems: ${u.length}`);
-    let d = 0, g = 0;
-    for (let l = 0; l < u.length; l++)
-      try {
-        const h = u[l], f = h.titleSlug || h.slug;
-        if (!f) continue;
-        console.log(`[${l + 1}/${u.length}] Syncing: ${h.title || f}`);
-        const m = h.difficulty || "Medium", p = m, S = `/**
- * Problem: ${h.title || f}
- * Difficulty: ${m}
- * URL: https://leetcode.com/problems/${f}/
- * Status: Accepted ✓
- * 
- * ${h.description ? h.description.substring(0, 200) : "No description"}
- */
-
-// Solution code here
-`, ie = `${p}/${f}.js`, P = await oe(
-          t,
-          s,
-          o,
-          ie,
-          S,
-          `Add solution: ${h.title || f}`
-        );
-        P.success ? d++ : (g++, console.warn(`Failed to sync ${f}:`, P.error)), l < u.length - 1 && await w(100);
-      } catch (h) {
-        console.error(`Error syncing submission ${l}:`, h), g++;
-      }
-    return console.log(`✅ Manual sync complete: ${d} synced, ${g} failed`), await chrome.storage.local.set({
-      manual_sync_last: Date.now(),
-      manual_sync_count: d
-    }), {
-      success: !0,
-      synced: d,
-      failed: g,
-      message: `Synced ${d} problems to GitHub`
-    };
-  } catch (e) {
-    return console.error("Error in manual sync:", e), { success: !1, error: e.message || "Manual sync failed" };
-  }
-}
-async function oe(e, t, r, s, o, n) {
-  try {
-    const c = `https://api.github.com/repos/${t}/${r}/contents/${s}`, i = await fetch(c, {
-      headers: {
-        Authorization: `token ${e}`,
-        Accept: "application/vnd.github.v3+json"
-      }
-    });
-    let a = null;
-    i.ok ? a = (await i.json()).sha : i.status !== 404 && console.warn(`GitHub check file error (${i.status}):`, s);
-    const u = btoa(unescape(encodeURIComponent(o))), d = {
-      message: n,
-      content: u
-    };
-    a && (d.sha = a);
-    const g = await fetch(c, {
-      method: "PUT",
-      headers: {
-        Authorization: `token ${e}`,
-        Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(d)
-    });
-    if (g.ok) {
-      const l = await g.json();
-      return console.log("✅ Synced to GitHub:", s), { success: !0 };
-    } else {
-      const l = await g.text();
-      if (console.error(`❌ GitHub PUT failed (${g.status}):`, s, l.substring(0, 200)), g.status === 403) {
-        try {
-          if (JSON.parse(l).message?.includes("rate"))
-            return { success: !1, error: "GitHub rate limit exceeded. Try again later." };
-        } catch {
+  for (const n of We)
+    for (const c of n.paths)
+      s.push({
+        id: a++,
+        priority: 2,
+        action: {
+          type: "redirect",
+          redirect: { extensionPath: "/blocked.html" }
+        },
+        condition: {
+          requestDomains: [n.domain],
+          urlFilter: `*${c}*`,
+          resourceTypes: ["main_frame"]
         }
-        return { success: !1, error: "Access denied to repository. Check token permissions." };
-      } else {
-        if (g.status === 401)
-          return { success: !1, error: "GitHub token is invalid or expired." };
-        if (g.status === 404)
-          return console.warn("⚠️ 404 error - repo may not exist or path invalid:", s), { success: !1, error: "Repository not found or invalid path." };
-      }
-      return { success: !1, error: `GitHub error ${g.status}` };
-    }
-  } catch (c) {
-    return console.error("Error syncing to GitHub:", c), { success: !1, error: c.message };
-  }
-}
-async function ot() {
-  try {
-    const t = (await chrome.storage.local.get("failed_syncs")).failed_syncs || [];
-    if (t.length === 0)
-      return { success: !0, retried: 0 };
-    const r = await b("github_token");
-    if (!r)
-      return { success: !1, error: "No GitHub token configured" };
-    const s = await chrome.storage.local.get([
-      "github_username",
-      "github_repo"
-    ]);
-    s.github_token = r;
-    let o = 0;
-    const n = [];
-    for (const c of t)
-      (await re(c.submission, s, 2)).success ? o++ : (c.retryCount++, n.push(c)), await w(1e3);
-    return await chrome.storage.local.set({ failed_syncs: n }), { success: !0, retried: o, failed: n.length };
-  } catch (e) {
-    return { success: !1, error: e.message };
-  }
-}
-const ne = "Ov23liEa61h0LIbIdqls";
-async function nt() {
-  try {
-    const e = await fetch("https://github.com/login/device/code", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json"
+      });
+  const o = Array.from(/* @__PURE__ */ new Set([...qe, ...r]));
+  for (const n of o) {
+    if (!n || !n.trim()) continue;
+    const c = N(n.trim());
+    s.push({
+      id: a++,
+      priority: 1,
+      action: {
+        type: "redirect",
+        redirect: { extensionPath: "/blocked.html" }
       },
-      body: JSON.stringify({
-        client_id: ne,
-        scope: "repo"
-        // We need repo scope to create/update files
-      })
-    });
-    if (!e.ok) {
-      const r = await e.text();
-      return console.error("Device code request failed:", e.status, r), e.status === 401 || e.status === 404 ? {
-        success: !1,
-        error: "Invalid GitHub Client ID. Please check the configuration.",
-        errorCode: "INVALID_CLIENT"
-      } : {
-        success: !1,
-        error: `GitHub returned error ${e.status}`,
-        errorCode: "API_ERROR"
-      };
-    }
-    const t = await e.json();
-    return !t.device_code || !t.user_code ? {
-      success: !1,
-      error: "Invalid response from GitHub",
-      errorCode: "INVALID_RESPONSE"
-    } : (await chrome.storage.local.set({
-      github_auth_pending: {
-        deviceCode: t.device_code,
-        userCode: t.user_code,
-        verificationUri: t.verification_uri,
-        expiresAt: Date.now() + t.expires_in * 1e3,
-        interval: t.interval || 5,
-        startedAt: Date.now()
+      condition: {
+        requestDomains: [c],
+        resourceTypes: ["main_frame"]
       }
-    }), {
-      success: !0,
-      userCode: t.user_code,
-      verificationUri: t.verification_uri,
-      expiresIn: t.expires_in,
-      interval: t.interval || 5
     });
+  }
+  return s;
+}
+async function A() {
+  if (typeof chrome > "u" || !chrome.storage || !chrome.storage.local)
+    return { active: !1, reason: "CHROME_STORAGE_UNAVAILABLE", todayStr: "", streak: 0 };
+  try {
+    const e = await chrome.storage.local.get([
+      "hardcore_mode_enabled",
+      "my_leetcode_username",
+      "last_solve_date",
+      "user_timezone",
+      "own_profile"
+    ]), r = e.user_timezone, t = Math.floor(Date.now() / 1e3), s = D(t, r);
+    if (!e.hardcore_mode_enabled)
+      return { active: !1, reason: "HARDCORE_DISABLED", todayStr: s, streak: 0 };
+    const a = e.my_leetcode_username;
+    let o = e.own_profile;
+    if (!o && a)
+      try {
+        const n = await chrome.storage.local.get(["friends_cache"]);
+        if (n.friends_cache) {
+          const c = Object.keys(n.friends_cache).find((i) => i.toLowerCase() === a.toLowerCase());
+          c && (o = n.friends_cache[c]);
+        }
+        o || (o = await ne(a));
+      } catch (n) {
+        console.warn("[BlockerManager] Error fetching cached friend data:", n);
+      }
+    if (o) {
+      const n = o.stats?.streak || 0;
+      return Me(o.allAcceptedSubmissions, o.submissionCalendar, r) ? (await chrome.storage.local.set({ last_solve_date: s }), { active: !1, reason: "SOLVED_TODAY_CANONICAL", todayStr: s, streak: n }) : (e.last_solve_date === s && await chrome.storage.local.remove("last_solve_date"), { active: !0, reason: "UNSOLVED_TODAY", todayStr: s, streak: n });
+    }
+    return e.last_solve_date === s ? { active: !1, reason: "SOLVED_TODAY_CACHE", todayStr: s, streak: 0 } : { active: !0, reason: "NO_PROFILE_UNSOLVED", todayStr: s, streak: 0 };
   } catch (e) {
-    return console.error("Device code request error:", e), e.name === "TypeError" && e.message.includes("fetch") ? {
-      success: !1,
-      error: "Network error. Please check your internet connection.",
-      errorCode: "NETWORK_ERROR"
-    } : {
-      success: !1,
-      error: e.message,
-      errorCode: "UNKNOWN_ERROR"
-    };
+    return console.error("[BlockerManager] isBlockerActive check error:", e), { active: !1, reason: `ERROR: ${e.message}`, todayStr: "", streak: 0 };
   }
 }
-async function at(e) {
+async function v() {
+  if (typeof chrome > "u" || !chrome.declarativeNetRequest)
+    return console.warn("[BlockerManager] chrome.declarativeNetRequest API not available"), { success: !1, locked: !1, ruleCount: 0, reason: "DNR_NOT_AVAILABLE" };
   try {
-    const r = (await chrome.storage.local.get("github_auth_pending")).github_auth_pending;
-    if (!r || Date.now() > r.expiresAt)
-      return await chrome.storage.local.remove("github_auth_pending"), {
-        success: !1,
-        error: "Authorization expired. Please try again.",
-        errorCode: "EXPIRED",
-        shouldRetry: !1
-      };
-    const o = await (await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        client_id: ne,
-        device_code: e || r.deviceCode,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-      })
-    })).json();
-    if (o.error)
-      switch (o.error) {
-        case "authorization_pending":
-          return {
-            success: !1,
-            errorCode: "PENDING",
-            shouldRetry: !0,
-            interval: r.interval
-          };
-        case "slow_down":
-          return r.interval = (r.interval || 5) + 5, await chrome.storage.local.set({ github_auth_pending: r }), {
-            success: !1,
-            errorCode: "SLOW_DOWN",
-            shouldRetry: !0,
-            interval: r.interval
-          };
-        case "expired_token":
-          return await chrome.storage.local.remove("github_auth_pending"), {
-            success: !1,
-            error: "Authorization expired. Please try again.",
-            errorCode: "EXPIRED",
-            shouldRetry: !1
-          };
-        case "access_denied":
-          return await chrome.storage.local.remove("github_auth_pending"), {
-            success: !1,
-            error: 'Authorization denied. Please try again and click "Authorize".',
-            errorCode: "DENIED",
-            shouldRetry: !1
-          };
-        default:
-          return {
-            success: !1,
-            error: o.error_description || o.error,
-            errorCode: "UNKNOWN",
-            shouldRetry: !1
-          };
-      }
-    if (o.access_token) {
-      await chrome.storage.local.remove("github_auth_pending");
-      const n = await ae(o.access_token);
-      return n.success ? {
-        success: !0,
-        token: o.access_token,
-        username: n.username,
-        avatarUrl: n.avatarUrl,
-        scopes: o.scope
-      } : {
-        success: !1,
-        error: "Failed to validate token: " + n.error,
-        errorCode: "VALIDATION_FAILED",
-        shouldRetry: !1
-      };
-    }
-    return {
-      success: !1,
-      error: "Unexpected response from GitHub",
-      errorCode: "INVALID_RESPONSE",
-      shouldRetry: !1
-    };
-  } catch (t) {
-    return console.error("Device poll error:", t), t.name === "TypeError" && t.message.includes("fetch") ? {
-      success: !1,
-      error: "Network error. Will retry...",
-      errorCode: "NETWORK_ERROR",
-      shouldRetry: !0
-    } : {
-      success: !1,
-      error: t.message,
-      errorCode: "UNKNOWN_ERROR",
-      shouldRetry: !1
-    };
-  }
-}
-async function ae(e) {
-  try {
-    const t = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${e}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "LeetStreak-Extension"
-      }
+    const e = await A(), t = (await chrome.declarativeNetRequest.getDynamicRules()).map((o) => o.id);
+    if (!e.active)
+      return t.length > 0 && await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: t,
+        addRules: []
+      }), await chrome.storage.local.set({
+        hardcore_blocker_state: {
+          locked: !1,
+          ruleCount: 0,
+          reason: e.reason,
+          todayStr: e.todayStr,
+          streak: e.streak,
+          lastSynced: Date.now()
+        }
+      }), { success: !0, locked: !1, ruleCount: 0, reason: e.reason };
+    const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), a = Wt({
+      customBlocked: s.custom_blocked_domains || [],
+      allowlist: s.allowlist || []
     });
-    if (!t.ok)
-      return t.status === 401 ? { success: !1, error: "Invalid or expired token" } : t.status === 403 ? t.headers.get("X-RateLimit-Remaining") === "0" ? { success: !1, error: "GitHub API rate limit exceeded. Please wait." } : { success: !1, error: "Access forbidden. Token may lack required permissions." } : { success: !1, error: `GitHub API error: ${t.status}` };
-    const r = await t.json();
-    return {
-      success: !0,
-      username: r.login,
-      avatarUrl: r.avatar_url,
-      name: r.name,
-      email: r.email
-    };
-  } catch (t) {
-    return console.error("Token validation error:", t), { success: !1, error: t.message };
+    return await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: t,
+      addRules: a
+    }), await chrome.storage.local.set({
+      hardcore_blocker_state: {
+        locked: !0,
+        ruleCount: a.length,
+        reason: e.reason,
+        todayStr: e.todayStr,
+        streak: e.streak,
+        lastSynced: Date.now()
+      }
+    }), await Yt(), { success: !0, locked: !0, ruleCount: a.length, reason: e.reason };
+  } catch (e) {
+    console.error("[BlockerManager] syncBlockerRules error:", e);
+    try {
+      await chrome.storage.local.set({
+        hardcore_blocker_state: {
+          locked: !1,
+          error: e.message,
+          lastSynced: Date.now()
+        }
+      });
+    } catch {
+    }
+    return { success: !1, locked: !1, ruleCount: 0, error: e.message };
   }
 }
-async function it(e) {
-  return e || (e = await b("github_token")), e ? await ae(e) : { success: !1, error: "No token provided" };
+let Ce = !1;
+function P(e, r, t = "") {
+  if (!(typeof chrome > "u" || !chrome.tabs || !chrome.tabs.update))
+    try {
+      const s = chrome.runtime.getURL(`blocked.html?blocked=${encodeURIComponent(r)}&label=${encodeURIComponent(t)}`);
+      chrome.tabs.update(e, { url: s }, () => {
+        chrome.runtime?.lastError;
+      });
+    } catch (s) {
+      console.warn("[BlockerManager] redirectTabToBlocked error:", s);
+    }
 }
-async function ct(e, t, r) {
+async function Yt() {
+  if (typeof chrome > "u" || !chrome.tabs || !chrome.tabs.query)
+    return { sweptCount: 0, redirectedTabs: [] };
   try {
-    const { storeEncryptedToken: s } = await Promise.resolve().then(() => Le);
-    return await s("github_token", e), await chrome.storage.local.set({
-      github_username: t,
-      github_repo: r,
-      github_sync_enabled: !0,
-      // CRITICAL: Enable sync flag
-      github_connected: !0,
-      github_connected_at: Date.now()
-    }), console.log("✅ GitHub credentials stored successfully"), console.log("GitHub sync enabled flag set to true"), { success: !0 };
-  } catch (s) {
-    return console.error("❌ Failed to store credentials:", s), { success: !1, error: s.message };
+    if (!(await A()).active)
+      return { sweptCount: 0, redirectedTabs: [] };
+    const r = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), t = r.custom_blocked_domains || [], s = r.allowlist || [], a = await chrome.tabs.query({}), o = [];
+    for (const n of a) {
+      if (!n.id || !n.url || n.url.includes("blocked.html") || n.url.startsWith("chrome") || n.url.startsWith("about:") || n.url.startsWith("edge:") || n.url.includes("leetcode.com"))
+        continue;
+      const c = C(n.url, { customBlocked: t, allowlist: s });
+      c.isDistraction && (console.log(`[BlockerManager] Sweeping open distracting tab #${n.id}: ${n.url} (${c.label || c.reason})`), P(n.id, n.url, c.label), o.push({ id: n.id, url: n.url }));
+    }
+    return { sweptCount: o.length, redirectedTabs: o };
+  } catch (e) {
+    return console.warn("[BlockerManager] sweepOpenTabs error:", e), { sweptCount: 0, redirectedTabs: [], error: e.message };
   }
 }
-async function lt() {
+function jt() {
+  Ce || typeof chrome > "u" || (Ce = !0, v().catch((e) => console.error("[BlockerManager] Startup sync failed:", e)), chrome.webNavigation && chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener(async (e) => {
+    if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
+      try {
+        if (!(await A()).active) return;
+        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = C(e.url, {
+          customBlocked: t.custom_blocked_domains || [],
+          allowlist: t.allowlist || []
+        });
+        s.isDistraction && (chrome.storage.session && await chrome.storage.session.set({
+          [`blocked_tab_${e.tabId}`]: {
+            url: e.url,
+            label: s.label,
+            timestamp: Date.now()
+          }
+        }), P(e.tabId, e.url, s.label));
+      } catch (r) {
+        console.warn("[BlockerManager] onBeforeNavigate error:", r);
+      }
+  }), chrome.webNavigation && chrome.webNavigation.onCommitted && chrome.webNavigation.onCommitted.addListener(async (e) => {
+    if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
+      try {
+        if (!(await A()).active) return;
+        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = C(e.url, {
+          customBlocked: t.custom_blocked_domains || [],
+          allowlist: t.allowlist || []
+        });
+        s.isDistraction && P(e.tabId, e.url, s.label);
+      } catch {
+      }
+  }), chrome.webNavigation && chrome.webNavigation.onHistoryStateUpdated && chrome.webNavigation.onHistoryStateUpdated.addListener(async (e) => {
+    if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
+      try {
+        if (!(await A()).active) return;
+        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = C(e.url, {
+          customBlocked: t.custom_blocked_domains || [],
+          allowlist: t.allowlist || []
+        });
+        s.isDistraction && (chrome.storage.session && await chrome.storage.session.set({
+          [`blocked_tab_${e.tabId}`]: {
+            url: e.url,
+            label: s.label,
+            timestamp: Date.now()
+          }
+        }), P(e.tabId, e.url, s.label));
+      } catch (r) {
+        console.warn("[BlockerManager] onHistoryStateUpdated error:", r);
+      }
+  }), chrome.tabs && chrome.tabs.onUpdated && chrome.tabs.onUpdated.addListener(async (e, r, t) => {
+    const s = r.url || t?.url;
+    if (!(!s || s.includes("blocked.html") || s.startsWith("chrome") || s.startsWith("about:") || s.includes("leetcode.com")))
+      try {
+        if (!(await A()).active) return;
+        const o = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), n = C(s, {
+          customBlocked: o.custom_blocked_domains || [],
+          allowlist: o.allowlist || []
+        });
+        n.isDistraction && P(e, s, n.label);
+      } catch {
+      }
+  }), chrome.tabs && chrome.tabs.onActivated && chrome.tabs.onActivated.addListener(async (e) => {
+    try {
+      if (!(await A()).active) return;
+      const t = await chrome.tabs.get(e.tabId);
+      if (!t || !t.url || t.url.includes("blocked.html") || t.url.startsWith("chrome") || t.url.startsWith("about:") || t.url.startsWith("edge:") || t.url.includes("leetcode.com")) return;
+      const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), a = C(t.url, {
+        customBlocked: s.custom_blocked_domains || [],
+        allowlist: s.allowlist || []
+      });
+      a.isDistraction && (console.log(`[BlockerManager] onActivated blocking active tab #${e.tabId} (${t.url})`), P(e.tabId, t.url, a.label));
+    } catch {
+    }
+  }), chrome.windows && chrome.windows.onFocusChanged && chrome.windows.onFocusChanged.addListener(async (e) => {
+    if (!(typeof chrome.windows.WINDOW_ID_NONE < "u" && e === chrome.windows.WINDOW_ID_NONE))
+      try {
+        if (!(await A()).active) return;
+        const [t] = await chrome.tabs.query({ active: !0, windowId: e });
+        if (!t || !t.id || !t.url || t.url.includes("blocked.html") || t.url.startsWith("chrome") || t.url.startsWith("about:") || t.url.startsWith("edge:") || t.url.includes("leetcode.com")) return;
+        const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), a = C(t.url, {
+          customBlocked: s.custom_blocked_domains || [],
+          allowlist: s.allowlist || []
+        });
+        a.isDistraction && (console.log(`[BlockerManager] onFocusChanged blocking window tab #${t.id} (${t.url})`), P(t.id, t.url, a.label));
+      } catch {
+      }
+  }), chrome.storage && chrome.storage.onChanged && chrome.storage.onChanged.addListener((e, r) => {
+    if (r !== "local") return;
+    [
+      "hardcore_mode_enabled",
+      "last_solve_date",
+      "my_leetcode_username",
+      "user_timezone",
+      "own_profile",
+      "custom_blocked_domains",
+      "allowlist"
+    ].some((a) => e[a]) && v().catch((a) => {
+      console.error("[BlockerManager] Storage change sync error:", a);
+    });
+  }), console.log("🛡️ [BlockerManager] Multi-layer network blocker initialized"));
+}
+function Jt() {
+  if (jt(), typeof chrome > "u" || !chrome.tabs) {
+    console.warn("[TabMonitor] chrome.tabs API not available");
+    return;
+  }
+  chrome.tabs.onUpdated.addListener(async (e, r, t) => {
+    if (r.status === "complete" && t?.url)
+      try {
+        if (!(await A()).active) return;
+        const a = C(t.url);
+        if (a.isDistraction && !t.url.includes("blocked.html")) {
+          const o = chrome.runtime.getURL(`blocked.html?blocked=${encodeURIComponent(t.url)}&label=${encodeURIComponent(a.label)}`);
+          chrome.tabs.update(e, { url: o });
+        }
+      } catch {
+      }
+  }), console.log("✅ [TabMonitor] Hardcore Mode Tab Monitor and Blocker initialized");
+}
+const re = "leetfriends_sync", Gt = "schedule_transition_check", je = 500;
+self.addEventListener("error", (e) => {
+  console.error("[ServiceWorker] Uncaught error:", e.error);
+});
+self.addEventListener("unhandledrejection", (e) => {
+  console.error("[ServiceWorker] Uncaught promise rejection:", e.reason);
+});
+Jt();
+it().catch((e) => {
+  console.warn("[ServiceWorker] Session restoration (non-blocking):", e.message);
+});
+chrome.runtime.onInstalled.addListener(async () => {
+  console.log("[ServiceWorker] Installed - setting up sync alarm and cleaning legacy keys"), me(), zt(), await v();
+});
+chrome.runtime.onStartup.addListener(async () => {
+  console.log("[ServiceWorker] Browser startup - reconciling blocker rules"), await v();
+});
+async function zt() {
   try {
-    return await chrome.storage.local.remove([
+    const e = [
       "github_token",
       "github_token_encrypted",
       "github_token_key",
       "github_username",
       "github_repo",
-      "github_connected",
-      "github_connected_at",
-      "github_auth_pending",
-      "failed_syncs",
-      "synced_submissions"
-    ]), console.log("GitHub credentials cleared"), { success: !0 };
+      "github_sync_enabled",
+      "synced_problems"
+    ];
+    await chrome.storage.local.remove(e), console.log("[ServiceWorker] Legacy keys cleaned successfully");
   } catch (e) {
-    return console.error("Failed to clear credentials:", e), { success: !1, error: e.message };
+    console.warn("[ServiceWorker] Error cleaning legacy storage:", e);
   }
 }
-async function ut() {
+async function me() {
+  const e = qt(), r = e?.intervalMinutes || 30;
   try {
-    const e = await chrome.storage.local.get([
-      "github_username",
-      "github_repo",
-      "github_connected",
-      "github_connected_at",
-      "synced_submissions",
-      "failed_syncs"
-    ]);
-    if (!!await b("github_token") && e.github_connected) {
-      const s = e.synced_submissions?.length || 0, o = e.failed_syncs?.length || 0;
-      return {
-        success: !0,
-        connected: !0,
-        username: e.github_username,
-        repo: e.github_repo,
-        connectedAt: e.github_connected_at,
-        syncedCount: s,
-        failedCount: o
-      };
-    }
-    return {
-      success: !0,
-      connected: !1
-    };
-  } catch (e) {
-    return console.error("Failed to get GitHub status:", e), { success: !1, error: e.message };
-  }
-}
-async function dt(e, t, r) {
-  try {
-    if (e || (e = await b("github_token")), !e)
-      return { success: !1, error: "No GitHub token available" };
-    const s = await fetch(`https://api.github.com/repos/${t}/${r}`, {
-      headers: {
-        Authorization: `Bearer ${e}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "LeetStreak-Extension"
+    await chrome.alarms.clear(re), await chrome.alarms.clear(Gt), chrome.alarms.create(re, {
+      delayInMinutes: r,
+      periodInMinutes: r
+    }), await chrome.storage.local.set({
+      current_schedule: {
+        interval: r,
+        description: e?.description || "Standard sync",
+        updatedAt: Date.now()
       }
     });
-    if (s.ok) {
-      const o = await s.json();
-      return {
-        success: !0,
-        exists: !0,
-        repoUrl: o.html_url,
-        isPrivate: o.private
-      };
-    }
-    if (s.status === 404) {
-      const o = await fetch("https://api.github.com/user/repos", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${e}`,
-          Accept: "application/vnd.github.v3+json",
-          "Content-Type": "application/json",
-          "User-Agent": "LeetStreak-Extension"
-        },
-        body: JSON.stringify({
-          name: r,
-          description: "🔥 My LeetCode solutions - synced automatically by LeetStreak",
-          private: !1,
-          // Public by default, user can change later
-          auto_init: !0,
-          // Create with README
-          has_issues: !1,
-          has_projects: !1,
-          has_wiki: !1
-        })
-      });
-      if (o.ok) {
-        const c = await o.json();
-        return {
-          success: !0,
-          exists: !1,
-          // Was just created
-          created: !0,
-          repoUrl: c.html_url,
-          isPrivate: c.private
-        };
-      }
-      return {
-        success: !1,
-        error: (await o.json()).message || "Failed to create repository",
-        errorCode: "CREATE_FAILED"
-      };
-    }
-    return s.status === 403 ? {
-      success: !1,
-      error: "Access denied. Token may lack repo permissions.",
-      errorCode: "FORBIDDEN"
-    } : {
-      success: !1,
-      error: `GitHub API error: ${s.status}`,
-      errorCode: "API_ERROR"
-    };
-  } catch (s) {
-    return console.error("Ensure repo error:", s), { success: !1, error: s.message };
+  } catch (t) {
+    console.warn("[ServiceWorker] setupDynamicAlarm error:", t);
   }
 }
-chrome.alarms.onAlarm.addListener((e) => {
-  e.name === "github_cleanup" && ft();
-});
-async function ft() {
+async function Qt() {
   try {
-    const e = await chrome.storage.local.get(null), t = Date.now(), r = [];
-    for (const [s, o] of Object.entries(e))
-      s.startsWith("pending_") && o.timestamp && t - o.timestamp > 3600 * 1e3 && r.push(s);
-    r.length > 0 && (await chrome.storage.local.remove(r), console.log(`Cleaned up ${r.length} old pending submissions`));
+    const r = (await chrome.storage.local.get("current_schedule")).current_schedule, t = de();
+    (!r || Math.abs(r.interval - t) > 0.1) && (console.log(`[ServiceWorker] Transitioning schedule: ${fe()}`), await me());
   } catch (e) {
-    console.error("Cleanup error:", e);
+    console.warn("[ServiceWorker] checkScheduleTransition error:", e);
   }
 }
-async function gt(e, t) {
-  console.warn("🚨 CSP Violation from", t.tab?.id || "extension", ":", e);
-  try {
-    const s = (await chrome.storage.local.get("csp_violations")).csp_violations || [];
-    s.push({
-      ...e,
-      tabId: t.tab?.id,
-      url: t.url,
-      receivedAt: (/* @__PURE__ */ new Date()).toISOString()
-    }), s.length > 100 && s.splice(0, s.length - 100), await chrome.storage.local.set({ csp_violations: s }), e.violatedDirective?.includes("script-src") && console.error("Critical CSP violation detected:", e.blockedURI);
-  } catch (r) {
-    console.error("Failed to store CSP violation:", r);
+chrome.alarms.onAlarm.addListener(async (e) => {
+  e.name === re && (console.log(`[ServiceWorker] Background sync triggered - ${fe()}`), await Qt(), await Je(), await v());
+});
+chrome.runtime.onMessage.addListener((e, r, t) => {
+  if (e.type === "PING") {
+    t({ pong: !0 });
+    return;
   }
+  switch (e.type) {
+    case "FETCH_STATS":
+      return Vt(e.forceRefresh).then(t), !0;
+    case "ADD_FRIEND":
+      return Xt(e.username).then(t), !0;
+    case "REMOVE_FRIEND":
+      return Zt(e.username).then(t), !0;
+    case "GET_FRIENDS":
+      return er().then(t), !0;
+    case "MUTE_NOTIFICATIONS":
+      return Pt(e.untilUTC).then(() => t({ success: !0 })), !0;
+    case "GET_NOTIFICATION_STATE":
+      return He().then((s) => t({ success: !0, state: s })), !0;
+    case "ADD_TO_QUEUE":
+      return tr(e.problemData).then(t), !0;
+    case "SUBMISSION_ACCEPTED":
+      return rr(e.problemSlug, e.title).then(t), !0;
+    case "SYNC_BLOCKER_RULES":
+      return v().then(t), !0;
+    case "GET_BLOCKER_STATUS":
+      return A().then(t), !0;
+    case "SHOW_NOTIFICATION":
+      return Fe([{
+        type: "custom",
+        message: e.message || "",
+        title: e.title || "LeetStreak",
+        priority: 2
+      }]).then(() => t({ success: !0 })), !0;
+    case "GET_STORAGE_STATUS":
+      return chrome.storage.local.getBytesInUse(null, (s) => {
+        t({ bytesInUse: s || 0, quota: 5242880 });
+      }), !0;
+    case "RESCHEDULE_ALARMS":
+      return me().then(() => t({ success: !0 })), !0;
+    // ===== 1v1 Battle System =====
+    case "BATTLE_GET_STATUS":
+      return or(e.username).then(t), !0;
+    case "BATTLE_CHALLENGE":
+      return nr(e.challenger, e.challenged, e.language).then(t), !0;
+    case "BATTLE_RESPOND":
+      return cr(e.battleId, e.username, e.accept).then(t), !0;
+    case "BATTLE_PICK_PROBLEM":
+      return ir(e.battleId, e.username, e.slug, e.title).then(t), !0;
+    case "BATTLE_READY":
+      return lr(e.battleId, e.username).then(t), !0;
+    case "BATTLE_SUBMISSION":
+      return ur(e).then(t), !0;
+    case "BATTLE_FORFEIT":
+      return dr(e.battleId, e.username).then(t), !0;
+    case "BATTLE_CANCEL":
+      return fr(e.battleId, e.username).then(t), !0;
+    case "BATTLE_VALIDATE_PROBLEM":
+      return $e(e.slugOrUrl).then(t), !0;
+    case "BATTLE_PING_PRESENCE":
+      return mr(e.username).then(t), !0;
+    case "BATTLE_GET_PRESENCE":
+      return hr(e.usernames).then(t), !0;
+    case "GET_LOGGED_IN_USER":
+      return sr().then(t), !0;
+    case "FETCH_OWN_PROFILE":
+      return Kt(e.forceRefresh).then(t), !0;
+    // ===== Cloud Authentication & Account =====
+    case "GET_AUTH_STATE":
+      return (async () => {
+        const s = await L();
+        t({
+          success: !0,
+          state: H(),
+          session: s ? { user_id: s.user_id, email: s.email, expires_at: s.expires_at } : null,
+          isRateLimited: $(),
+          cooldownSeconds: se()
+        });
+      })().catch((s) => t({ success: !1, error: s.message })), !0;
+    case "SIGN_IN_EMAIL":
+      return ut(e.email, e.password).then((s) => t({ success: !0, session: { user_id: s.user_id, email: s.email } })).catch((s) => t({ success: !1, error: s.message, isRateLimited: $() })), !0;
+    case "SIGN_UP_EMAIL":
+      return dt(e.email, e.password).then((s) => t(s)).catch((s) => t({ success: !1, error: s.message, isRateLimited: $() })), !0;
+    case "SIGN_OUT":
+      return ft().then((s) => t(s)).catch((s) => t({ success: !1, error: s.message })), !0;
+    // ===== Roasts =====
+    case "SEND_ROAST":
+      return _r(e.targetUsername, e.fromUsername, e.message).then(t), !0;
+    case "CLEAR_ROASTS":
+      return (async () => {
+        const s = await chrome.storage.local.get("my_leetcode_username");
+        return s.my_leetcode_username && await Ie(s.my_leetcode_username), { success: await Pe() };
+      })().then(t), !0;
+    default:
+      t({ success: !1, error: `Unknown message type: ${e.type}` });
+  }
+});
+chrome.notifications.onClicked.addListener((e) => {
+  (e.includes("streak") || e.includes("roast") || e.includes("solve")) && (chrome.tabs.create({ url: "https://leetcode.com/problemset/" }), chrome.notifications.clear(e));
+});
+async function Vt(e = !1) {
+  try {
+    const r = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), t = r.my_leetcode_username;
+    if (!t)
+      return { success: !1, error: "No LeetCode username configured. Please enter your username." };
+    let s = await oe(), a = !1;
+    if (e || !s || te(s.lastUpdated)) {
+      console.log(`[ServiceWorker] Fetching own LeetCode data for: ${t}`);
+      try {
+        const u = await x(t);
+        s = await Y(u, r.user_timezone), await V(s), a = !0;
+      } catch (u) {
+        if (console.error(`[ServiceWorker] Error fetching own LeetCode profile for ${t}:`, u), !s)
+          return {
+            success: !1,
+            error: `Failed to fetch LeetCode data for ${t}: ${u.message}`,
+            isLeetCodeError: !0
+          };
+      }
+    }
+    let n = await ee();
+    const c = await Ne();
+    let i = e;
+    if (!i && c.length > 0) {
+      for (const u of c)
+        if (!n[u] || te(n[u]?.lastUpdated)) {
+          i = !0;
+          break;
+        }
+    }
+    if (i && c.length > 0) {
+      console.log("[ServiceWorker] Syncing friends data...");
+      for (const u of c)
+        if (u.toLowerCase() !== t.toLowerCase())
+          try {
+            const m = await x(u), _ = await Y(m, r.user_timezone);
+            await ce(u, _), await Ge(je);
+          } catch (m) {
+            console.warn(`[ServiceWorker] Error updating friend ${u}:`, m.message);
+          }
+      n = await ee();
+    }
+    const l = { ...n };
+    return s && (l[t] = s), {
+      success: !0,
+      ownProfile: s,
+      friends: l,
+      refreshed: a || i
+    };
+  } catch (r) {
+    return console.error("[ServiceWorker] handleFetchStats error:", r), { success: !1, error: r.message };
+  }
+}
+async function Kt(e = !1) {
+  try {
+    const r = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), t = r.my_leetcode_username;
+    if (!t)
+      return { success: !1, error: "No LeetCode username configured" };
+    let s = await oe();
+    if (e || !s || te(s.lastUpdated)) {
+      const o = await x(t);
+      s = await Y(o, r.user_timezone), await V(s);
+    }
+    return { success: !0, ownProfile: s };
+  } catch (r) {
+    return console.error("[ServiceWorker] handleFetchOwnProfile error:", r), { success: !1, error: r.message };
+  }
+}
+async function Xt(e) {
+  try {
+    const r = e;
+    let t;
+    try {
+      t = Ot(e);
+    } catch (n) {
+      return { success: !1, error: n.message };
+    }
+    if (await ne(t))
+      return { success: !1, error: `${r} is already in your friends list` };
+    const a = await x(r), o = await Y(a);
+    return await ce(t, o), { success: !0, message: `${r} added successfully`, data: o };
+  } catch (r) {
+    return console.error("[ServiceWorker] handleAddFriend error:", r), { success: !1, error: r.message || "User not found or profile is private" };
+  }
+}
+async function Zt(e) {
+  try {
+    return await wt(e), { success: !0, message: `${e} removed` };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function er() {
+  try {
+    return { success: !0, friends: await ee() };
+  } catch (e) {
+    return { success: !1, error: e.message };
+  }
+}
+async function tr(e) {
+  try {
+    if (!e) return { success: !1, error: "Problem data required" };
+    const t = (await chrome.storage.local.get("problem_queue")).problem_queue || [];
+    if (t.some((o) => o.slug === e.slug || o.id === e.slug))
+      return { success: !1, error: "Problem already in queue", alreadyExists: !0 };
+    const a = {
+      ...e,
+      id: e.slug || `problem-${Date.now()}`,
+      addedAt: Date.now(),
+      status: e.status || "pending"
+    };
+    return t.push(a), await chrome.storage.local.set({ problem_queue: t }), { success: !0, message: "Added to problem queue" };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function rr(e, r) {
+  try {
+    const t = await chrome.storage.local.get(["my_leetcode_username", "user_timezone", "problem_queue"]), s = D(Math.floor(Date.now() / 1e3), t.user_timezone);
+    if (await chrome.storage.local.set({ last_solve_date: s }), console.log(`[ServiceWorker] Solve recorded today (${s}) — Hardcore Mode unlocked!`), await v(), t.problem_queue && Array.isArray(t.problem_queue)) {
+      const a = t.problem_queue.map((o) => o.slug === e || o.id === e || r && o.title === r ? { ...o, status: "completed" } : o);
+      await chrome.storage.local.set({ problem_queue: a });
+    }
+    return Je().catch(console.error), { success: !0 };
+  } catch (t) {
+    return console.error("[ServiceWorker] handleSubmissionAccepted error:", t), { success: !1, error: t.message };
+  }
+}
+async function sr() {
+  try {
+    const e = await fetch("https://leetcode.com/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "query globalData { userStatus { isSignedIn username } }" })
+    });
+    if (!e.ok) throw new Error(`HTTP error ${e.status}`);
+    const r = await e.json();
+    return r.data?.userStatus?.isSignedIn && r.data?.userStatus?.username ? { success: !0, username: r.data.userStatus.username } : { success: !1, error: "Not logged in to LeetCode" };
+  } catch (e) {
+    return { success: !1, error: e.message };
+  }
+}
+async function Je() {
+  try {
+    const e = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), r = e.my_leetcode_username, t = e.user_timezone, s = await Ne(), a = r ? [.../* @__PURE__ */ new Set([r, ...s])] : s;
+    console.log(`[ServiceWorker] Syncing ${a.length} profile(s): ${a.join(", ")}`);
+    const o = [];
+    if (r)
+      try {
+        const n = await Oe(r);
+        if (n && n.length > 0) {
+          const i = [];
+          for (const l of n)
+            o.push({
+              type: "roast",
+              username: l.sender_username,
+              message: `${l.sender_username} roasted you: "${l.content}" 🔥`,
+              priority: 2
+            }), l.status === "sent" && i.push(l.id);
+          i.length > 0 && await ht(i);
+        }
+        const c = await j(r);
+        if (c?.pending_roasts && c.pending_roasts.length > 0) {
+          for (const i of c.pending_roasts)
+            o.push({
+              type: "roast",
+              username: i.from,
+              message: `${i.from} roasted you: "${i.message}" 🔥`,
+              priority: 2
+            });
+          await Pe();
+        }
+      } catch (n) {
+        console.warn("[ServiceWorker] Error checking pending roasts:", n);
+      }
+    for (const n of a)
+      try {
+        const c = await ne(n), i = await x(n), l = await Y(i, t);
+        if (await ce(n, l), r && n.toLowerCase() === r.toLowerCase()) {
+          if (await V(l), Me(l.allAcceptedSubmissions, l.submissionCalendar, t)) {
+            const u = D(Math.floor(Date.now() / 1e3), t);
+            await chrome.storage.local.set({ last_solve_date: u });
+          }
+          await v();
+        }
+        if (!await xe()) {
+          const u = await ar(n, c, l, r);
+          o.push(...u), r && n.toLowerCase() === r.toLowerCase() && Ht(l.allAcceptedSubmissions, l.stats.streak) && o.push({
+            username: "You",
+            type: "streak_at_risk",
+            message: xt("You", "streak_at_risk", { streak: l.stats.streak }),
+            priority: 3
+          });
+        }
+        await Ge(je);
+      } catch (c) {
+        console.warn(`[ServiceWorker] Error syncing ${n}:`, c);
+      }
+    o.length > 0 && await Fe(o);
+  } catch (e) {
+    console.error("[ServiceWorker] syncAllFriends error:", e);
+  }
+}
+async function ar(e, r, t, s) {
+  const a = [];
+  if (s && e.toLowerCase() === s.toLowerCase())
+    return a;
+  if (r?.stats && t?.stats) {
+    const o = r.stats.total || 0, n = t.stats.total || 0;
+    if (n > o) {
+      const c = n - o;
+      let i = "a problem";
+      t.recentSubmissions && t.recentSubmissions.length > 0 && (i = t.recentSubmissions[0].title || i), a.push({
+        username: e,
+        type: "new_submission",
+        message: `${e} just solved ${c === 1 ? `"${i}"` : `${c} problems`}! 🎯`,
+        priority: 1
+      });
+    }
+  }
+  if (t.stats?.streak && Mt(t.stats.streak)) {
+    const o = r?.stats?.streak || 0;
+    t.stats.streak > o && a.push({
+      username: e,
+      type: "milestone",
+      message: `${e} reached a ${t.stats.streak}-day streak! 🔥`,
+      priority: 2
+    });
+  }
+  return a;
+}
+async function Y(e, r = null) {
+  const { profile: t, contestRanking: s, submissionCalendar: a, allAcceptedSubmissions: o } = e, { currentStreak: n, longestStreak: c } = It(
+    o || [],
+    a || {},
+    r
+  ), i = Nt(t.submitStats?.acSubmissionNum);
+  return {
+    profile: {
+      username: t.username,
+      realName: t.profile?.realName || "",
+      avatar: t.profile?.userAvatar || "",
+      ranking: t.profile?.ranking || 0
+    },
+    stats: {
+      ...i,
+      streak: n,
+      longestStreak: c
+    },
+    contest: {
+      rating: Math.round(s?.rating || 0),
+      attended: s?.attendedContestsCount || 0,
+      ranking: s?.globalRanking || 0
+    },
+    badges: t.badges || [],
+    recentSubmissions: t.recentSubmissions || [],
+    allAcceptedSubmissions: o || [],
+    submissionCalendar: a || {},
+    lastUpdated: Date.now()
+  };
+}
+async function or(e) {
+  try {
+    const r = await chrome.storage.local.get("my_leetcode_username"), t = e || r.my_leetcode_username;
+    if (!t) return { success: !1, error: "No username configured" };
+    const [s, a] = await Promise.all([
+      z(t),
+      vt(t, 10)
+    ]);
+    if (!s) return { success: !0, battle: null, history: a };
+    const o = await le(s.id);
+    return { success: !0, battle: s, results: o, history: a };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function nr(e, r, t) {
+  try {
+    const s = await chrome.storage.local.get("my_leetcode_username"), a = e || s.my_leetcode_username;
+    return await Et(a, r, t);
+  } catch (s) {
+    return { success: !1, error: s.message };
+  }
+}
+async function cr(e, r, t) {
+  try {
+    const s = await chrome.storage.local.get("my_leetcode_username"), a = r || s.my_leetcode_username;
+    return await bt(e, a, t);
+  } catch (s) {
+    return { success: !1, error: s.message };
+  }
+}
+async function ir(e, r, t, s) {
+  try {
+    const a = await chrome.storage.local.get("my_leetcode_username"), o = r || a.my_leetcode_username;
+    return await Tt(e, o, t, s);
+  } catch (a) {
+    return { success: !1, error: a.message };
+  }
+}
+async function lr(e, r) {
+  try {
+    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
+    return await At(e, s);
+  } catch (t) {
+    return { success: !1, error: t.message };
+  }
+}
+async function ur(e) {
+  try {
+    const t = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
+    if (!t) return { success: !1, error: "No username configured" };
+    const s = await z(t);
+    return s ? await kt(s.id, t, {
+      submissionId: e.submissionId,
+      accepted: e.accepted,
+      runtime_ms: e.runtime_ms,
+      memory_mb: e.memory_mb,
+      language: e.language,
+      attempts: e.attempts,
+      problemSlug: e.problemSlug
+    }) : { success: !1, error: "No active battle in progress" };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function dr(e, r) {
+  try {
+    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
+    return await Rt(e, s);
+  } catch (t) {
+    return { success: !1, error: t.message };
+  }
+}
+async function fr(e, r) {
+  try {
+    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
+    return await Dt(e, s);
+  } catch (t) {
+    return { success: !1, error: t.message };
+  }
+}
+async function mr(e) {
+  try {
+    const r = await chrome.storage.local.get("my_leetcode_username"), t = e || r.my_leetcode_username;
+    return t && await Lt(t), { success: !0 };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function hr(e) {
+  try {
+    if (!e?.length) return { success: !0, presenceMap: {} };
+    const r = await Ut(e);
+    return { success: !0, presenceMap: Object.fromEntries(r) };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function _r(e, r, t) {
+  try {
+    return await Ue(e, r, t) ? { success: !0 } : { success: await gt(e, r, t) };
+  } catch (s) {
+    return { success: !1, error: s.message };
+  }
+}
+function Ge(e) {
+  return new Promise((r) => setTimeout(r, e));
 }

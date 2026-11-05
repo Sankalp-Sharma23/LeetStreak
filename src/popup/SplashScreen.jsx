@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-function SplashScreen({ onVideoEnd, showLoadingMessage = false }) {
+function SplashScreen({ onVideoEnd }) {
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);
 

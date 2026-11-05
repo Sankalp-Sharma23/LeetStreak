@@ -78,6 +78,7 @@ export default defineConfig(() => {
         input: {
           popup: path.resolve(__dirname, 'popup.html'),
           options: path.resolve(__dirname, 'options.html'),
+          blocked: path.resolve(__dirname, 'blocked.html'),
         },
         output: {
           entryFileNames: 'assets/[name]-[hash].js',

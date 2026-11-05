@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { 
   Flame, Rocket, Zap, Star, Lightbulb, PartyPopper, Dumbbell, 
-  Crown, Medal, Trophy, Scale, Sprout, Target, BarChart3 
+  Crown, Medal, Trophy, Scale, Sprout, Target, BarChart3,
+  Download, FileText, FileSpreadsheet
 } from 'lucide-react';
 import { 
   generateInsights, 
@@ -9,6 +10,7 @@ import {
   analyzeTopicPerformance,
   compareWithFriends 
 } from '../shared/insights-generator';
+import { exportToCSV, exportToPDF } from '../shared/export-manager';
 
 export default function InsightsPanelEnhanced({ userData, friendsData = [] }) {
   const [insights, setInsights] = useState([]);
@@ -205,6 +207,32 @@ export default function InsightsPanelEnhanced({ userData, friendsData = [] }) {
       {/* Analytics Tab */}
       {activeTab === 'analytics' && (
         <div className="space-y-3">
+          {/* Export Actions */}
+          <div className="bg-surface border border-surfaceHover rounded-xl p-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Download className="w-4 h-4 text-primary" />
+              <span className="text-xs font-semibold text-text-main">Export Analytics</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => exportToCSV(userData)}
+                className="px-2.5 py-1.5 bg-surfaceHover hover:bg-surfaceHover/80 text-text-primary text-[11px] font-medium rounded-lg transition-colors flex items-center gap-1.5 border border-surfaceHover cursor-pointer"
+                title="Export as CSV"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-accent" />
+                CSV
+              </button>
+              <button
+                onClick={() => exportToPDF(userData)}
+                className="px-2.5 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-primary/20 cursor-pointer"
+                title="Export as PDF"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                PDF
+              </button>
+            </div>
+          </div>
+
           {/* Success Metrics */}
           {successMetrics && (
             <div className="bg-surface border border-primary/30 rounded-xl p-4">

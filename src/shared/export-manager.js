@@ -5,7 +5,19 @@
 export function exportToCSV(userData) {
   if (!userData) return;
 
-  const { profile, stats, submissionCalendar } = userData;
+  const profile = userData.profile || {
+    username: userData.username || 'user',
+    realName: userData.realName || 'N/A',
+    ranking: userData.ranking || 'N/A'
+  };
+  const stats = userData.stats || {
+    streak: userData.streak || 0,
+    total: userData.totalSolved || userData.total || 0,
+    easy: userData.easySolved || userData.easy || 0,
+    medium: userData.mediumSolved || userData.medium || 0,
+    hard: userData.hardSolved || userData.hard || 0
+  };
+  const submissionCalendar = userData.submissionCalendar || {};
   
   // Create CSV content
   let csvContent = "LeetCode Statistics Report\n\n";
@@ -54,7 +66,18 @@ export function exportToCSV(userData) {
 export function exportToPDF(userData) {
   if (!userData) return;
 
-  const { profile, stats } = userData;
+  const profile = userData.profile || {
+    username: userData.username || 'user',
+    realName: userData.realName || 'N/A',
+    ranking: userData.ranking || 'N/A'
+  };
+  const stats = userData.stats || {
+    streak: userData.streak || 0,
+    total: userData.totalSolved || userData.total || 0,
+    easy: userData.easySolved || userData.easy || 0,
+    medium: userData.mediumSolved || userData.medium || 0,
+    hard: userData.hardSolved || userData.hard || 0
+  };
   
   // Create a simple HTML structure for PDF
   const htmlContent = `

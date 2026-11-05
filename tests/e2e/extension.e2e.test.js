@@ -141,7 +141,7 @@ describe('E2E Tests - LeetStreak Extension', () => {
         await page.waitForTimeout(2000);
       }
 
-      const pageContent = await page.evaluate(() => document.body.innerText);
+      const _pageContent = await page.evaluate(() => document.body.innerText);
       console.log('✅ Friend addition flow completed');
     });
   });
@@ -208,7 +208,7 @@ describe('E2E Tests - LeetStreak Extension', () => {
       await page.waitForTimeout(2000);
 
       // Assert: Streak should be 0 or show "broken"
-      const pageText = await page.evaluate(() => document.body.innerText);
+      const _pageText = await page.evaluate(() => document.body.innerText);
       
       console.log('✅ Time Travel: 48-hour gap detected');
     });

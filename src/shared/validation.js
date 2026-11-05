@@ -5,15 +5,13 @@
 
 import { 
   escapeHtml as escapeHtmlUtil, 
-  sanitizeCommitMessage as sanitizeCommitUtil,
   validateUsername as validateUsernameUtil,
-  isValidGitHubToken,
   isValidUrl,
   RateLimiter
 } from './security-utils.js';
 
 // Re-export for convenience
-export { isValidGitHubToken, isValidUrl, RateLimiter };
+export { isValidUrl, RateLimiter };
 
 /**
  * Validate and normalize username
@@ -38,11 +36,4 @@ export function escapeHtml(text) {
   return escapeHtmlUtil(text);
 }
 
-/**
- * Sanitize commit message for GitHub
- * @param {string} message - Raw commit message
- * @returns {string} Sanitized message
- */
-export function sanitizeCommitMessage(message) {
-  return sanitizeCommitUtil(message);
-}
+

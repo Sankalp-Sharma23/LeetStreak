@@ -2,18 +2,22 @@
   "manifest_version": 3,
   "name": "LeetStreak",
   "version": "1.0.0",
-  "description": "Track LeetCode streaks with friends",
+  "description": "Track LeetCode streaks with friends and block distractions until you solve",
   "permissions": [
     "storage",
     "alarms",
     "notifications",
+    "scripting",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "declarativeNetRequestFeedback",
+    "webNavigation",
     "tabs"
   ],
   "host_permissions": [
     "https://leetcode.com/*",
     "https://leetcode.com/graphql",
-    "https://api.github.com/*",
-    "https://github.com/*"
+    "*://*/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests; report-uri /__/csp-report",
@@ -39,5 +43,11 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*", "blocked.html", "assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

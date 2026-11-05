@@ -7,15 +7,15 @@ function DailyQuestion() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
-  const loadDailyQuestion = async () => {
-    setLoading(true);
-    const dailyQuestion = await getDailyQuestion();
-    setQuestion(dailyQuestion);
-    setLoading(false);
-  };
-
   useEffect(() => {
-    loadDailyQuestion(); // eslint-disable-line react-hooks/exhaustive-deps
+    let mounted = true;
+    getDailyQuestion().then(dailyQuestion => {
+      if (mounted) {
+        setQuestion(dailyQuestion);
+        setLoading(false);
+      }
+    });
+    return () => { mounted = false; };
   }, []);
 
   const getDifficultyConfig = (difficulty) => {
@@ -101,7 +101,13 @@ function DailyQuestion() {
           Check back later or try refreshing the extension
         </p>
         <button
-          onClick={loadDailyQuestion}
+          onClick={() => {
+            setLoading(true);
+            getDailyQuestion().then(q => {
+              setQuestion(q);
+              setLoading(false);
+            });
+          }}
           className="w-full mt-2 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg text-xs font-semibold transition-colors"
         >
           🔄 Try Again

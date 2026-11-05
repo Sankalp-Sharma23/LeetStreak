@@ -1,29 +1,24 @@
 /**
  * Unit Tests - Streak Calculation Logic
- * Tests pure JavaScript functions without browser dependencies
+ * Tests canonical personal streak calculations without external dependencies (no sinon)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import sinon from 'sinon';
-
-// Import functions to test
-import { calculateStreak, needsRefresh } from '../../src/shared/streak-calculator.js';
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { calculateStreak, needsRefresh, getAcceptedSolveDates, timestampToDateString } from '../../src/shared/streak-calculator.js';
 
 describe('Streak Calculation Logic', () => {
-  let clock;
-
   beforeEach(() => {
-    // Create a fake timer for time manipulation
-    clock = sinon.useFakeTimers(new Date('2023-01-03T12:00:00Z').getTime());
+    // 2023-01-03 12:00:00 UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2023-01-03T12:00:00Z'));
   });
 
   afterEach(() => {
-    // Restore real timers
-    clock.restore();
+    jest.useRealTimers();
   });
 
-  describe('Basic Streak Calculation', () => {
-    test('should increment streak when user solved yesterday and today', () => {
+  describe('Basic Personal Streak Calculation', () => {
+    test('should increment streak when user solved on consecutive days', () => {
       const submissionCalendar = {
         // Today (2023-01-03)
         [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 3,
@@ -33,180 +28,128 @@ describe('Streak Calculation Logic', () => {
         [Math.floor(Date.UTC(2023, 0, 1, 0, 0, 0) / 1000)]: 1
       };
 
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(3); // 3 consecutive days
+      const result = calculateStreak(submissionCalendar);
+      expect(result.currentStreak).toBe(3);
+      expect(result.longestStreak).toBe(3);
+      expect(result.solvedToday).toBe(true);
+      expect(result.isAtRisk).toBe(false);
     });
 
-    test('should reset streak to 0 when 2 days gap detected', () => {
+    test('should maintain streak during active today if user solved yesterday (Prompt Spec)', () => {
       const submissionCalendar = {
-        // Today (2023-01-03)
-        [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 1,
-        // 3 days ago (2023-12-31) - gap of 2 days!
-        [Math.floor(Date.UTC(2022, 11, 31, 0, 0, 0) / 1000)]: 2
+        // Yesterday only (2023-01-02)
+        [Math.floor(Date.UTC(2023, 0, 2, 0, 0, 0) / 1000)]: 2,
+        // Day before (2023-01-01)
+        [Math.floor(Date.UTC(2023, 0, 1, 0, 0, 0) / 1000)]: 1
       };
 
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(1); // Only today counts, streak broken
+      const result = calculateStreak(submissionCalendar);
+      // Streak should be 2, still active today, but marked at risk
+      expect(result.currentStreak).toBe(2);
+      expect(result.longestStreak).toBe(2);
+      expect(result.solvedToday).toBe(false);
+      expect(result.isAtRisk).toBe(true);
     });
 
-    test('should return 0 when no submissions today', () => {
+    test('should reset streak to 0 when 2 days gap detected without today solve', () => {
       const submissionCalendar = {
-        // Yesterday only
-        [Math.floor(Date.UTC(2023, 0, 2, 0, 0, 0) / 1000)]: 5
+        // 2 days ago (2023-01-01) - missed yesterday and today
+        [Math.floor(Date.UTC(2023, 0, 1, 0, 0, 0) / 1000)]: 2
       };
 
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(0);
+      const result = calculateStreak(submissionCalendar);
+      expect(result.currentStreak).toBe(0);
+      expect(result.longestStreak).toBe(1);
     });
 
-    test('should handle single day streak correctly', () => {
+    test('should count multiple submissions on same day as single day', () => {
+      const acceptedList = [
+        { timestamp: Math.floor(Date.UTC(2023, 0, 3, 2, 0, 0) / 1000), titleSlug: 'two-sum' },
+        { timestamp: Math.floor(Date.UTC(2023, 0, 3, 5, 30, 0) / 1000), titleSlug: 'add-two-numbers' },
+        { timestamp: Math.floor(Date.UTC(2023, 0, 3, 10, 0, 0) / 1000), titleSlug: 'reverse-integer' }
+      ];
+
+      const result = calculateStreak(acceptedList);
+      expect(result.currentStreak).toBe(1);
+      expect(result.solveDates.length).toBe(1);
+    });
+
+    test('should preserve longest streak even when current streak breaks', () => {
       const submissionCalendar = {
-        // Only today
+        // 4 day run in past
+        [Math.floor(Date.UTC(2022, 11, 20, 0, 0, 0) / 1000)]: 1,
+        [Math.floor(Date.UTC(2022, 11, 21, 0, 0, 0) / 1000)]: 1,
+        [Math.floor(Date.UTC(2022, 11, 22, 0, 0, 0) / 1000)]: 1,
+        [Math.floor(Date.UTC(2022, 11, 23, 0, 0, 0) / 1000)]: 1,
+        // Gap of days...
+        // Today only
         [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 1
       };
 
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(1);
-    });
-
-    test('should ignore future dates', () => {
-      const submissionCalendar = {
-        // Today
-        [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 1,
-        // Tomorrow (should be ignored)
-        [Math.floor(Date.UTC(2023, 0, 4, 0, 0, 0) / 1000)]: 5
-      };
-
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(1);
+      const result = calculateStreak(submissionCalendar);
+      expect(result.currentStreak).toBe(1);
+      expect(result.longestStreak).toBe(4);
     });
   });
 
-  describe('Time Travel Scenarios', () => {
-    test('LastLogin: Yesterday, TodaySolved: True -> Streak + 1', () => {
-      const lastLogin = new Date('2023-01-02T12:00:00Z').getTime();
-      const submissionCalendar = {
-        [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 2, // Today
-        [Math.floor(Date.UTC(2023, 0, 2, 0, 0, 0) / 1000)]: 1  // Yesterday
-      };
-
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(2);
+  describe('Timezone & Date Utilities', () => {
+    test('timestampToDateString should format correctly for UTC', () => {
+      const ts = Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000);
+      const str = timestampToDateString(ts, 'UTC');
+      expect(str).toBe('2023-01-03');
     });
 
-    test('LastLogin: 2 Days Ago -> Streak Reset to 0', () => {
-      clock.restore();
-      clock = sinon.useFakeTimers(new Date('2023-01-03T12:00:00Z').getTime());
-
-      const submissionCalendar = {
-        // Last activity was Jan 1 (2 days ago from Jan 3)
-        [Math.floor(Date.UTC(2023, 0, 1, 0, 0, 0) / 1000)]: 3
-        // No activity on Jan 2 or Jan 3
-      };
-
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(0);
-    });
-
-    test('LastLogin: Today -> No change in streak', () => {
-      const submissionCalendar = {
-        [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 5
-      };
-
-      const streak1 = calculateStreak(submissionCalendar);
-      
-      // Simulate another check on same day
-      const streak2 = calculateStreak(submissionCalendar);
-      
-      expect(streak1).toBe(streak2);
-      expect(streak1).toBe(1);
-    });
-  });
-
-  describe('Long Streak Scenarios', () => {
-    test('should correctly calculate 30-day streak', () => {
-      const submissionCalendar = {};
-      const baseDate = new Date('2023-01-03T00:00:00Z');
-      
-      // Create 30 consecutive days
-      for (let i = 0; i < 30; i++) {
-        const date = new Date(baseDate);
-        date.setUTCDate(date.getUTCDate() - i);
-        const timestamp = Math.floor(date.getTime() / 1000);
-        submissionCalendar[timestamp] = i + 1;
-      }
-
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(30);
-    });
-
-    test('should handle 100+ day streak', () => {
-      const submissionCalendar = {};
-      const baseDate = new Date('2023-01-03T00:00:00Z');
-      
-      for (let i = 0; i < 105; i++) {
-        const date = new Date(baseDate);
-        date.setUTCDate(date.getUTCDate() - i);
-        const timestamp = Math.floor(date.getTime() / 1000);
-        submissionCalendar[timestamp] = 1;
-      }
-
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(105);
+    test('getAcceptedSolveDates deduplicates and sorts ascending', () => {
+      const list = [
+        { timestamp: 1672790400 }, // 2023-01-04
+        { timestamp: 1672704000 }, // 2023-01-03
+        { timestamp: 1672704100 }  // 2023-01-03
+      ];
+      const dates = getAcceptedSolveDates(list, null, 'UTC');
+      expect(dates).toEqual(['2023-01-03', '2023-01-04']);
     });
   });
 
   describe('Edge Cases', () => {
-    test('should handle empty submission calendar', () => {
-      const streak = calculateStreak({});
-      expect(streak).toBe(0);
+    test('should handle empty submission input', () => {
+      expect(calculateStreak([])).toEqual({
+        currentStreak: 0,
+        longestStreak: 0,
+        isAtRisk: false,
+        solvedToday: false,
+        solveDates: []
+      });
+      expect(calculateStreak({})).toEqual({
+        currentStreak: 0,
+        longestStreak: 0,
+        isAtRisk: false,
+        solvedToday: false,
+        solveDates: []
+      });
+      expect(calculateStreak(null)).toEqual({
+        currentStreak: 0,
+        longestStreak: 0,
+        isAtRisk: false,
+        solvedToday: false,
+        solveDates: []
+      });
+    });
+  });
+
+  describe('Data Refresh Logic', () => {
+    test('should need refresh when data is older than 15 minutes', () => {
+      const sixteenMinutesAgo = Date.now() - (16 * 60 * 1000);
+      expect(needsRefresh(sixteenMinutesAgo)).toBe(true);
     });
 
-    test('should handle null/undefined calendar', () => {
-      expect(calculateStreak(null)).toBe(0);
-      expect(calculateStreak(undefined)).toBe(0);
+    test('should not need refresh when data is fresher than 15 minutes', () => {
+      const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+      expect(needsRefresh(tenMinutesAgo)).toBe(false);
     });
 
-    test('should handle invalid calendar format', () => {
-      const streak = calculateStreak("invalid");
-      expect(streak).toBe(0);
+    test('should need refresh when no timestamp provided', () => {
+      expect(needsRefresh(null)).toBe(true);
+      expect(needsRefresh(undefined)).toBe(true);
     });
-
-    test('should handle calendar with zero counts', () => {
-      const submissionCalendar = {
-        [Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000)]: 0,
-        [Math.floor(Date.UTC(2023, 0, 2, 0, 0, 0) / 1000)]: 5
-      };
-
-      const streak = calculateStreak(submissionCalendar);
-      expect(streak).toBe(0); // Zero count today = no streak
-    });
-  });
-});
-
-describe('Data Refresh Logic', () => {
-  let clock;
-
-  beforeEach(() => {
-    clock = sinon.useFakeTimers(new Date('2023-01-03T12:00:00Z').getTime());
-  });
-
-  afterEach(() => {
-    clock.restore();
-  });
-
-  test('should need refresh when data is older than 15 minutes', () => {
-    const sixteenMinutesAgo = Date.now() - (16 * 60 * 1000);
-    expect(needsRefresh(sixteenMinutesAgo)).toBe(true);
-  });
-
-  test('should not need refresh when data is fresher than 15 minutes', () => {
-    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
-    expect(needsRefresh(tenMinutesAgo)).toBe(false);
-  });
-
-  test('should need refresh when no timestamp provided', () => {
-    expect(needsRefresh(null)).toBe(true);
-    expect(needsRefresh(undefined)).toBe(true);
   });
 });

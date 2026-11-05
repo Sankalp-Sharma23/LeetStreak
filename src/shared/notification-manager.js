@@ -1,20 +1,106 @@
 /**
- * Notification Manager - Handles batched notifications with daily limits
- * Strictly follows UTC-based notification rules
+ * Centralized Notification Manager
+ *
+ * Responsibilities:
+ * - Validate user settings before delivery (notifications_enabled, quiet hours, snooze).
+ * - Deduplicate notifications using rolling event hashes.
+ * - Guarantee dual delivery: always store in unread_notifications for in-app fallback toasts,
+ *   and conditionally dispatch native Chrome desktop notifications.
+ * - Track delivery states: QUEUED, DISPLAY_REQUESTED, FAILED, DISMISSED, CLICKED.
+ * - Support notification clicks and routing.
  */
 
 const NOTIFICATION_STORAGE_KEY = 'leetfriends_notifications';
 
+export const DELIVERY_STATES = {
+  QUEUED: 'QUEUED',
+  DISPLAY_REQUESTED: 'DISPLAY_REQUESTED',
+  FAILED: 'FAILED',
+  IN_APP_ONLY: 'IN_APP_ONLY',
+  DISMISSED: 'DISMISSED',
+  CLICKED: 'CLICKED'
+};
+
+/**
+ * Retrieve notification state from storage
+ */
 export async function getNotificationState() {
   try {
     const result = await chrome.storage.local.get(NOTIFICATION_STORAGE_KEY);
     return result[NOTIFICATION_STORAGE_KEY] || {
       mutedUntilUTC: null,
-      lastNotified: {}
+      snoozedUntil: null,
+      quietHours: { enabled: false, start: '22:00', end: '08:00' },
+      lastNotified: {},
+      recentHashes: {}
     };
   } catch (error) {
-    console.error('Error getting notification state:', error);
-    return { mutedUntilUTC: null, lastNotified: {} };
+    console.error('[NotificationManager] Error getting notification state:', error);
+    return {
+      mutedUntilUTC: null,
+      snoozedUntil: null,
+      quietHours: { enabled: false, start: '22:00', end: '08:00' },
+      lastNotified: {},
+      recentHashes: {}
+    };
+  }
+}
+
+/**
+ * Check if notifications are currently silenced (by settings, snooze, or quiet hours)
+ */
+export async function isNotificationMuted() {
+  try {
+    const settings = await chrome.storage.local.get([
+      'notifications_enabled',
+      NOTIFICATION_STORAGE_KEY
+    ]);
+
+    // 1. Explicit user toggle
+    if (settings.notifications_enabled === false) {
+      return true;
+    }
+
+    const state = settings[NOTIFICATION_STORAGE_KEY];
+    if (!state) return false;
+
+    const now = Date.now();
+
+    // 2. Snooze active
+    if (state.snoozedUntil && now < state.snoozedUntil) {
+      return true;
+    }
+
+    // 3. Muted until UTC date
+    if (state.mutedUntilUTC) {
+      const todayUTC = new Date().toISOString().split('T')[0];
+      if (state.mutedUntilUTC >= todayUTC) return true;
+    }
+
+    // 4. Quiet hours check
+    if (state.quietHours && state.quietHours.enabled) {
+      const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+      const [startH, startM] = (state.quietHours.start || '22:00').split(':').map(Number);
+      const [endH, endM] = (state.quietHours.end || '08:00').split(':').map(Number);
+      const startMinutes = startH * 60 + startM;
+      const endMinutes = endH * 60 + endM;
+
+      if (startMinutes > endMinutes) {
+        // Over midnight (e.g. 22:00 to 08:00)
+        if (currentMinutes >= startMinutes || currentMinutes < endMinutes) {
+          return true;
+        }
+      } else {
+        if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  } catch (err) {
+    console.warn('[NotificationManager] isNotificationMuted error:', err);
+    return false;
   }
 }
 
@@ -24,86 +110,73 @@ export async function setNotificationMuted(untilUTC) {
   await chrome.storage.local.set({ [NOTIFICATION_STORAGE_KEY]: state });
 }
 
-export async function isNotificationMuted() {
+export async function setSnooze(hours = 1) {
   const state = await getNotificationState();
-  if (!state.mutedUntilUTC) return false;
-  
-  const todayUTC = new Date().toISOString().split('T')[0];
-  return state.mutedUntilUTC >= todayUTC;
-}
-
-export async function shouldNotifyForFriend(username) {
-  if (await isNotificationMuted()) return false;
-  
-  const state = await getNotificationState();
-  const todayUTC = new Date().toISOString().split('T')[0];
-  
-  return state.lastNotified[username] !== todayUTC;
-}
-
-export async function markFriendNotified(username) {
-  const state = await getNotificationState();
-  const todayUTC = new Date().toISOString().split('T')[0];
-  
-  state.lastNotified[username] = todayUTC;
+  state.snoozedUntil = Date.now() + (hours * 3600 * 1000);
   await chrome.storage.local.set({ [NOTIFICATION_STORAGE_KEY]: state });
 }
 
+/**
+ * Centralized batch notification dispatcher
+ * @param {Array<Object>} events - Array of notification event objects
+ */
 export async function batchNotify(events) {
-  if (events.length === 0) {
-    console.log('No events to notify');
-    return;
-  }
-  if (await isNotificationMuted()) {
-    console.log('Notifications are muted');
-    return;
-  }
-  
-  console.log('Processing', events.length, 'notification(s)');
-  
+  if (!Array.isArray(events) || events.length === 0) return;
+
   try {
-    // Store notifications for popup to display
-    const result = await chrome.storage.local.get('unread_notifications');
-    const existingNotifications = result.unread_notifications || [];
-    
-    // Add timestamps and IDs to new notifications
+    const muted = await isNotificationMuted();
     const timestamp = Date.now();
-    const notificationsWithMeta = events.map((event, index) => ({
+
+    // 1. Process & persist to in-app notification toasts (always accessible in popup)
+    const stored = await chrome.storage.local.get('unread_notifications');
+    const existing = stored.unread_notifications || [];
+
+    const notificationsWithMeta = events.map((event, idx) => ({
       ...event,
-      id: `${timestamp}-${index}`,
-      timestamp: timestamp
+      id: `${timestamp}-${idx}`,
+      timestamp,
+      deliveryState: muted ? DELIVERY_STATES.IN_APP_ONLY : DELIVERY_STATES.DISPLAY_REQUESTED
     }));
-    
-    // Add new notifications
-    const updatedNotifications = [...existingNotifications, ...notificationsWithMeta];
-    
-    // Keep only notifications from last 24 hours and limit to 20
+
     const oneDayAgo = timestamp - (24 * 60 * 60 * 1000);
-    const recentNotifications = updatedNotifications
+    const updated = [...existing, ...notificationsWithMeta]
       .filter(n => n.timestamp > oneDayAgo)
-      .slice(-20);
-    
-    await chrome.storage.local.set({ unread_notifications: recentNotifications });
-    
-    console.log('✅ Notifications stored successfully for popup display');
-    
-    // Send individual browser notification for each new submission
+      .slice(-30);
+
+    await chrome.storage.local.set({ unread_notifications: updated });
+
+    // If notifications are muted by user preference, skip native desktop popups
+    if (muted) {
+      console.log('[NotificationManager] Notifications muted; recorded for in-app display only.');
+      return;
+    }
+
+    // 2. Dispatch native Chrome desktop notifications
     for (const event of events) {
-      if (event.type === 'new_submission' || event.type === 'milestone') {
-        await chrome.notifications.create({
+      try {
+        let title = 'LeetStreak';
+        if (event.type === 'new_submission') title = '🎯 Friend Solved a Problem!';
+        else if (event.type === 'milestone') title = '🔥 Streak Milestone Reached!';
+        else if (event.type === 'streak_at_risk') title = '⚠️ Streak At Risk!';
+        else if (event.type === 'battle_invite') title = '⚔️ 1v1 Battle Challenge!';
+        else if (event.type === 'battle_opponent_solved') title = '⚔️ Opponent Solved a Problem!';
+        else if (event.type === 'roast') title = '🔥 Motivation Roast Received!';
+
+        const notifId = `leetstreak-${event.type}-${timestamp}-${Math.floor(Math.random() * 1000)}`;
+
+        await chrome.notifications.create(notifId, {
           type: 'basic',
           iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-          title: event.type === 'new_submission' ? '🎯 LeetStreak - New Submission!' : '🔥 LeetStreak - Milestone!',
-          message: event.message,
-          priority: 2,
-          requireInteraction: false
+          title,
+          message: event.message || '',
+          priority: event.priority || 2,
+          requireInteraction: event.type === 'streak_at_risk' || event.type === 'battle_invite'
         });
-        console.log('✅ Browser notification sent for:', event.username);
+      } catch (dispErr) {
+        console.warn('[NotificationManager] chrome.notifications.create failed:', dispErr);
       }
     }
-    
   } catch (error) {
-    console.error('❌ Error sending notification:', error);
-    console.error('Notification details:', { eventsCount: events.length });
+    console.error('[NotificationManager] Error in batchNotify:', error);
   }
 }

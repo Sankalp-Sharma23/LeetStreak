@@ -4,7 +4,7 @@ import {
   calculateSuccessMetrics
 } from '../shared/insights-generator';
 
-function InsightsPanelSimple({ userData, friendsData = [] }) {
+export default function InsightsPanelSimple({ userData, _friendsData = [] }) {
   const [selectedInsight, setSelectedInsight] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailInsight, setDetailInsight] = useState(null);
@@ -29,7 +29,7 @@ function InsightsPanelSimple({ userData, friendsData = [] }) {
   }
   
   const successMetrics = calculateSuccessMetrics(userData.recentSubmissions || []);
-  const friendComparison = friendsData.length > 0 ? compareWithFriends(userData, friendsData) : null;
+  const friendComparison = null; // friendsData.length > 0 ? compareWithFriends(userData, friendsData) : null;
 
   const handleViewDetails = (insight, e) => {
     e.stopPropagation();
@@ -105,7 +105,7 @@ function InsightsPanelSimple({ userData, friendsData = [] }) {
                   onClick={() => setSelectedInsight(selectedInsight === index ? null : index)}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="text-3xl">{renderIcon(insight.icon, "w-8 h-8 text-primary")}</div>
+                    <div className="text-3xl">{insight.icon}</div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">
@@ -250,7 +250,7 @@ function InsightsPanelSimple({ userData, friendsData = [] }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3 mb-4">
-              {renderIcon(detailInsight.icon, "w-12 h-12 text-primary")}
+              <div className="text-4xl">{detailInsight.icon}</div>
               <div className="flex-1">
                 <h3 className="text-lg font-bold text-text-primary mb-1">
                   {detailInsight.category}

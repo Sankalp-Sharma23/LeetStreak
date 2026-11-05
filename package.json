@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit",
+    "test:security": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/security",
     "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/integration",
     "test:e2e": "node tests/e2e/run-e2e.js",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e"
@@ -32,6 +33,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "fs-extra": "^11.3.3",
     "globals": "^16.5.0",
+    "jest": "^30.5.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "vite": "^7.2.4"

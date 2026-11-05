@@ -1,138 +1,69 @@
 import React, { useState } from 'react';
 import FriendCard from './FriendCard';
+import { Trophy, Flame, Award } from 'lucide-react';
+import { sortFriends } from '../shared/ranking-manager.js';
 
-function Leaderboard({ friends, myData, myUsername }) {
+export { getTotalSolved, getStreak, getRating, getUsername, sortFriends } from '../shared/ranking-manager.js';
+
+function Leaderboard({ friends, myData, myUsername, onRefresh, onRequireAuth }) {
   const [selectedFriend, setSelectedFriend] = useState(null);
-  const [timeFilter, setTimeFilter] = useState('all'); // 'all', 'week', 'month'
-
-  // Helper to check if friend solved today
-  const isSolvingToday = (submissionCalendar) => {
-    if (!submissionCalendar) return false;
-    const calendar = typeof submissionCalendar === 'string' ? JSON.parse(submissionCalendar) : submissionCalendar;
-    const today = new Date().toISOString().split('T')[0];
-    
-    for (const [timestamp, count] of Object.entries(calendar)) {
-      if (count > 0) {
-        const date = new Date(parseInt(timestamp) * 1000).toISOString().split('T')[0];
-        if (date === today) return true;
-      }
-    }
-    return false;
-  };
-
-  // Get problems solved in a time period
-  const getProblemsInPeriod = (submissionCalendar, period) => {
-    if (!submissionCalendar) return 0;
-    
-    try {
-      const calendar = typeof submissionCalendar === 'string' ? JSON.parse(submissionCalendar) : submissionCalendar;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      let startDate;
-      if (period === 'week') {
-        // This week (Monday to Sunday)
-        startDate = new Date(today);
-        const dayOfWeek = today.getDay();
-        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        startDate.setDate(today.getDate() - daysToMonday);
-      } else if (period === 'month') {
-        // This month
-        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-      } else {
-        return 0;
-      }
-      
-      startDate.setHours(0, 0, 0, 0);
-      const startTimestamp = Math.floor(startDate.getTime() / 1000);
-      
-      let count = 0;
-      for (const [timestamp, problemCount] of Object.entries(calendar)) {
-        if (parseInt(timestamp) >= startTimestamp && problemCount > 0) {
-          count += problemCount;
-        }
-      }
-      
-      return count;
-    } catch (error) {
-      console.error('Error calculating period problems:', error);
-      return 0;
-    }
-  };
+  const [sortBy, setSortBy] = useState('total'); // 'total', 'streak', 'rating'
 
   // Remove current user from friends list if they exist there, then add myData
-  const friendsWithoutMe = friends.filter(f => f.profile?.username !== myUsername);
+  const myUsernameLower = myUsername ? myUsername.toLowerCase() : '';
+  const friendsWithoutMe = (friends || []).filter(f => (f?.profile?.username || f?.username || '').toLowerCase() !== myUsernameLower);
   const allFriends = myData ? [...friendsWithoutMe, myData] : friendsWithoutMe;
 
-  // Sort friends based on selected time filter
-  const sortedFriends = [...allFriends].sort((a, b) => {
-    if (timeFilter === 'all') {
-      return (b.stats?.total || 0) - (a.stats?.total || 0);
-    } else if (timeFilter === 'week') {
-      const aWeekCount = getProblemsInPeriod(a.submissionCalendar, 'week');
-      const bWeekCount = getProblemsInPeriod(b.submissionCalendar, 'week');
-      return bWeekCount - aWeekCount;
-    } else if (timeFilter === 'month') {
-      const aMonthCount = getProblemsInPeriod(a.submissionCalendar, 'month');
-      const bMonthCount = getProblemsInPeriod(b.submissionCalendar, 'month');
-      return bMonthCount - aMonthCount;
-    }
-    return 0;
-  });
+  // Sort friends based on selected criteria with deterministic tiebreakers
+  const sortedFriends = sortFriends(allFriends, sortBy);
 
   const handleCardClick = (friend) => {
-    if (!friend || !friend.profile) return;
-    setSelectedFriend(selectedFriend?.profile?.username === friend.profile.username ? null : friend);
+    const friendUsername = friend?.profile?.username || friend?.username;
+    const selectedUsername = selectedFriend?.profile?.username || selectedFriend?.username;
+    if (!friendUsername) return;
+    setSelectedFriend(selectedUsername === friendUsername ? null : friend);
   };
 
   return (
     <div className="bg-background">
-      {/* Filter Tabs */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-surfaceHover px-4 py-3">
-        <div className="flex items-center gap-2">
+      {/* Sort Selector Bar */}
+      <div className="px-4 pt-3 pb-1 flex items-center justify-between gap-1">
+        <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Rank by:</span>
+        <div className="flex bg-surface rounded-xl p-0.5 border border-surfaceHover/50">
           <button
-            onClick={() => setTimeFilter('all')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all ${
-              timeFilter === 'all' 
-                ? 'bg-primary text-inverted shadow-lg' 
-                : 'bg-surface text-text-muted hover:text-text-main'
+            onClick={() => setSortBy('total')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+              sortBy === 'total'
+                ? 'bg-primary text-inverted shadow-sm'
+                : 'text-text-muted hover:text-text-main'
             }`}
           >
-            All Time
+            <Trophy className="w-3 h-3" />
+            <span>Solved</span>
           </button>
           <button
-            onClick={() => setTimeFilter('week')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all ${
-              timeFilter === 'week' 
-                ? 'bg-primary text-inverted shadow-lg' 
-                : 'bg-surface text-text-muted hover:text-text-main'
+            onClick={() => setSortBy('streak')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+              sortBy === 'streak'
+                ? 'bg-primary text-inverted shadow-sm'
+                : 'text-text-muted hover:text-text-main'
             }`}
           >
-            This Week
+            <Flame className="w-3 h-3 text-orange-400" />
+            <span>Streak</span>
           </button>
           <button
-            onClick={() => setTimeFilter('month')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all ${
-              timeFilter === 'month' 
-                ? 'bg-primary text-inverted shadow-lg' 
-                : 'bg-surface text-text-muted hover:text-text-main'
+            onClick={() => setSortBy('rating')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+              sortBy === 'rating'
+                ? 'bg-primary text-inverted shadow-sm'
+                : 'text-text-muted hover:text-text-main'
             }`}
           >
-            This Month
+            <Award className="w-3 h-3" />
+            <span>Rating</span>
           </button>
         </div>
-        
-        {/* Active Today Indicator */}
-        {allFriends.filter(f => f && f.submissionCalendar && isSolvingToday(f.submissionCalendar)).length > 0 && (
-          <div className="mt-2 px-3 py-1.5 bg-secondary/10 border border-secondary/30 rounded-lg flex items-center gap-2">
-            <span className="text-lg animate-bounce">🔥</span>
-            <span className="text-xs text-secondary font-semibold">
-              {allFriends.filter(f => f && f.submissionCalendar && isSolvingToday(f.submissionCalendar)).length} {
-                allFriends.filter(f => f && f.submissionCalendar && isSolvingToday(f.submissionCalendar)).length === 1 ? 'person' : 'people'
-              } solving today!
-            </span>
-          </div>
-        )}
       </div>
 
       {sortedFriends.length === 0 ? (
@@ -141,30 +72,21 @@ function Leaderboard({ friends, myData, myUsername }) {
         </div>
       ) : (
         <div className="p-4 space-y-2.5 animate-slide-up">
-          {sortedFriends.filter(f => f && f.profile).map((friend, index) => {
-            
-            // Calculate filtered stats for display
-            let displayStats = friend.stats;
-            if (timeFilter !== 'all') {
-              const problemsInPeriod = getProblemsInPeriod(friend.submissionCalendar, timeFilter);
-              displayStats = {
-                ...friend.stats,
-                total: problemsInPeriod,
-                // Note: We don't have difficulty breakdown for time periods, so we show total only
-                _filteredByTime: true
-              };
-            }
-            
+          {sortedFriends.filter(f => f && (f.profile?.username || f.username)).map((friend, index) => {
+            const friendUser = friend.profile?.username || friend.username;
+            const isSelected = (selectedFriend?.profile?.username || selectedFriend?.username) === friendUser;
             return (
-              <div key={friend.profile.username}>
+              <div key={friendUser}>
                 <FriendCard
-                  friend={{ ...friend, stats: displayStats }}
+                  friend={friend}
                   rank={index + 1}
-                  isExpanded={selectedFriend?.profile?.username === friend.profile.username}
+                  sortBy={sortBy}
+                  isExpanded={isSelected}
                   onClick={() => handleCardClick(friend)}
-                  isCurrentUser={myUsername && friend.profile.username === myUsername}
+                  isCurrentUser={myUsername && friendUser.toLowerCase() === myUsername.toLowerCase()}
+                  myUsername={myUsername}
                   mySubmissionCalendar={myData?.submissionCalendar}
-                  timeFilter={timeFilter}
+                  onRequireAuth={onRequireAuth}
                 />
               </div>
             );

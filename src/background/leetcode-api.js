@@ -7,7 +7,7 @@ const TIMEOUT_MS = 6000; // 6 seconds
 
 // Rate limiting
 import { RateLimiter } from '../shared/security-utils.js';
-import { secureFetch } from '../shared/certificate-pinning.js';
+import { secureFetch } from '../shared/https-enforcement.js';
 const apiRateLimiter = new RateLimiter(30, 60000); // 30 calls per minute
 
 /**
@@ -287,37 +287,10 @@ export async function fetchUserData(username) {
   }
 }
 
-export function calculateStreak(submissionCalendar) {
-  if (!submissionCalendar || typeof submissionCalendar !== 'object') {
-    return 0;
-  }
+// NOTE: calculateStreak has been removed from this file.
+// The authoritative implementation lives in ../shared/streak-calculator.js
+// and is imported by service-worker.js. Do not add a duplicate here.
 
-  let streak = 0;
-  
-  // Convert submission calendar to Set of dates with submissions
-  const submissionDates = new Set();
-  Object.entries(submissionCalendar).forEach(([timestamp, count]) => {
-    if (count > 0) {
-      const date = new Date(parseInt(timestamp) * 1000);
-      const dateStr = date.toISOString().split('T')[0];
-      submissionDates.add(dateStr);
-    }
-  });
-
-  // Calculate current streak
-  let currentDate = new Date();
-  while (true) {
-    const dateStr = currentDate.toISOString().split('T')[0];
-    if (submissionDates.has(dateStr)) {
-      streak++;
-      currentDate.setDate(currentDate.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-
-  return streak;
-}
 
 export function isDailyChallengeCompleted(recentSubmissions) {
   if (!recentSubmissions || recentSubmissions.length === 0) {

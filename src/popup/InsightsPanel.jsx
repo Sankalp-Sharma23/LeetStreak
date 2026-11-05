@@ -61,7 +61,7 @@ export default function InsightsPanel({ userData, _friendsData = [] }) {
           onClick={() => setSelectedInsight(selectedInsight === index ? null : index)}
         >
           <div className="flex items-start gap-3">
-            <div className="text-3xl">{renderIcon(insight.icon, "w-8 h-8 text-primary")}</div>
+            <div className="text-3xl">{insight.icon}</div>
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">
@@ -122,7 +122,7 @@ export default function InsightsPanel({ userData, _friendsData = [] }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3 mb-4">
-              {renderIcon(detailInsight.icon, "w-12 h-12 text-primary")}
+              <div className="text-4xl">{detailInsight.icon}</div>
               <div className="flex-1">
                 <h3 className="text-lg font-bold text-text-primary mb-1">
                   {detailInsight.category}

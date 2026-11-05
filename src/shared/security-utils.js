@@ -60,21 +60,7 @@ export function isValidUrl(url, allowedProtocols = ['https:'], allowedHosts = nu
   }
 }
 
-/**
- * Validate GitHub token format
- * @param {string} token - GitHub token
- * @returns {boolean} True if valid format
- */
-export function isValidGitHubToken(token) {
-  if (typeof token !== 'string') return false;
-  
-  // GitHub Personal Access Tokens (classic): ghp_[A-Za-z0-9]{36}
-  // GitHub Fine-grained tokens: github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}
-  const classicPattern = /^ghp_[A-Za-z0-9]{36}$/;
-  const fineGrainedPattern = /^github_pat_[A-Za-z0-9_]{82}$/;
-  
-  return classicPattern.test(token) || fineGrainedPattern.test(token);
-}
+
 
 /**
  * Validate username
@@ -103,21 +89,7 @@ export function validateUsername(username, minLength = 1, maxLength = 50) {
   return { valid: true, username: username.toLowerCase() };
 }
 
-/**
- * Sanitize commit message for GitHub
- * @param {string} message - Raw commit message
- * @returns {string} Sanitized message
- */
-export function sanitizeCommitMessage(message) {
-  if (typeof message !== 'string') return '';
-  
-  // Remove potentially dangerous characters
-  return message
-    .replace(/[<>]/g, '')
-    .replace(/[\r\n]+/g, ' ')
-    .trim()
-    .slice(0, 256); // Limit length
-}
+
 
 /**
  * Rate limiter class for API calls
@@ -324,7 +296,7 @@ export function safeJsonParse(jsonString, schema = null) {
 export function isTrustedOrigin(origin) {
   const trustedOrigins = [
     'https://leetcode.com',
-    'https://api.github.com',
+    'https://supabase.com',
     'chrome-extension://' // For extension pages
   ];
   

@@ -53,3 +53,7 @@ temp/
 # Extension packaging
 *.crx
 *.pem
+
+# Test & Agent artifacts
+.chrome-test-profile/
+.agents/

@@ -15,7 +15,7 @@
  * 10. Browser Compatibility
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, test } from '@jest/globals';
 
 // ============================================================================
 // TEST CATEGORY 1: CORE FUNCTIONALITY

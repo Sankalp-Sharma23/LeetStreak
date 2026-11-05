@@ -4,6 +4,8 @@ function ProblemQueue() {
   const [problems, setProblems] = useState([]);
   const [newProblem, setNewProblem] = useState('');
   const [showInput, setShowInput] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('success'); // 'success' or 'error'
 
   // Check if problems are already submitted and mark as completed
   const checkAndUpdateCompletedProblems = async (problemsList) => {
@@ -177,7 +179,9 @@ function ProblemQueue() {
     });
     
     if (exists) {
-      alert('This problem is already in your queue!');
+      setToastType('error');
+      setToastMessage('⚠️ Already in queue!');
+      setTimeout(() => setToastMessage(''), 3000);
       return;
     }
 
@@ -214,10 +218,13 @@ function ProblemQueue() {
       status: status, // pending, in-progress, completed
       difficulty: 'Medium'
     };
-
     saveProblems([...problems, problem]);
     setNewProblem('');
     setShowInput(false);
+    
+    setToastType('success');
+    setToastMessage(status === 'completed' ? 'Added! (Already Completed ✓)' : 'Added to Queue! ✅');
+    setTimeout(() => setToastMessage(''), 3000);
   };
 
   const updateStatus = (identifier, newStatus) => {
@@ -283,6 +290,17 @@ function ProblemQueue() {
           {showInput ? '✕' : '+ Add'}
         </button>
       </div>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className={`mb-3 p-2 border rounded-lg animate-fade-in flex items-center justify-center ${
+          toastType === 'success' 
+            ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+            : 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+        }`}>
+          <span className="text-xs font-semibold">{toastMessage}</span>
+        </div>
+      )}
 
       {/* Add Problem Input */}
       {showInput && (

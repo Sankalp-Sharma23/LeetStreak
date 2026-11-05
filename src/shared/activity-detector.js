@@ -10,32 +10,33 @@ const getYesterdayUTC = () => {
   return date.toISOString().split('T')[0];
 };
 
-export function detectSolvedToday(submissionCalendar) {
-  if (!submissionCalendar || typeof submissionCalendar !== 'object') {
+/**
+ * Check if the user has at least one ACCEPTED solve today (UTC).
+ * Uses allAcceptedSubmissions so that wrong answers / TLE don't count.
+ * @param {Array} allAcceptedSubmissions - Array of {timestamp, titleSlug} objects
+ * @returns {boolean}
+ */
+export function detectSolvedToday(allAcceptedSubmissions) {
+  if (!Array.isArray(allAcceptedSubmissions) || allAcceptedSubmissions.length === 0) {
     return false;
   }
 
   const todayUTC = getTodayUTC();
-  
-  for (const [timestamp, count] of Object.entries(submissionCalendar)) {
-    if (count > 0) {
-      const date = new Date(parseInt(timestamp) * 1000);
-      const dateUTC = date.toISOString().split('T')[0];
-      if (dateUTC === todayUTC) {
-        return true;
-      }
-    }
-  }
-  
-  return false;
+
+  return allAcceptedSubmissions.some(sub => {
+    const ts = parseInt(sub.timestamp, 10);
+    if (isNaN(ts) || ts <= 0) return false;
+    return new Date(ts * 1000).toISOString().split('T')[0] === todayUTC;
+  });
 }
 
 export function hasNewActivity(currentData, previousData) {
-  if (!previousData) return detectSolvedToday(currentData.submissionCalendar);
-  
-  const solvedToday = detectSolvedToday(currentData.submissionCalendar);
+  const accepted = currentData.allAcceptedSubmissions || [];
+  if (!previousData) return detectSolvedToday(accepted);
+
+  const solvedToday = detectSolvedToday(accepted);
   const totalIncreased = (currentData.stats?.total || 0) > (previousData.stats?.total || 0);
-  
+
   return solvedToday || totalIncreased;
 }
 
@@ -43,28 +44,29 @@ export function detectMilestone(streak) {
   return [7, 30, 100].includes(streak);
 }
 
-export function isStreakAtRisk(submissionCalendar, streak) {
+/**
+ * Check if the user's streak is at risk (has a streak but hasn't solved today
+ * or yesterday with an ACCEPTED solution).
+ * @param {Array} allAcceptedSubmissions - Array of accepted submission objects
+ * @param {number} streak - Current streak value
+ * @returns {boolean}
+ */
+export function isStreakAtRisk(allAcceptedSubmissions, streak) {
   if (streak === 0) return false;
-  
+
   const yesterdayUTC = getYesterdayUTC();
-  
-  const solvedToday = detectSolvedToday(submissionCalendar);
-  
-  if (solvedToday) return false;
-  
-  let solvedYesterday = false;
-  for (const [timestamp, count] of Object.entries(submissionCalendar)) {
-    if (count > 0) {
-      const date = new Date(parseInt(timestamp) * 1000);
-      const dateUTC = date.toISOString().split('T')[0];
-      if (dateUTC === yesterdayUTC) {
-        solvedYesterday = true;
-        break;
-      }
-    }
-  }
-  
-  return !solvedYesterday && streak > 0;
+  const todayUTC = getTodayUTC();
+
+  const accepted = Array.isArray(allAcceptedSubmissions) ? allAcceptedSubmissions : [];
+
+  const solvedTodayOrYesterday = accepted.some(sub => {
+    const ts = parseInt(sub.timestamp, 10);
+    if (isNaN(ts) || ts <= 0) return false;
+    const d = new Date(ts * 1000).toISOString().split('T')[0];
+    return d === todayUTC || d === yesterdayUTC;
+  });
+
+  return !solvedTodayOrYesterday;
 }
 
 export function buildNotificationMessage(username, eventType, data) {

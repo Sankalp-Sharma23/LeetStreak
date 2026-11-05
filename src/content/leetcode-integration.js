@@ -1,7 +1,7 @@
 /**
  * LeetCode Page Content Script
  * Injects "Add to Queue" and "Code Screenshot" buttons
- * GitHub Auto-Sync functionality
+ * Autonomous submission observer and Battle HUD
  */
 
 (function() {
@@ -11,9 +11,195 @@
   
   let buttonsInjected = false;
   let currentProblemData = null;
-  let githubSyncEnabled = false;
   let submissionWatcher = null;
   
+  // Battle Mode state
+  let activeBattle = null;
+  let battleAttemptCount = 0;
+
+  function normalizeLanguage(language) {
+    const normalized = String(language).toLowerCase().trim();
+    const aliases = {
+      python: 'python3', py: 'python3', javascript: 'javascript', js: 'javascript',
+      typescript: 'typescript', ts: 'typescript', 'c++': 'cpp', cpp: 'cpp',
+      csharp: 'csharp', 'c#': 'csharp', golang: 'go'
+    };
+    return aliases[normalized] || normalized;
+  }
+  
+  // Check if there is an active battle on load
+  async function checkBattleStatus() {
+    try {
+      const [resp, userData] = await Promise.all([
+        chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS' }),
+        chrome.storage.local.get('my_leetcode_username')
+      ]);
+      const myUsername = userData.my_leetcode_username;
+      if (resp?.battle) {
+        const status = resp.battle.status;
+        const activeStatuses = [
+          'starting', 'problem_1_active', 'problem_1_waiting',
+          'transitioning', 'problem_2_active', 'problem_2_waiting'
+        ];
+        
+        if (activeStatuses.includes(status)) {
+          activeBattle = resp.battle;
+          
+          // Determine which problem is currently active
+          const isP1 = ['starting', 'problem_1_active', 'problem_1_waiting'].includes(status);
+          const activeSlug = isP1 ? activeBattle.problem_1 : activeBattle.problem_2;
+          
+          console.log('[LeetStreak Battle] Active battle detected. Current problem:', activeSlug);
+          
+          // Check if opponent solved the current problem
+          const opponentResult = (resp.results || []).find(r => 
+            r.username !== myUsername && 
+            r.problem_index === (isP1 ? 1 : 2) && 
+            r.accepted
+          );
+          const opponentSolvedText = opponentResult ? ` — ⚠️ Opponent Finished!` : '';
+          
+          // Auto-inject language if required
+          if (activeBattle.language) {
+            const currentLang = window.localStorage.getItem('global_lang');
+            if (currentLang !== activeBattle.language) {
+              console.log('[LeetStreak Battle] Forcing language to:', activeBattle.language);
+              window.localStorage.setItem('global_lang', activeBattle.language);
+              // Force a reload once to ensure Monaco editor picks it up
+              if (!window.sessionStorage.getItem('leetstreak_lang_forced')) {
+                window.sessionStorage.setItem('leetstreak_lang_forced', '1');
+                window.location.reload();
+                return;
+              }
+            }
+          }
+          
+          // Determine the start time for the current problem
+          const problemStartTime = isP1 ? activeBattle.p1_start_time : activeBattle.p2_start_time;
+
+          injectBattleIndicator(isP1 ? 1 : 2, activeSlug, problemStartTime, opponentSolvedText);
+        } else {
+          activeBattle = null;
+        }
+      }
+    } catch (e) {
+      // Service worker may not be ready yet, ignore
+    }
+  }
+
+  // Poll battle status periodically
+  setInterval(checkBattleStatus, 5000);
+  
+  // Show a ⚔️ indicator on the page when in battle mode
+  function injectBattleIndicator(problemIndex, activeSlug, startTimeIso, opponentSolvedText = '') {
+    if (!activeBattle || !isProblemPage()) return;
+    const currentSlug = window.location.pathname.split('/problems/')[1]?.split('/')[0];
+    if (currentSlug !== activeSlug) return;
+    
+    let bar = document.getElementById('leetstreak-battle-indicator');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'leetstreak-battle-indicator';
+      bar.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0;
+        background: linear-gradient(90deg, #7f1d1d, #dc2626, #7f1d1d);
+        color: white; text-align: center; font-size: 13px; font-weight: 700;
+        padding: 6px 16px; z-index: 99999;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        letter-spacing: 0.5px; box-shadow: 0 2px 8px rgba(220,38,38,0.4);
+        display: flex; justify-content: space-between; align-items: center;
+      `;
+      
+      const leftText = document.createElement('div');
+      leftText.id = 'leetstreak-battle-status-text';
+      
+      const rightText = document.createElement('div');
+      rightText.style.cssText = 'font-family: monospace; font-size: 14px; background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 4px;';
+      rightText.innerHTML = `⏱️ <span id="leetstreak-battle-timer">00:00</span>`;
+      
+      bar.appendChild(leftText);
+      bar.appendChild(rightText);
+      document.body.prepend(bar);
+      
+      // Start timer interval
+      const startMs = startTimeIso ? new Date(startTimeIso).getTime() : Date.now();
+      setInterval(() => {
+        const elapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+        const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const s = (elapsed % 60).toString().padStart(2, '0');
+        const timerSpan = document.getElementById('leetstreak-battle-timer');
+        if (timerSpan) {
+          timerSpan.textContent = `${m}:${s}`;
+        }
+      }, 1000);
+    }
+    
+    const leftText = document.getElementById('leetstreak-battle-status-text');
+    if (leftText) {
+      leftText.textContent = `⚔️ BATTLE ACTIVE — Problem ${problemIndex} of 2${opponentSolvedText}`;
+    }
+  }
+  
+  // Send battle submission result to service worker
+  async function triggerBattleSubmission(performanceStats, code, language) {
+    if (!activeBattle) return;
+    
+    const currentSlug = window.location.pathname.split('/problems/')[1]?.split('/')[0];
+    if (!currentSlug) return;
+
+    const isProblem1 = activeBattle.problem_1 && currentSlug.toLowerCase() === activeBattle.problem_1.toLowerCase();
+    const isProblem2 = activeBattle.problem_2 && currentSlug.toLowerCase() === activeBattle.problem_2.toLowerCase();
+    
+    if (!isProblem1 && !isProblem2) return;
+    
+    const lines = code ? code.split('\n').filter(l => l.trim().length > 0).length : null;
+    
+    try {
+      const runtime_ms = performanceStats.runtime ? parseInt(performanceStats.runtime) : null;
+      const memory_mb = performanceStats.memory ? parseFloat(performanceStats.memory) : null;
+      const runtime_beats = performanceStats.runtimePercentile ? parseFloat(performanceStats.runtimePercentile) : null;
+      const memory_beats = performanceStats.memoryPercentile ? parseFloat(performanceStats.memoryPercentile) : null;
+      
+      let submissionId = null;
+      const subLink = document.querySelector('a[href*="/submissions/detail/"]');
+      if (subLink) {
+        const match = subLink.href.match(/detail\/(\d+)/);
+        if (match) submissionId = match[1];
+      }
+      if (!submissionId) {
+        submissionId = `sub_${currentSlug}_${Date.now()}`;
+      }
+
+      const resp = await chrome.runtime.sendMessage({
+        type: 'BATTLE_SUBMISSION',
+        battleId: activeBattle.id,
+        problemSlug: currentSlug,
+        submissionId,
+        accepted: true,
+        runtime_ms,
+        memory_mb,
+        runtime_beats,
+        memory_beats,
+        language: normalizeLanguage(language),
+        lines_of_code: lines,
+        attempts: battleAttemptCount || 1,
+        problemIndex: isProblem1 ? 1 : 2
+      });
+      
+      if (resp?.success) {
+        // Update the battle indicator
+        const bar = document.getElementById('leetstreak-battle-indicator');
+        if (bar) {
+          bar.style.background = 'linear-gradient(90deg, #14532d, #16a34a, #14532d)';
+          bar.textContent = `✅ Accepted for ${currentSlug}! Progress recorded.`;
+        }
+        activeBattle = null; // Clear local state so we stop tracking on this page
+      }
+    } catch (e) {
+      console.error('[LeetStreak Battle] Failed to send battle submission:', e);
+    }
+  }
+
   // Check if we're on a problem page
   function isProblemPage() {
     return window.location.pathname.startsWith('/problems/') && 
@@ -362,6 +548,141 @@
     
     return button;
   }
+
+  function showNotification(message, type = 'info') {
+    document.getElementById('leetstreak-notification')?.remove();
+    const colors = { success: '#10b981', error: '#ef4444', info: '#667eea' };
+    const notification = document.createElement('div');
+    notification.id = 'leetstreak-notification';
+    notification.textContent = message;
+    notification.style.cssText = `position: fixed; top: 20px; right: 20px; background: ${colors[type] || colors.info}; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; z-index: 10001;`;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+  }
+
+  function injectButtons() {
+    if (buttonsInjected || document.getElementById('leetstreak-buttons')) return;
+    const submitButton = [...document.querySelectorAll('button')].find(button =>
+      /^(Submit|Run|Test)$/.test(button.textContent.trim())
+    );
+    const target = submitButton?.parentElement || document.querySelector('[class*="toolbar"]');
+    if (!target) return;
+
+    const container = document.createElement('div');
+    container.id = 'leetstreak-buttons';
+    container.style.cssText = 'display: inline-flex; gap: 8px; align-items: center; margin-left: 12px; z-index: 100;';
+    container.append(
+      createButton('Add to Queue', '📋', handleAddToQueue),
+      createButton('Code Screenshot', '📸', handleCodeScreenshot)
+    );
+    target.appendChild(container);
+    buttonsInjected = true;
+  }
+
+  function handleCodeScreenshot() {
+    const problem = currentProblemData || extractProblemData() || {};
+    const code = extractCode();
+    if (!code) {
+      showNotification('No code found in editor. Write some code first.', 'error');
+      return;
+    }
+
+    try {
+      const language = getSelectedLanguage() || 'code';
+      const lines = code.split('\n');
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      const fontSize = 14;
+      const lineHeight = 22;
+      const padding = 32;
+      const headerHeight = 70;
+
+      ctx.font = `${fontSize}px "Fira Code", monospace, "Courier New"`;
+
+      let maxLineWidth = 0;
+      lines.forEach(line => {
+        const w = ctx.measureText(line).width;
+        if (w > maxLineWidth) maxLineWidth = w;
+      });
+
+      const lineNumWidth = 45;
+      const width = Math.max(640, Math.ceil(maxLineWidth + padding * 2 + lineNumWidth + 40));
+      const height = Math.ceil(headerHeight + (lines.length * lineHeight) + padding * 2);
+
+      canvas.width = width;
+      canvas.height = height;
+
+      ctx.font = `${fontSize}px "Fira Code", monospace, "Courier New"`;
+
+      // Background gradient
+      const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+      bgGrad.addColorStop(0, '#18181B');
+      bgGrad.addColorStop(1, '#09090B');
+      ctx.fillStyle = bgGrad;
+      if (ctx.roundRect) {
+        ctx.roundRect(0, 0, width, height, 16);
+      } else {
+        ctx.rect(0, 0, width, height);
+      }
+      ctx.fill();
+
+      // Window controls
+      ctx.fillStyle = '#EF4444';
+      ctx.beginPath(); ctx.arc(padding, 28, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#F59E0B';
+      ctx.beginPath(); ctx.arc(padding + 18, 28, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#10B981';
+      ctx.beginPath(); ctx.arc(padding + 36, 28, 6, 0, Math.PI * 2); ctx.fill();
+
+      // Title
+      ctx.fillStyle = '#F4F4F5';
+      ctx.font = 'bold 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(`${problem.title || 'LeetCode Problem'} (${language})`, padding + 60, 33);
+
+      // Badge
+      ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillStyle = '#F59E0B';
+      const watermark = '⚡ LeetStreak';
+      ctx.fillText(watermark, width - padding - ctx.measureText(watermark).width, 33);
+
+      // Separator
+      ctx.strokeStyle = '#27272A';
+      ctx.beginPath();
+      ctx.moveTo(padding, 50);
+      ctx.lineTo(width - padding, 50);
+      ctx.stroke();
+
+      // Code text
+      ctx.font = `${fontSize}px "Fira Code", monospace, "Courier New"`;
+      let y = headerHeight + padding;
+      lines.forEach((line, index) => {
+        ctx.fillStyle = '#52525B';
+        ctx.fillText(String(index + 1), padding, y);
+        ctx.fillStyle = '#E4E4E7';
+        ctx.fillText(line, padding + lineNumWidth, y);
+        y += lineHeight;
+      });
+
+      canvas.toBlob(blob => {
+        if (!blob) {
+          showNotification('Failed to generate image', 'error');
+          return;
+        }
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        const slug = problem.slug || 'leetcode-solution';
+        link.download = `${slug}-solution.png`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+        showNotification('📸 Code screenshot saved as PNG!', 'success');
+      }, 'image/png');
+    } catch (err) {
+      console.error('[LeetStreak] Code screenshot error:', err);
+      showNotification('Screenshot generation failed', 'error');
+    }
+  }
   
   // Create floating action button as fallback
   function _createFloatingButton() {
@@ -382,13 +703,13 @@
     `;
     
     const queueBtn = createButton('Queue', '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="15" y1="10" x2="9" y2="10"/></svg>', handleAddToQueue, true);
-    const screenshotBtn = createButton('Screenshot', '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>', handleCodeScreenshot, true);
+    const insightsBtn = createButton('Insights', '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', handleFriendsInsights, true);
     
     queueBtn.style.bottom = '80px';
-    screenshotBtn.style.bottom = '20px';
+    insightsBtn.style.bottom = '20px';
     
     container.appendChild(queueBtn);
-    container.appendChild(screenshotBtn);
+    container.appendChild(insightsBtn);
     
     document.body.appendChild(container);
     console.log('LeetStreak: Floating buttons added as fallback');
@@ -527,1301 +848,136 @@
     }
   }
   
-  // Handle Code Screenshot
-  async function handleCodeScreenshot() {
-    currentProblemData = extractProblemData();
-    const code = extractCode();
-    let language = getSelectedLanguage();
-    
-    if (!code) {
-      showNotification('❌ No code found. Write some code first!', 'error');
-      return;
-    }
-    
-    // If language detection failed or defaulted, try to analyze the code
-    if (!language || language === 'python3') {
-      const detectedLang = analyzeCodeLanguage(code);
-      if (detectedLang) {
-        language = detectedLang;
-        console.log('LeetStreak: Detected language from code analysis:', language);
+  // Handle Friends Insights
+  async function handleFriendsInsights() {
+    try {
+      currentProblemData = extractProblemData();
+      if (!currentProblemData || !currentProblemData.slug) {
+        showNotification('❌ Could not identify current problem', 'error');
+        return;
       }
+      
+      const slug = currentProblemData.slug;
+      
+      // Get friends data from storage
+      const data = await safeStorageGet(['leetfriends_data', 'my_leetcode_username']);
+      const friendsData = data.leetfriends_data || {};
+      
+      let solvedFriends = [];
+      
+      for (const [username, userData] of Object.entries(friendsData)) {
+        if (username === 'timestamp') continue;
+        
+        let hasSolved = false;
+        
+        // Check allAcceptedSubmissions
+        if (userData.allAcceptedSubmissions && userData.allAcceptedSubmissions.length > 0) {
+          hasSolved = userData.allAcceptedSubmissions.some(sub => sub.titleSlug === slug);
+        }
+        
+        // Fallback: check recentSubmissions
+        if (!hasSolved && userData.profile && userData.profile.recentSubmissions) {
+          hasSolved = userData.profile.recentSubmissions.some(sub => sub.titleSlug === slug && sub.statusDisplay === 'Accepted');
+        }
+        
+        if (hasSolved) {
+          solvedFriends.push({
+            username: username,
+            avatar: userData.profile?.avatar || 'https://assets.leetcode.com/users/default_avatar.jpg'
+          });
+        }
+      }
+      
+      showInsightsModal(solvedFriends, currentProblemData.title);
+      
+    } catch (error) {
+      console.error('Insights error:', error);
+      showNotification('❌ Failed to load insights', 'error');
     }
-    
-    showNotification('📸 Generating screenshot...', 'info');
-    
-    // Create screenshot modal
-    createScreenshotModal(currentProblemData, code, language);
   }
-  
-  // Create screenshot preview modal
-  function createScreenshotModal(problemData, code, language) {
-    // Remove existing modal if any
-    const existingModal = document.getElementById('leetstreak-screenshot-modal');
-    if (existingModal) {
-      existingModal.remove();
-    }
+
+  function showInsightsModal(solvedFriends, problemTitle) {
+    const existingModal = document.getElementById('leetstreak-insights-modal');
+    if (existingModal) existingModal.remove();
     
-    // Create modal
     const modal = document.createElement('div');
-    modal.id = 'leetstreak-screenshot-modal';
+    modal.id = 'leetstreak-insights-modal';
     modal.style.cssText = `
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 10000;
-      backdrop-filter: blur(4px);
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 10000; backdrop-filter: blur(8px);
     `;
     
-    // Create content container
+    // Close when clicking outside
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+    
     const content = document.createElement('div');
     content.style.cssText = `
-      background: white;
+      background: linear-gradient(145deg, #161b22, #0d1117);
+      border: 1px solid #30363d;
       border-radius: 16px;
-      max-width: 900px;
-      max-height: 90vh;
-      overflow: auto;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      scrollbar-width: none;
-      -ms-overflow-style: none;
+      width: 420px;
+      padding: 24px;
+      color: #c9d1d9;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      font-family: 'Inter', system-ui, sans-serif;
     `;
     
-    // Hide scrollbar for webkit browsers
-    content.style.webkitScrollbar = 'none';
+    let friendsHtml = '';
+    if (solvedFriends.length === 0) {
+      friendsHtml = `<div style="text-align:center; padding: 20px; color: #8b949e; background: rgba(255,255,255,0.05); border-radius: 8px;">
+        None of your friends have solved this yet. Be the first! 🏆
+      </div>`;
+    } else {
+      friendsHtml = `<div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
+        ${solvedFriends.map(f => `
+          <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+            <img src="${f.avatar}" style="width: 32px; height: 32px; border-radius: 50%;" />
+            <span style="font-weight: 600;">${f.username}</span>
+            <span style="margin-left:auto; color: #2ea043; font-size: 12px;">Solved ✓</span>
+          </div>
+        `).join('')}
+      </div>`;
+    }
     
-    // Generate screenshot HTML safely
-    const screenshotElement = generateScreenshotElement(problemData, code, language);
-    content.appendChild(screenshotElement);
+    content.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e3b341" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Friends Insights
+        </h2>
+        <button id="close-insights-btn" style="background: none; border: none; color: #8b949e; cursor: pointer; font-size: 20px;">&times;</button>
+      </div>
+      
+      <div style="font-size: 14px; margin-bottom: 12px; color: #8b949e;">
+        Problem: <strong style="color: #c9d1d9;">${problemTitle}</strong>
+      </div>
+      
+      <h3 style="font-size: 14px; margin: 20px 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px; color: #8b949e;">Friends who solved this</h3>
+      ${friendsHtml}
+      
+      <div style="margin-top: 24px; padding: 16px; background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 8px;">
+        <div style="font-weight: 600; color: #58a6ff; margin-bottom: 4px;">📈 Rank Predictor</div>
+        <div style="font-size: 13px; color: #c9d1d9; line-height: 1.5;">
+          Solving this problem will boost your overall solved count and improve your standing on the LeetStreak leaderboard!
+        </div>
+      </div>
+    `;
     
     modal.appendChild(content);
     document.body.appendChild(modal);
     
-    // Close on background click
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        modal.remove();
-      }
-    });
-    
-    // Add event listeners for buttons - use direct reference instead of setTimeout
-    const closeModal = document.getElementById('leetstreak-close-modal');
-    const downloadBtn = document.getElementById('leetstreak-download-screenshot');
-    
-    if (closeModal) {
-      closeModal.addEventListener('click', () => {
-        modal.remove();
-      });
-    }
-    
-    if (downloadBtn) {
-      downloadBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Download button clicked');
-        await downloadScreenshot(problemData.title);
-      });
-    } else {
-      console.error('Download button not found in modal');
-    }
-    
-    // Inject CSS to hide scrollbars globally
-    injectScrollbarCSS();
-  }
-  
-  // Inject CSS to hide scrollbars
-  function injectScrollbarCSS() {
-    if (document.getElementById('leetstreak-scrollbar-css')) {
-      return; // Already injected
-    }
-    
-    const style = document.createElement('style');
-    style.id = 'leetstreak-scrollbar-css';
-    style.textContent = `
-      #leetstreak-screenshot-modal ::-webkit-scrollbar {
-        display: none;
-      }
-      #leetstreak-screenshot-modal {
-        scrollbar-width: none;
-        -ms-overflow-style: none;
-      }
-      #leetstreak-screenshot-modal * {
-        scrollbar-width: none;
-        -ms-overflow-style: none;
-      }
-      #leetstreak-screenshot-modal *::-webkit-scrollbar {
-        display: none;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-  
-  // Generate beautiful screenshot element with safe DOM manipulation
-  function generateScreenshotElement(problemData, code, language) {
-    const difficultyColors = {
-      easy: '#3fb950',
-      medium: '#d29922',
-      hard: '#da3633'
-    };
-    
-    const difficultyColor = difficultyColors[problemData.difficulty.toLowerCase()] || difficultyColors.medium;
-    const bgGradient = `linear-gradient(135deg, #0d1117 0%, #161b22 100%)`;
-    
-    // Main container
-    const container = document.createElement('div');
-    container.style.cssText = 'padding: 32px; background: #0d1117; min-height: 100vh;';
-    
-    // Header section with improved styling
-    const header = document.createElement('div');
-    header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px;';
-    
-    const title = document.createElement('h2');
-    title.textContent = '✨ Code Screenshot';
-    title.style.cssText = "margin: 0; font-size: 32px; color: #c9d1d9; font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 800; letter-spacing: -0.5px;";
-    
-    const closeBtn = document.createElement('button');
-    closeBtn.id = 'leetstreak-close-modal';
-    closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background: #21262d; border: 1px solid #30363d; font-size: 24px; cursor: pointer; color: #8b949e; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 12px; transition: all 0.2s ease; font-weight: 300;';
-    closeBtn.onmouseover = function() { this.style.background='#30363d'; this.style.color='#c9d1d9'; this.style.transform='scale(1.05)'; };
-    closeBtn.onmouseout = function() { this.style.background='#21262d'; this.style.color='#8b949e'; this.style.transform='scale(1)'; };
-    
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    
-    // Screenshot content with enhanced styling
-    const screenshotContent = document.createElement('div');
-    screenshotContent.id = 'leetstreak-screenshot-content';
-    screenshotContent.style.cssText = `background: ${bgGradient}; border-radius: 24px; padding: 48px; color: #c9d1d9; font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); border: 1px solid #30363d;`;
-    
-    // Problem header
-    const problemHeader = document.createElement('div');
-    problemHeader.style.cssText = 'margin-bottom: 36px;';
-    
-    const badgeContainer = document.createElement('div');
-    badgeContainer.style.cssText = 'display: flex; align-items: center; gap: 12px; margin-bottom: 16px;';
-    
-    const difficultyBadge = document.createElement('span');
-    difficultyBadge.textContent = problemData.difficulty.toUpperCase();
-    difficultyBadge.style.cssText = `background: ${difficultyColor}20; padding: 6px 16px; border-radius: 12px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; color: ${difficultyColor}; box-shadow: 0 4px 12px ${difficultyColor}20; font-family: 'Inter', sans-serif; border: 1px solid ${difficultyColor}40;`;
-    badgeContainer.appendChild(difficultyBadge);
-    
-    if (problemData.number) {
-      const numberSpan = document.createElement('span');
-      numberSpan.textContent = `#${problemData.number}`;
-      numberSpan.style.cssText = "opacity: 0.9; font-size: 15px; font-weight: 700; font-family: 'Inter', sans-serif;";
-      badgeContainer.appendChild(numberSpan);
-    }
-    
-    const problemTitle = document.createElement('h1');
-    problemTitle.textContent = problemData.title;
-    problemTitle.style.cssText = "margin: 0; font-size: 36px; font-weight: 900; line-height: 1.2; color: #e6edf3; font-family: 'Inter', sans-serif; letter-spacing: -0.8px;";
-    
-    problemHeader.appendChild(badgeContainer);
-    problemHeader.appendChild(problemTitle);
-    
-    // Code block with improved styling
-    const codeBlock = document.createElement('div');
-    codeBlock.style.cssText = 'background: #0d1117; border-radius: 18px; padding: 28px; border: 1px solid #30363d;';
-    
-    const codeHeader = document.createElement('div');
-    codeHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #30363d;';
-    
-    const langSpan = document.createElement('span');
-    langSpan.textContent = getDisplayLanguageName(language);
-    langSpan.style.cssText = `font-size: 14px; opacity: 1; font-weight: 800; color: #58a6ff; font-family: 'Inter', sans-serif; letter-spacing: 0.5px;`;
-    
-    const dateSpan = document.createElement('span');
-    dateSpan.textContent = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    dateSpan.style.cssText = "font-size: 13px; opacity: 0.85; font-weight: 600; font-family: 'Inter', sans-serif; color: #8b949e;";
-    
-    codeHeader.appendChild(langSpan);
-    codeHeader.appendChild(dateSpan);
-    
-    const codeEl = document.createElement('pre');
-    codeEl.textContent = code; // textContent automatically escapes
-    codeEl.style.cssText = "margin: 0; font-family: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 15px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; color: #e6edf3; font-weight: 500; max-height: 400px; overflow-y: auto;";
-    
-    codeBlock.appendChild(codeHeader);
-    codeBlock.appendChild(codeEl);
-    
-    // Footer with enhanced branding
-    const footer = document.createElement('div');
-    footer.style.cssText = "margin-top: 36px; display: flex; justify-content: space-between; align-items: center; opacity: 0.95; font-size: 14px; font-weight: 700; font-family: 'Inter', sans-serif;";
-    
-    const brandSpan = document.createElement('span');
-    brandSpan.textContent = '🔥 LeetStreak';
-    brandSpan.style.cssText = `color: #58a6ff; font-size: 16px;`;
-    
-    const urlSpan = document.createElement('span');
-    urlSpan.textContent = 'leetcode.com';
-    urlSpan.style.cssText = 'font-weight: 600; color: #8b949e;';
-    
-    footer.appendChild(brandSpan);
-    footer.appendChild(urlSpan);
-    
-    // Assemble screenshot content
-    screenshotContent.appendChild(problemHeader);
-    screenshotContent.appendChild(codeBlock);
-    screenshotContent.appendChild(footer);
-    
-    // Action buttons with improved styling - positioned at bottom
-    const actionButtons = document.createElement('div');
-    actionButtons.style.cssText = 'display: flex; gap: 12px; margin-top: 28px; padding-top: 28px; border-top: 1px solid #30363d; justify-content: flex-end; flex-wrap: wrap;';
-    
-    const downloadBtn = document.createElement('button');
-    downloadBtn.id = 'leetstreak-download-screenshot';
-    downloadBtn.textContent = '⬇️ Download PNG';
-    downloadBtn.style.cssText = "padding: 12px 28px; background: #000000; color: #ff8c00; border: 2px solid #ff8c00; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 6px 20px rgba(255, 140, 0, 0.25); font-family: 'Inter', 'SF Pro Display', sans-serif; letter-spacing: 0.3px; white-space: nowrap;";
-    downloadBtn.onmouseover = function() { this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 30px rgba(255, 140, 0, 0.35)'; this.style.background='#1a1a1a'; };
-    downloadBtn.onmouseout = function() { this.style.transform='translateY(0)'; this.style.boxShadow='0 6px 20px rgba(255, 140, 0, 0.25)'; this.style.background='#000000'; };
-    downloadBtn.onmousedown = function() { this.style.transform='translateY(0px)'; };
-    downloadBtn.onmouseup = function() { this.style.transform='translateY(-2px)'; };
-    
-    actionButtons.appendChild(downloadBtn);
-    
-    // Assemble main container
-    container.appendChild(header);
-    container.appendChild(screenshotContent);
-    container.appendChild(actionButtons);
-    
-    return container;
-  }
-  
-  // Legacy function for backwards compatibility - now calls the safe version
-  function generateScreenshotHTML(problemData, code, language) {
-    const element = generateScreenshotElement(problemData, code, language);
-    const wrapper = document.createElement('div');
-    wrapper.appendChild(element);
-    return wrapper.innerHTML;
-  }
-  
-  // Escape HTML
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-  
-  // Copy screenshot to clipboard
-  async function _copyScreenshotToClipboard() {
-    try {
-      const element = document.getElementById('leetstreak-screenshot-content');
-      if (!element) return;
-      
-      // Use html2canvas library if available, otherwise show fallback message
-      if (typeof html2canvas !== 'undefined') {
-        const canvas = await html2canvas(element, {
-          backgroundColor: null,
-          scale: 2
-        });
-        
-        canvas.toBlob(async (blob) => {
-          try {
-            await navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': blob })
-            ]);
-            showNotification('✅ Copied to clipboard!', 'success');
-          } catch (err) {
-            showNotification('❌ Copy failed. Try download instead.', 'error');
-          }
-        });
-      } else {
-        showNotification('📥 Use Download button instead', 'info');
-      }
-    } catch (error) {
-      console.error('Copy error:', error);
-      showNotification('❌ Copy failed', 'error');
-    }
-  }
-  
-  // Download screenshot - Capture visual content exactly as displayed
-  async function downloadScreenshot(problemTitle) {
-    try {
-      console.log('Starting download process...');
-      
-      const element = document.getElementById('leetstreak-screenshot-content');
-      if (!element) {
-        console.error('Screenshot element not found');
-        showNotification('❌ Screenshot element not found', 'error');
-        return;
-      }
-      
-      console.log('Screenshot element found, capturing visual content...');
-      showNotification('📸 Capturing screenshot...', 'info');
-      
-      // Create a wrapper with styling
-      const wrapper = document.createElement('div');
-      wrapper.style.position = 'fixed';
-      wrapper.style.top = '-9999px';
-      wrapper.style.left = '-9999px';
-      wrapper.style.width = (element.offsetWidth + 96) + 'px';
-      wrapper.style.height = (element.offsetHeight + 96) + 'px';
-      wrapper.style.padding = '48px';
-      wrapper.style.boxSizing = 'border-box';
-      wrapper.style.background = 'linear-gradient(135deg, #0d1117 0%, #161b22 100%)';
-      wrapper.style.borderRadius = '24px';
-      wrapper.style.border = '1px solid #30363d';
-      wrapper.style.overflow = 'hidden';
-      
-      // Clone the screenshot content
-      const clone = element.cloneNode(true);
-      wrapper.appendChild(clone);
-      document.body.appendChild(wrapper);
-      
-      // Get actual rendered dimensions
-      const width = wrapper.offsetWidth;
-      const height = wrapper.offsetHeight;
-      console.log('Wrapper dimensions:', width, 'x', height);
-      
-      // Create canvas
-      const canvas = document.createElement('canvas');
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (!ctx) {
-        throw new Error('Could not get canvas context');
-      }
-      
-      ctx.scale(dpr, dpr);
-      
-      // Try using html2canvas if available
-      if (typeof html2canvas !== 'undefined') {
-        console.log('Using html2canvas to render');
-        try {
-          const renderedCanvas = await html2canvas(wrapper, {
-            backgroundColor: '#0d1117',
-            scale: 2,
-            useCORS: true,
-            allowTaint: true,
-            logging: false,
-            width: width,
-            height: height
-          });
-          
-          document.body.removeChild(wrapper);
-          
-          console.log('Canvas rendered successfully');
-          renderedCanvas.toBlob((blob) => {
-            if (blob) {
-              console.log('Blob created, size:', blob.size);
-              downloadBlob(blob, problemTitle);
-            } else {
-              console.error('Blob is null');
-              showNotification('❌ Failed to create image blob', 'error');
-            }
-          }, 'image/png', 1.0);
-        } catch (error) {
-          console.error('html2canvas error:', error);
-          document.body.removeChild(wrapper);
-          showNotification('❌ Failed to render screenshot', 'error');
-        }
-      } else {
-        console.log('html2canvas not available, loading from CDN');
-        // Try to load html2canvas from CDN
-        const loaded = await loadHtml2CanvasFromCDN();
-        
-        document.body.removeChild(wrapper);
-        
-        if (loaded && typeof html2canvas !== 'undefined') {
-          try {
-            const renderedCanvas = await html2canvas(wrapper, {
-              backgroundColor: '#0d1117',
-              scale: 2,
-              useCORS: true,
-              allowTaint: true,
-              logging: false
-            });
-            
-            console.log('Canvas rendered from CDN library');
-            renderedCanvas.toBlob((blob) => {
-              if (blob) {
-                console.log('Blob created, size:', blob.size);
-                downloadBlob(blob, problemTitle);
-              } else {
-                showNotification('❌ Failed to create image', 'error');
-              }
-            }, 'image/png', 1.0);
-          } catch (error) {
-            console.error('html2canvas error:', error);
-            showNotification('❌ Screenshot capture failed', 'error');
-          }
-        } else {
-          console.log('Fallback: using simple canvas rendering');
-          // Fallback to simple rendering
-          try {
-            // Fill background
-            ctx.fillStyle = '#0d1117';
-            ctx.fillRect(0, 0, width, height);
-            
-            // Draw border and gradient
-            const gradient = ctx.createLinearGradient(0, 0, width, height);
-            gradient.addColorStop(0, '#0d1117');
-            gradient.addColorStop(1, '#161b22');
-            
-            // Draw rounded rectangle
-            const radius = 24;
-            ctx.beginPath();
-            ctx.moveTo(radius, 0);
-            ctx.lineTo(width - radius, 0);
-            ctx.arcTo(width, 0, width, radius, radius);
-            ctx.lineTo(width, height - radius);
-            ctx.arcTo(width, height, width - radius, height, radius);
-            ctx.lineTo(radius, height);
-            ctx.arcTo(0, height, 0, height - radius, radius);
-            ctx.lineTo(0, radius);
-            ctx.arcTo(0, 0, radius, 0, radius);
-            ctx.closePath();
-            ctx.fillStyle = gradient;
-            ctx.fill();
-            ctx.strokeStyle = '#30363d';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            
-            // Render text
-            ctx.fillStyle = '#c9d1d9';
-            ctx.font = '14px "JetBrains Mono", monospace';
-            
-            const text = element.textContent || '';
-            const lines = text.split('\n');
-            let y = 80;
-            
-            for (const line of lines) {
-              if (y > height - 30) break;
-              ctx.fillText(line.substring(0, 110), 80, y);
-              y += 20;
-            }
-            
-            console.log('Canvas rendered with fallback method');
-            canvas.toBlob((blob) => {
-              if (blob) {
-                console.log('Fallback blob created, size:', blob.size);
-                downloadBlob(blob, problemTitle);
-              } else {
-                console.error('Fallback blob creation failed');
-                showNotification('❌ Failed to create image', 'error');
-              }
-            }, 'image/png', 1.0);
-          } catch (error) {
-            console.error('Fallback rendering error:', error);
-            showNotification('❌ ' + error.message, 'error');
-          }
-        }
-      }
-      
-    } catch (error) {
-      console.error('Download error:', error);
-      showNotification('❌ ' + (error.message || 'Download failed'), 'error');
-    }
-  }
-  
-  // Load html2canvas from CDN
-  function loadHtml2CanvasFromCDN() {
-    return new Promise((resolve) => {
-      if (typeof html2canvas !== 'undefined') {
-        console.log('html2canvas already loaded');
-        resolve(true);
-        return;
-      }
-      
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-      script.async = true;
-      
-      script.onload = () => {
-        console.log('html2canvas loaded from CDN');
-        resolve(true);
-      };
-      
-      script.onerror = () => {
-        console.error('Failed to load html2canvas from CDN');
-        resolve(false);
-      };
-      
-      document.head.appendChild(script);
+    document.getElementById('close-insights-btn').addEventListener('click', () => {
+      modal.remove();
     });
   }
-  
-  // Download blob as file
-  function downloadBlob(blob, problemTitle) {
-    try {
-      console.log('Blob created, size:', blob.size);
-      
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const safeTitle = (problemTitle || 'code_screenshot')
-        .replace(/[^a-z0-9_-]/gi, '_')
-        .substring(0, 50);
-      
-      link.download = `${safeTitle}_leetstreak.png`;
-      link.href = url;
-      link.style.display = 'none';
-      
-      document.body.appendChild(link);
-      console.log('Triggering download: ' + link.download);
-      
-      // Trigger download
-      link.click();
-      
-      // Cleanup
-      setTimeout(() => {
-        try {
-          if (document.body.contains(link)) {
-            document.body.removeChild(link);
-          }
-          URL.revokeObjectURL(url);
-        } catch (e) {
-          console.error('Cleanup error:', e);
-        }
-      }, 100);
-      
-      showNotification('✅ Screenshot downloaded!', 'success');
-    } catch (error) {
-      console.error('Download blob error:', error);
-      showNotification('❌ ' + error.message, 'error');
-    }
-  }
-  
-  // Download canvas as image
-  
-  // Show notification
-  function showNotification(message, type = 'info') {
-    // Remove existing notification
-    const existing = document.getElementById('leetstreak-notification');
-    if (existing) {
-      existing.remove();
-    }
-    
-    const colors = {
-      success: '#10b981',
-      error: '#ef4444',
-      info: '#667eea'
-    };
-    
-    const notification = document.createElement('div');
-    notification.id = 'leetstreak-notification';
-    notification.textContent = message;
-    notification.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: ${colors[type]};
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      z-index: 10001;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-      animation: slideInRight 0.3s ease;
-    `;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      notification.style.animation = 'slideOutRight 0.3s ease';
-      setTimeout(() => notification.remove(), 300);
-    }, 3000);
-  }
-  
-  // Inject buttons into the page
-  function injectButtons() {
-    try {
-      if (buttonsInjected) return;
-      
-      console.log('LeetStreak: Attempting to inject buttons...');
-      
-      // Check if already exists
-      if (document.getElementById('leetstreak-buttons')) {
-        console.log('LeetStreak: Buttons already exist');
-        buttonsInjected = true;
-        return;
-      }
-      
-      // Try multiple strategies to find injection point
-      let targetElement = null;
-      
-      // Strategy 1: Find by testid (most reliable)
-      try {
-        const testidButton = document.querySelector('[data-e2e-locator*="console"]');
-        if (testidButton && testidButton.parentElement) {
-          targetElement = testidButton.parentElement.parentElement;
-          console.log('LeetStreak: Found via testid');
-        }
-      } catch (e) {
-        // Continue to next strategy
-      }
-      
-      // Strategy 2: Find submit/run buttons container
-      if (!targetElement) {
-        try {
-          const buttons = Array.from(document.querySelectorAll('button'));
-          const submitButton = buttons.find(btn => {
-            try {
-              return btn && btn.textContent && (
-                btn.textContent.includes('Submit') || 
-                btn.textContent.includes('Run') ||
-                btn.textContent.includes('Test')
-              );
-            } catch {
-              return false;
-            }
-          });
-          if (submitButton && submitButton.parentElement) {
-            targetElement = submitButton.parentElement;
-            console.log('LeetStreak: Found via submit button');
-          }
-        } catch (e) {
-          // Continue to next strategy
-        }
-      }
-      
-      // Strategy 3: Find by looking for action buttons area
-      if (!targetElement) {
-        try {
-          const actionDivs = document.querySelectorAll('div[class*="flex"]');
-          for (const div of actionDivs) {
-            try {
-              const hasButtons = div && div.querySelectorAll && div.querySelectorAll('button').length >= 2;
-              if (hasButtons && div.offsetHeight > 30) {
-                targetElement = div;
-                console.log('LeetStreak: Found via flex container');
-                break;
-              }
-            } catch {
-              continue;
-            }
-          }
-        } catch (e) {
-          // Continue to next strategy
-        }
-      }
-      
-      // Strategy 4: Find the header/toolbar area
-      if (!targetElement) {
-        try {
-          const headers = document.querySelectorAll('[class*="header"], [class*="toolbar"]');
-          if (headers.length > 0 && headers[0]) {
-            targetElement = headers[0];
-            console.log('LeetStreak: Found via header');
-          }
-        } catch (e) {
-          // Continue
-        }
-      }
-      
-      if (!targetElement) {
-        console.log('LeetStreak: Could not find injection point. Will retry...');
-        return;
-      }
-      
-      console.log('LeetStreak: Found injection point:', targetElement);
-      
-      // Create container for our buttons
-      const buttonContainer = document.createElement('div');
-      buttonContainer.id = 'leetstreak-buttons';
-      buttonContainer.style.cssText = `
-        display: inline-flex;
-        gap: 8px;
-        align-items: center;
-        margin-left: 12px;
-        z-index: 100;
-      `;
-      
-      // Create buttons
-      const queueButton = createButton('Add to Queue', '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="15" y1="10" x2="9" y2="10"/></svg>', handleAddToQueue);
-      const screenshotButton = createButton('Code Screenshot', '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>', handleCodeScreenshot);
-      
-      buttonContainer.appendChild(queueButton);
-      buttonContainer.appendChild(screenshotButton);
-      
-      // Insert into page
-      targetElement.appendChild(buttonContainer);
-      
-      buttonsInjected = true;
-      console.log('LeetStreak: Buttons injected successfully!');
-    } catch (error) {
-      console.error('LeetStreak: Error in injectButtons:', error);
-      // Don't set buttonsInjected to true so it can retry
-    }
-  }
 
-  // ===== GitHub Auto-Sync Functionality =====
-  
-  /**
-   * Capture code using multiple strategies
-   */
-  async function captureCodeMultiStrategy() {
-    const strategies = [
-      captureFromMonacoAPI,
-      captureFromTextarea,
-      captureFromVisibleLines
-    ];
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      for (const strategy of strategies) {
-        try {
-          const code = await strategy();
-          if (code && code.trim().length > 0) {
-            return {
-              success: true,
-              code: code.trim(),
-              method: strategy.name
-            };
-          }
-        } catch (error) {
-          // Try next strategy
-        }
-      }
-      
-      if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 200));
-      }
-    }
-
-    return { success: false, code: null };
-  }
-
-  function captureFromMonacoAPI() {
-    if (typeof window.monaco === 'undefined' || !window.monaco.editor) {
-      throw new Error('Monaco not available');
-    }
-
-    const models = window.monaco.editor.getModels();
-    if (!models || models.length === 0) {
-      throw new Error('No models');
-    }
-
-    const solutionModel = models.find(m => 
-      !m.uri.toString().includes('test')
-    ) || models[0];
-
-    const code = solutionModel.getValue();
-    if (!code) throw new Error('Empty');
-    
-    return code;
-  }
-
-  function captureFromTextarea() {
-    const textarea = document.querySelector('.monaco-editor textarea') ||
-                    document.querySelector('textarea');
-    if (textarea && textarea.value) {
-      return textarea.value;
-    }
-    throw new Error('No textarea');
-  }
-
-  function captureFromVisibleLines() {
-    const lines = document.querySelectorAll('.view-lines .view-line');
-    if (lines.length > 0) {
-      return Array.from(lines).map(l => l.textContent).join('\n');
-    }
-    throw new Error('No visible lines');
-  }
-
-  function detectLanguage() {
-    // Try Monaco
-    try {
-      if (window.monaco && window.monaco.editor) {
-        const models = window.monaco.editor.getModels();
-        if (models.length > 0) {
-          const lang = models[0].getLanguageId();
-          if (lang) return normalizeLanguage(lang);
-        }
-      }
-    } catch (e) {}
-
-    // Try language selector
-    const langElement = document.querySelector('[data-mode-id]') ||
-                       document.querySelector('.ant-select-selection-item');
-    if (langElement) {
-      const lang = langElement.getAttribute('data-mode-id') || langElement.textContent;
-      if (lang) return normalizeLanguage(lang);
-    }
-
-    // Try local storage
-    try {
-      const globalLang = localStorage.getItem('global_lang');
-      if (globalLang) {
-        const parsed = JSON.parse(globalLang);
-        if (parsed.lang) return normalizeLanguage(parsed.lang);
-      }
-    } catch (e) {}
-
-    return 'python3';
-  }
-
-  function normalizeLanguage(lang) {
-    if (!lang || typeof lang !== 'string') return 'python3';
-    
-    const lowercaseLang = lang.toLowerCase().trim();
-    
-    const map = {
-      // Python
-      'python': 'python3', 'py': 'python3', 'python3': 'python3',
-      // JavaScript
-      'javascript': 'javascript', 'js': 'javascript', 'ecmascript': 'javascript',
-      // TypeScript
-      'typescript': 'typescript', 'ts': 'typescript',
-      // Java
-      'java': 'java',
-      // C++
-      'c++': 'cpp', 'cpp': 'cpp', 'c++17': 'cpp', 'c++20': 'cpp',
-      // C
-      'c': 'c',
-      // C#
-      'csharp': 'csharp', 'c#': 'csharp', 'cs': 'csharp',
-      // Go
-      'go': 'go',
-      // Rust
-      'rust': 'rust',
-      // PHP
-      'php': 'php',
-      // Swift
-      'swift': 'swift',
-      // Kotlin
-      'kotlin': 'kotlin', 'kt': 'kotlin',
-      // Ruby
-      'ruby': 'ruby', 'rb': 'ruby',
-      // R
-      'r': 'r',
-      // Scala
-      'scala': 'scala',
-      // Bash
-      'bash': 'bash', 'shell': 'bash',
-      // SQL
-      'sql': 'sql'
-    };
-    
-    return map[lowercaseLang] || lowercaseLang;
-  }
-
-  function getDisplayLanguageName(lang) {
-    const displayMap = {
-      'python3': 'Python',
-      'javascript': 'JavaScript',
-      'typescript': 'TypeScript',
-      'java': 'Java',
-      'cpp': 'C++',
-      'c': 'C',
-      'csharp': 'C#',
-      'go': 'Go',
-      'rust': 'Rust',
-      'swift': 'Swift',
-      'kotlin': 'Kotlin',
-      'php': 'PHP',
-      'ruby': 'Ruby',
-      'r': 'R',
-      'scala': 'Scala',
-      'bash': 'Bash',
-      'sql': 'SQL'
-    };
-    return displayMap[lang.toLowerCase()] || (lang.charAt(0).toUpperCase() + lang.slice(1));
-  }
-
-  // Analyze code to detect language from syntax patterns
-  function analyzeCodeLanguage(code) {
-    if (!code || typeof code !== 'string') return null;
-    
-    const patterns = {
-      'java': [
-        /\bpublic\s+class\s+\w+/,
-        /\bpublic\s+static\s+void\s+main/,
-        /\bimport\s+java\./,
-        /\bnew\s+\w+\s*\(/
-      ],
-      'cpp': [
-        /#include\s*[<"]/,
-        /\busing\s+namespace\s+std/,
-        /std::/,
-        /\bvector<|map<|unordered_map</
-      ],
-      'c': [
-        /#include\s*["<](stdio|stdlib|string)[.>h"]/,
-        /printf\s*\(/,
-        /scanf\s*\(/,
-        /\bmalloc\s*\(/
-      ],
-      'python': [
-        /\bdef\s+\w+\s*\(/,
-        /\bclass\s+\w+\s*:/,
-        /\bif\s+__name__\s*==\s*['"]__main__['"]/,
-        /\bimport\s+\w+|from\s+\w+\s+import/
-      ],
-      'javascript': [
-        /\bfunction\s+\w+\s*\(|const\s+\w+\s*=\s*\(|let\s+\w+\s*=|var\s+\w+\s*=/,
-        /\bconst\s+.*=.*=>|function\s*\(/,
-        /console\.(log|error|warn)/,
-        /\brequire\s*\(|import\s+.*from/
-      ],
-      'typescript': [
-        /:\s*(string|number|boolean|any|void|interface|type|enum)/,
-        /\binterface\s+\w+|type\s+\w+\s*=/,
-        /public\s+\w+\s*:/,
-        /\b<\w+>/
-      ],
-      'go': [
-        /\bpackage\s+main/,
-        /\bfunc\s+\w+\s*\(/,
-        /\bimport\s*\(/,
-        /\berr\s+!=\s+nil/
-      ],
-      'rust': [
-        /\bfn\s+\w+\s*\(/,
-        /\bmut\s+\w+/,
-        /\b&str|String::|Vec::/,
-        /\blet\s+mut\s+\w+/
-      ],
-      'csharp': [
-        /\busing\s+System/,
-        /\bpublic\s+(class|interface|struct|enum)/,
-        /\bnamespace\s+\w+/,
-        /\bvar\s+\w+\s*=/
-      ],
-      'php': [
-        /<\?php|<\?/,
-        /\$\w+\s*=/,
-        /\bfunction\s+\w+\s*\(/,
-        /echo\s+|print\s+/
-      ]
-    };
-    
-    let bestMatch = { lang: null, score: 0 };
-    
-    for (const [lang, patternList] of Object.entries(patterns)) {
-      let score = 0;
-      for (const pattern of patternList) {
-        const matches = code.match(pattern);
-        if (matches) {
-          score += matches.length;
-        }
-      }
-      
-      if (score > bestMatch.score) {
-        bestMatch = { lang, score };
-      }
-    }
-    
-    return bestMatch.score > 0 ? bestMatch.lang : null;
-  }
-
-  function getLanguageExtension(lang) {
-    const map = {
-      'python3': 'py', 'javascript': 'js', 'typescript': 'ts',
-      'java': 'java', 'cpp': 'cpp', 'c': 'c', 'csharp': 'cs',
-      'go': 'go', 'rust': 'rs', 'swift': 'swift', 'kotlin': 'kt',
-      'php': 'php', 'ruby': 'rb', 'r': 'r', 'scala': 'scala',
-      'bash': 'sh', 'sql': 'sql'
-    };
-    return map[lang] || 'txt';
-  }
-  
-  /**
-   * Initialize GitHub sync and set up submission monitoring
-   */
-  async function initGitHubSync() {
-    try {
-      const result = await safeStorageGet(['github_sync_enabled', 'github_username', 'github_repo', 'github_token_encrypted']);
-      
-      console.log('📊 GitHub sync storage check:', {
-        enabled: result.github_sync_enabled,
-        hasEncryptedToken: !!result.github_token_encrypted,
-        username: result.github_username,
-        repo: result.github_repo
-      });
-      
-      // Check if github_sync_enabled is true AND we have encrypted token stored
-      if (result.github_sync_enabled && result.github_token_encrypted) {
-        githubSyncEnabled = true;
-        console.log('✅ LeetStreak: GitHub sync is ENABLED');
-        
-        // Monitor for submit button clicks
-        setupSubmitButtonListener();
-      } else {
-        console.log('❌ LeetStreak: GitHub sync is DISABLED');
-        if (!result.github_sync_enabled) {
-          console.log('  - Reason: github_sync_enabled flag not set');
-        }
-        if (!result.github_token_encrypted) {
-          console.log('  - Reason: github_token_encrypted not found in storage');
-        }
-      }
-    } catch (error) {
-      console.error('LeetStreak: Failed to initialize GitHub sync:', error);
-    }
-  }
-
-  /**
-   * Set up listener for Submit Solution button
-   */
-  function setupSubmitButtonListener() {
-    console.log('LeetStreak: Setting up submit button listener...');
-    
-    // Use event delegation on document
-    document.addEventListener('click', async (event) => {
-      try {
-        const target = event.target;
-        
-        // Check if clicked element or parent is a submit button
-        const button = target.closest('button');
-        if (!button) return;
-        
-        const buttonText = button.textContent || '';
-        const isSubmitButton = 
-          (buttonText.includes('Submit') && 
-          !buttonText.includes('Submission') &&
-          button.getAttribute('data-e2e-locator') === 'console-submit-button') ||
-          (buttonText.trim() === 'Submit' && !button.disabled);
-        
-        if (isSubmitButton && githubSyncEnabled) {
-          console.log('🚀 LeetStreak: Submit button clicked! Capturing code...');
-          await handleSubmissionCapture();
-        }
-      } catch (error) {
-        // Silently ignore errors from extension context invalidation
-        if (error.message && error.message.includes('Extension context invalidated')) {
-          return;
-        }
-        console.error('LeetStreak: Error in submit button listener:', error);
-      }
-    }, true); // Use capture phase
-    
-    console.log('LeetStreak: Submit button listener active');
-  }
-
-  /**
-   * Capture code and metadata before submission
-   */
-  async function handleSubmissionCapture() {
-    try {
-      console.log('LeetStreak: Starting code capture...');
-      
-      // Capture code using multi-strategy approach
-      const captureResult = await captureCodeMultiStrategy();
-      
-      console.log('LeetStreak: Code capture result:', captureResult.success ? 'SUCCESS' : 'FAILED');
-      
-      if (!captureResult.success) {
-        console.warn('LeetStreak: Code capture failed');
-        showNotification('⚠️ Could not capture code', 'error');
-        return;
-      }
-
-      console.log('LeetStreak: Code captured:', captureResult.code.length, 'characters');
-
-      // Detect language
-      const language = detectLanguage();
-      const extension = getLanguageExtension(language);
-      
-      console.log('LeetStreak: Detected language:', language);
-
-      // Extract problem metadata
-      const problemData = extractProblemMetadata();
-      
-      if (!problemData) {
-        console.warn('LeetStreak: Failed to extract problem metadata');
-        showNotification('⚠️ Could not extract problem data', 'error');
-        return;
-      }
-
-      console.log('LeetStreak: Problem data:', problemData.title);
-
-      // Create submission object
-      const submission = {
-        code: captureResult.code,
-        language: language,
-        extension: extension,
-        problemTitle: problemData.title,
-        problemSlug: problemData.slug,
-        difficulty: problemData.difficulty,
-        topics: problemData.topics || ['Unsorted'],
-        questionNumber: problemData.number,
-        problemUrl: window.location.href,
-        timestamp: Date.now(),
-        captureMethod: captureResult.method
-      };
-
-      // Store as pending submission
-      const submissionId = `pending_${problemData.slug}_${Date.now()}`;
-      await safeStorageSet({
-        [submissionId]: submission
-      });
-
-      console.log('✅ LeetStreak: Code captured and stored as pending:', submissionId);
-      showNotification('📝 Code captured! Waiting for result...', 'info');
-
-      // Start watching for "Accepted" status
-      startSubmissionWatcher(submissionId, submission);
-
-    } catch (error) {
-      console.error('❌ LeetStreak: Submission capture failed:', error);
-      showNotification('❌ Capture failed: ' + error.message, 'error');
-    }
-  }
-
-  /**
-   * Extract problem metadata using multiple strategies
-   */
-  function extractProblemMetadata() {
-    try {
-      // Extract basic data
-      const basicData = extractProblemData();
-      
-      if (!basicData) {
-        return null;
-      }
-
-      // Try to extract topics/tags from the page
-      const topics = extractTopics();
-
-      return {
-        ...basicData,
-        topics: topics.length > 0 ? topics : ['Unsorted']
-      };
-    } catch (error) {
-      console.error('Error extracting problem metadata:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Extract problem topics/tags
-   */
-  function extractTopics() {
-    const topics = [];
-    
-    try {
-      // Strategy 1: Tags container
-      const tagElements = document.querySelectorAll('[class*="topic-tag"]');
-      tagElements.forEach(tag => {
-        const text = tag.textContent.trim();
-        if (text) topics.push(text);
-      });
-
-      // Strategy 2: Link elements with topic in href
-      if (topics.length === 0) {
-        const topicLinks = document.querySelectorAll('a[href*="/tag/"]');
-        topicLinks.forEach(link => {
-          const text = link.textContent.trim();
-          if (text) topics.push(text);
-        });
-      }
-
-      // Strategy 3: GraphQL data in page
-      if (topics.length === 0) {
-        const scripts = document.querySelectorAll('script');
-        scripts.forEach(script => {
-          if (script.textContent.includes('"topicTags"')) {
-            try {
-              const match = script.textContent.match(/"topicTags":\s*\[([^\]]+)\]/);
-              if (match) {
-                const tagsText = match[1];
-                const tagMatches = tagsText.matchAll(/"name":"([^"]+)"/g);
-                for (const tagMatch of tagMatches) {
-                  topics.push(tagMatch[1]);
-                }
-              }
-            } catch (e) {
-              // Continue
-            }
-          }
-        });
-      }
-    } catch (error) {
-      console.warn('Error extracting topics:', error);
-    }
-
-    return [...new Set(topics)]; // Remove duplicates
-  }
-
-  /**
-   * Watch for "Accepted" status after submission
-   */
-  function startSubmissionWatcher(submissionId, submission) {
-    console.log('LeetStreak: Starting submission watcher...');
-    
-    if (submissionWatcher) {
-      submissionWatcher.disconnect();
-    }
-
-    const timeout = 5 * 60 * 1000; // 5 minutes
-    const startTime = Date.now();
-
-    submissionWatcher = new MutationObserver(async (mutations) => {
-
-      // Check for timeout
-      if (Date.now() - startTime > timeout) {
-        console.log('⏱️ LeetStreak: Submission watch timeout');
-        submissionWatcher.disconnect();
-        await markSubmissionExpired(submissionId);
-        return;
-      }
-
-      // Check for "Accepted" status
-      if (isSubmissionAccepted()) {
-        console.log('✅ LeetStreak: Submission ACCEPTED! Extracting stats...');
-        submissionWatcher.disconnect();
-        showNotification('✅ Accepted! Extracting stats...', 'success');
-        
-        // Wait a moment for stats to fully render
-        await new Promise(r => setTimeout(r, 1500));
-        
-        // Extract runtime and memory stats
-        const performanceStats = extractPerformanceStats();
-        console.log('📊 Performance stats:', performanceStats);
-        
-        // Merge performance stats with submission
-        const enrichedSubmission = {
-          ...submission,
-          ...performanceStats
-        };
-        
-        showNotification('✅ Syncing to GitHub...', 'success');
-        
-        // Send to background worker for GitHub sync
-        await triggerGitHubSync(submissionId, enrichedSubmission);
-      }
-
-      // Check for failure (stop watching)
-      if (isSubmissionFailed()) {
-        console.log('❌ LeetStreak: Submission failed, discarding');
-        submissionWatcher.disconnect();
-        await discardPendingSubmission(submissionId);
-      }
-    });
-
-    // Watch multiple possible result containers
-    const containers = [
-      document.body, // Fallback - watch everything
-      document.querySelector('[data-e2e-locator="submission-result"]'),
-      document.querySelector('#qd-content'),
-      document.querySelector('[class*="result"]')
-    ].filter(Boolean);
-
-    containers.forEach(container => {
-      submissionWatcher.observe(container, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-        attributes: true
-      });
-    });
-
-    console.log(`LeetStreak: Watching for submission result (timeout: ${timeout/1000}s)`);
-  }
-
-  /**
-   * Extract runtime and memory performance stats from the result page
-   * Called after submission is accepted
-   */
   function extractPerformanceStats() {
-    const stats = {
+    let stats = {
       runtime: null,
       runtimePercentile: null,
       memory: null,
@@ -1830,10 +986,7 @@
     };
 
     try {
-      // Strategy 1: Look for result details in the submission result area
-      const resultArea = document.querySelector('[data-e2e-locator="submission-result"]') || 
-                        document.querySelector('[class*="result"]');
-      
+      const resultArea = document.querySelector('[class*="result"], [data-e2e-locator="submission-result"]');
       if (resultArea) {
         const text = resultArea.textContent;
         
@@ -2041,173 +1194,92 @@
   }
 
   /**
-   * Trigger GitHub sync in background worker
+   * Autonomous LeetCode Submission Observer
+   * Unconditionally monitors submission verdict on problem pages without GitHub coupling.
    */
-  async function triggerGitHubSync(submissionId, submission) {
-    try {
-      console.log('🐙 LeetStreak: GitHub Auto-Sync triggered');
-      console.log('📤 Sending GitHub sync message to background with:', {
-        submissionId,
-        problemTitle: submission.problemTitle,
-        language: submission.language,
-        codeLength: submission.code?.length || 0
-      });
-      
-      // Validate input
-      if (!submissionId) {
-        throw new Error('submissionId is required');
-      }
-      if (!submission) {
-        throw new Error('submission object is required');
-      }
-      console.log('✅ Submission data validated');
-      
-      // First, ping the service worker to ensure it's awake
-      console.log('🏓 Pinging service worker to keep it awake...');
-      try {
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Service worker ping timeout'));
-          }, 2000);
-          
-          console.log('Calling chrome.runtime.sendMessage with PING...');
-          chrome.runtime.sendMessage({ type: 'PING' }, (response) => {
-            console.log('PING response received:', response);
-            clearTimeout(timeout);
-            if (chrome.runtime.lastError) {
-              console.error('PING error:', chrome.runtime.lastError);
-              reject(chrome.runtime.lastError);
-            } else {
-              resolve(response);
-            }
-          });
-        });
-        console.log('✅ Service worker is awake');
-      } catch (pingError) {
-        console.warn('⚠️ Service worker ping failed, proceeding anyway:', pingError.message);
-      }
-      
-      // Send with retry logic in case service worker isn't ready
-      let retries = 0;
-      const maxRetries = 3;
-      
-      const sendMessage = () => {
-        console.log('🚀 LeetStreak: About to send GITHUB_SYNC_SUBMISSION message...');
-        console.log('📋 submissionId:', submissionId);
-        console.log('📋 submission object:', submission);
-        
-        chrome.runtime.sendMessage({
-          type: 'GITHUB_SYNC_SUBMISSION',
-          submissionId,
-          submission
-        }, (response) => {
-          console.log('📬 LeetStreak: Message callback received, response:', response);
-          if (chrome.runtime.lastError) {
-            console.error('❌ LeetStreak: Message delivery error:', chrome.runtime.lastError.message);
-            
-            if (retries < maxRetries) {
-              console.log(`⏳ Retry ${retries + 1}/${maxRetries}...`);
-              retries++;
-              setTimeout(sendMessage, 1000); // Retry after 1 second
-            } else {
-              showNotification('❌ Sync failed: Extension error', 'error');
-            }
-            return;
-          }
-          
-          if (response && response.success) {
-            console.log('✅ LeetStreak: GitHub auto-sync response received - SUCCESS');
-            showNotification('✅ Synced to GitHub!', 'success');
-          } else {
-            console.error('❌ LeetStreak: GitHub auto-sync response - FAILURE:', response?.error);
-            showNotification('⚠️ Auto-sync failed. Stored as pending.', 'info');
-          }
-        });
+  let isObservingSubmission = false;
+
+  function initSubmissionObserver() {
+    if (isObservingSubmission) return;
+    isObservingSubmission = true;
+
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest?.('button');
+      if (!button || !/^Submit$/i.test(button.textContent.trim())) return;
+
+      console.log('[LeetStreak] Submit button clicked. Starting observation...');
+      const problem = currentProblemData || extractProblemData() || {};
+      const code = extractCode();
+      const language = getSelectedLanguage();
+      battleAttemptCount++;
+
+      let checkInterval = null;
+      let timeoutId = null;
+
+      const stopChecking = () => {
+        if (checkInterval) {
+          clearInterval(checkInterval);
+          checkInterval = null;
+        }
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
       };
-      
-      console.log('About to call sendMessage function');
-      sendMessage();
-      console.log('sendMessage function called');
-    } catch (error) {
-      console.error('❌ LeetStreak: Critical error in triggerGitHubSync:', error);
-      console.error('Error stack:', error.stack);
-      showNotification('❌ Sync error: ' + error.message, 'error');
-    }
+
+      checkInterval = setInterval(async () => {
+        if (isSubmissionAccepted()) {
+          stopChecking();
+          console.log('✅ [LeetStreak] Accepted submission detected!');
+          showNotification('✅ LeetStreak: Accepted submission detected!', 'success');
+
+          const stats = extractPerformanceStats();
+
+          // 1. Notify service worker of accepted solve (lifts Hardcore Mode, updates Problem Queue, syncs stats)
+          try {
+            await chrome.runtime.sendMessage({
+              type: 'SUBMISSION_ACCEPTED',
+              problemSlug: problem.slug,
+              title: problem.title
+            });
+          } catch (e) {
+            console.warn('[LeetStreak] Could not send SUBMISSION_ACCEPTED:', e);
+          }
+
+          // 2. Report battle submission if active
+          await triggerBattleSubmission(stats, code, language);
+
+        } else if (isSubmissionFailed()) {
+          stopChecking();
+          console.log('❌ [LeetStreak] Submission failed or rejected.');
+        }
+      }, 1000);
+
+      // 5-minute timeout safety
+      timeoutId = setTimeout(() => {
+        stopChecking();
+      }, 5 * 60 * 1000);
+    }, true);
   }
 
-  /**
-   * Mark submission as expired (no result within timeout)
-   */
-  async function markSubmissionExpired(submissionId) {
-    try {
-      // Move to failed syncs for manual review
-      const result = await safeStorageGet([submissionId]);
-      const submission = result[submissionId];
-      
-      if (submission) {
-        const failedSyncs = await safeStorageGet('failed_syncs');
-        const failed = failedSyncs.failed_syncs || [];
-        
-        failed.push({
-          submission,
-          error: 'Timeout: No result detected within 5 minutes',
-          timestamp: Date.now(),
-          retryCount: 0
-        });
-
-        await safeStorageSet({ failed_syncs: failed });
-      }
-
-      // Remove pending submission
-      await chrome.storage.local.remove(submissionId);
-      console.log('LeetStreak: Marked submission as expired');
-    } catch (error) {
-      console.error('LeetStreak: Failed to mark submission as expired:', error);
-    }
-  }
-
-  /**
-   * Discard pending submission (failed submission)
-   */
-  async function discardPendingSubmission(submissionId) {
-    try {
-      await chrome.storage.local.remove(submissionId);
-      console.log('LeetStreak: Discarded pending submission');
-    } catch (error) {
-      console.error('LeetStreak: Failed to discard submission:', error);
-    }
-  }
-
-  // ===== End GitHub Auto-Sync =====
-  
   // Initialize
   function init() {
     if (!isProblemPage()) {
-      console.log('LeetStreak: Not on a problem page');
       return;
     }
-    
-    console.log('LeetStreak: Initializing on problem page...');
-    
-    // Load GitHub sync settings
-    initGitHubSync();
-    
-    // Inject buttons after a delay to ensure DOM is ready
+
+    console.log('[LeetStreak] Initializing content scripts on problem page...');
+    initSubmissionObserver();
+
     setTimeout(() => {
-      if (!buttonsInjected) {
-        injectButtons();
-      }
+      if (!buttonsInjected) injectButtons();
     }, 1500);
-    
-    // Retry injection if it failed
+
     setTimeout(() => {
-      if (!buttonsInjected) {
-        console.log('LeetStreak: Retrying button injection...');
-        injectButtons();
-      }
+      if (!buttonsInjected) injectButtons();
     }, 4000);
-    
-    // Watch for URL changes (for SPA navigation)
+
+    // Watch for SPA URL changes
     let lastUrl = location.href;
     const urlObserver = new MutationObserver(() => {
       try {
@@ -2215,57 +1287,18 @@
         if (url !== lastUrl) {
           lastUrl = url;
           buttonsInjected = false;
-          githubSyncEnabled = false; // Reset sync state
           if (isProblemPage()) {
-            console.log('LeetStreak: URL changed, re-injecting...');
-            initGitHubSync(); // Reinitialize sync
+            initSubmissionObserver();
             setTimeout(() => injectButtons(), 2000);
           }
         }
-      } catch (error) {
-        // Silently handle errors in observer to prevent spam
-        if (error.message && !error.message.includes('Extension context')) {
-          console.error('LeetStreak: URL observer error:', error);
-        }
-      }
+      } catch {}
     });
-    
+
     try {
       urlObserver.observe(document, { subtree: true, childList: true });
-    } catch (error) {
-      console.error('LeetStreak: Failed to observe URL changes:', error);
-    }
+    } catch {}
   }
-  
-  // Load html2canvas library dynamically with error handling
-  function loadHtml2Canvas() {
-    // Check if already loaded
-    if (typeof html2canvas !== 'undefined') {
-      console.log('LeetStreak: html2canvas already loaded');
-      return;
-    }
-    
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    script.async = true;
-    script.onload = () => {
-      console.log('LeetStreak: html2canvas loaded successfully');
-    };
-    script.onerror = () => {
-      console.warn('LeetStreak: Failed to load html2canvas from CDN');
-      // Try alternative CDN
-      const altScript = document.createElement('script');
-      altScript.src = 'https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js';
-      altScript.async = true;
-      altScript.onload = () => console.log('LeetStreak: html2canvas loaded from unpkg');
-      altScript.onerror = () => console.error('LeetStreak: All html2canvas CDN sources failed');
-      document.head.appendChild(altScript);
-    };
-    document.head.appendChild(script);
-  }
-  
-  // Start
+
   init();
-  loadHtml2Canvas();
-  
 })();

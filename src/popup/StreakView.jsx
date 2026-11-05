@@ -3,7 +3,7 @@ import MilestoneCelebration from './MilestoneCelebration';
 import GoalsPanel from './GoalsPanel';
 import DailyQuestion from './DailyQuestion';
 import ProblemQueue from './ProblemQueue';
-import { exportToCSV, exportToPDF } from '../shared/export-manager';
+
 
 function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0);
@@ -21,21 +21,27 @@ function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
     }
   }, [currentStreak, celebratedMilestones]);
 
-  // Compute streak warning as derived state
+  // Compute streak warning: check allAcceptedSubmissions for a solve today (UTC).
+  // We do NOT use submissionCalendar here because it counts all attempts
+  // (wrong answers, TLE, etc.) — submitting 5 wrong answers shouldn't satisfy
+  // the streak warning check.
   const showStreakWarning = useMemo(() => {
     if (dismissedStreakWarning) return false;
     if (!friends || friends.length === 0) return false;
-    
+    if (currentStreak === 0) return false;
+
     const userData = friends[0];
-    if (!userData?.submissionCalendar) return false;
-    
-    const today = new Date();
-    const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-    const todayTimestamp = Math.floor(todayUTC.getTime() / 1000).toString();
-    const todayCount = parseInt(userData.submissionCalendar[todayTimestamp]) || 0;
-    
-    // Show warning if user has streak and hasn't solved today
-    return currentStreak > 0 && todayCount === 0;
+    const allAccepted = userData?.allAcceptedSubmissions;
+    if (!Array.isArray(allAccepted) || allAccepted.length === 0) return false;
+
+    const todayUTCStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD UTC
+    const solvedToday = allAccepted.some(sub => {
+      const ts = parseInt(sub.timestamp, 10);
+      if (isNaN(ts) || ts <= 0) return false;
+      return new Date(ts * 1000).toISOString().split('T')[0] === todayUTCStr;
+    });
+
+    return !solvedToday;
   }, [friends, currentStreak, dismissedStreakWarning]);
 
   // Safety check
@@ -302,23 +308,7 @@ function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
           )}
         </button>
         
-        {/* Export Buttons */}
-        <div className="flex items-center justify-center gap-3 mt-4">
-          <button
-            onClick={() => exportToCSV(userData)}
-            className="px-4 py-2 text-xs font-semibold text-text-main bg-surface hover:bg-surfaceHover border border-surfaceHover rounded-lg transition-all duration-300 shadow-sm hover:shadow-md active:scale-95 flex items-center gap-2"
-          >
-            <span>📄</span>
-            <span>Export CSV</span>
-          </button>
-          <button
-            onClick={() => exportToPDF(userData)}
-            className="px-4 py-2 text-xs font-semibold text-text-main bg-surface hover:bg-surfaceHover border border-surfaceHover rounded-lg transition-all duration-300 shadow-sm hover:shadow-md active:scale-95 flex items-center gap-2"
-          >
-            <span>📋</span>
-            <span>Export PDF</span>
-          </button>
-        </div>
+
         
         <p className="text-xs text-text-muted text-center mt-2">
           Auto-syncs every 30 minutes
@@ -396,7 +386,8 @@ function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
         <div className="bg-surface rounded-3xl shadow-xl p-6 border border-surfaceHover transition-all duration-300 hover:shadow-2xl hover:shadow-primary/5">
           <h3 className="text-sm font-semibold text-text-muted mb-4 text-center">Your Stats 📊</h3>
           
-          <div className="grid grid-cols-4 gap-3">
+          {/* Difficulty breakdown */}
+          <div className="grid grid-cols-4 gap-3 mb-3">
             <div className="text-center py-3 bg-leetcode-easy/10 rounded-2xl shadow-sm border border-leetcode-easy/20 hover:bg-leetcode-easy/20 transition-colors">
               <div className="text-xl font-bold text-leetcode-easy">{totalStats.easy}</div>
               <div className="text-xs text-text-muted mt-1">Easy</div>
@@ -414,6 +405,20 @@ function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
               <div className="text-xs text-text-muted mt-1">Total</div>
             </div>
           </div>
+
+          {/* Streak summary row */}
+          {userData && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-center py-3 bg-primary/10 rounded-2xl shadow-sm border border-primary/20 hover:bg-primary/20 transition-colors">
+                <div className="text-xl font-bold text-primary">{currentStreak}</div>
+                <div className="text-xs text-text-muted mt-1">🔥 Current Streak</div>
+              </div>
+              <div className="text-center py-3 bg-orange-500/10 rounded-2xl shadow-sm border border-orange-500/20 hover:bg-orange-500/20 transition-colors">
+                <div className="text-xl font-bold text-orange-400">{userData?.stats?.longestStreak || currentStreak}</div>
+                <div className="text-xs text-text-muted mt-1">🏆 Best Streak</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
