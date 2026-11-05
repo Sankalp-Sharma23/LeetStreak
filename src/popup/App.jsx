@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Users, TrendingUp, BarChart3, Rocket, Loader2, Sparkles, Frown, FileBarChart, Flame, Swords } from 'lucide-react';
 import AddFriend from './AddFriend';
 import LoadingSkeleton from './LoadingSkeleton';
@@ -258,10 +258,23 @@ function App() {
     }
   };
 
-  const friendsList = Object.values(friends).filter(f => f && f.profile?.username?.toLowerCase() !== myUsername?.toLowerCase());
-  const myData = ownProfile || (myUsername ? (friends[myUsername] || Object.values(friends).find(f => f.profile?.username?.toLowerCase() === myUsername.toLowerCase())) : null);
+  const friendsList = Object.values(friends).filter(f => f && (f.profile?.username || f.username)?.toLowerCase() !== myUsername?.toLowerCase());
+  const myData = ownProfile || (myUsername ? (
+    friends[myUsername] || 
+    friends[myUsername.toLowerCase()] || 
+    Object.values(friends).find(f => (f?.profile?.username || f?.username)?.toLowerCase() === myUsername.toLowerCase())
+  ) : null);
   
-  // Debug logging removed — no production console.log in render path
+  // Safe calendar parsing to prevent crashes from corrupted JSON strings
+  const parsedCalendar = useMemo(() => {
+    if (!myData?.submissionCalendar) return null;
+    if (typeof myData.submissionCalendar === 'object') return myData.submissionCalendar;
+    try {
+      return JSON.parse(myData.submissionCalendar);
+    } catch {
+      return null;
+    }
+  }, [myData?.submissionCalendar]);
   
   // Calculate my streak
   const myStreak = myData?.stats?.streak || 0;
@@ -312,7 +325,8 @@ function App() {
     );
   }
 
-  return (    <>
+  return (
+    <>
       {/* Splash Screen with Animation */}
       {showSplash && (
         <SplashScreen 
@@ -484,7 +498,7 @@ function App() {
               ) : view === 'streak' ? (
                 hasData ? (
                   <StreakView 
-                    friends={[myData]} 
+                    friends={myData ? [myData] : []} 
                     currentStreak={myStreak}
                     onRefresh={handleRefresh}
                     refreshing={refreshing}
@@ -506,10 +520,13 @@ function App() {
               ) : view === 'analytics' ? (
                 myData ? (
                   <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-                    {myData.submissionCalendar && (
-                      <ProgressChart submissionCalendar={typeof myData.submissionCalendar === 'string' ? JSON.parse(myData.submissionCalendar) : myData.submissionCalendar} />
+                    {parsedCalendar && (
+                      <ProgressChart submissionCalendar={parsedCalendar} />
                     )}
-                    <InsightsPanelEnhanced userData={myData} friendsData={friendsList.filter(f => f.username !== myUsername)} />
+                    <InsightsPanelEnhanced 
+                      userData={myData} 
+                      friendsData={friendsList.filter(f => (f?.profile?.username || f?.username)?.toLowerCase() !== myUsername?.toLowerCase())} 
+                    />
                   </div>
                 ) : (
                   <div className="flex items-center justify-center h-full p-8 text-center">
