@@ -435,7 +435,16 @@ export async function callRpc(functionName, params = {}) {
     if (!res.ok) {
       const errText = await res.text();
       console.error(`[SupabaseClient] RPC ${functionName} error:`, res.status, errText);
-      return { success: false, error: errText };
+      let parsedErr = null;
+      try {
+        parsedErr = JSON.parse(errText);
+      } catch {}
+      return {
+        success: false,
+        error: parsedErr?.message || parsedErr?.error_description || errText,
+        code: parsedErr?.code || null,
+        raw: errText
+      };
     }
 
     return await res.json();

@@ -94,8 +94,28 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     if (rpcRes && rpcRes.success && rpcRes.battle) {
       return { success: true, battle: rpcRes.battle };
     }
-    if (rpcRes && rpcRes.error) {
-      return { success: false, error: rpcRes.error };
+    // Check if RPC function is missing from Supabase schema cache (PGRST202)
+    const isMissingFunction = rpcRes?.code === 'PGRST202' || (
+      rpcRes?.error && typeof rpcRes.error === 'string' && (
+        rpcRes.error.includes('PGRST202') ||
+        rpcRes.error.includes('schema cache') ||
+        rpcRes.error.includes('Could not find the function')
+      )
+    ) || (
+      rpcRes?.raw && typeof rpcRes.raw === 'string' && (
+        rpcRes.raw.includes('PGRST202') ||
+        rpcRes.raw.includes('schema cache')
+      )
+    );
+    if (isMissingFunction) {
+      console.warn('[BattleManager] create_battle_challenge RPC not found in schema cache. Running REST fallback.');
+    } else if (rpcRes && rpcRes.error) {
+      let cleanMsg = rpcRes.error;
+      try {
+        const parsed = JSON.parse(rpcRes.error);
+        cleanMsg = parsed.message || parsed.error || cleanMsg;
+      } catch {}
+      return { success: false, error: cleanMsg };
     }
   } catch (rpcErr) {
     console.warn('[BattleManager] create_battle_challenge RPC error, using REST fallback:', rpcErr);

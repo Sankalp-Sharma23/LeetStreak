@@ -224,14 +224,14 @@ async function x(e) {
     throw console.error("Error fetching LeetCode data:", r), r;
   }
 }
-const Se = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Oe = typeof import.meta < "u" && Se ? Se : typeof process < "u" && process.env ? process.env : {}, m = Oe.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", H = Oe.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", S = m.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), d = {
+const Se = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Oe = typeof import.meta < "u" && Se ? Se : typeof process < "u" && process.env ? process.env : {}, h = Oe.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", H = Oe.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", b = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), f = {
   SESSION_LOADING: "SESSION_LOADING",
   AUTHENTICATED: "AUTHENTICATED",
   AUTH_REQUIRED: "AUTH_REQUIRED",
   SESSION_EXPIRED: "SESSION_EXPIRED",
   AUTH_ERROR: "AUTH_ERROR"
 };
-let D = null, te = d.SESSION_LOADING, Ee = null, q = 0;
+let D = null, te = f.SESSION_LOADING, Ee = null, q = 0;
 const ht = /* @__PURE__ */ new Set();
 function w(e, r = null) {
   te = e, Ee = r;
@@ -255,7 +255,7 @@ function ne(e = 60) {
   q = Date.now() + e * 1e3, typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ supabase_auth_cooldown_until: q }).catch(() => {
   });
 }
-async function E() {
+async function T() {
   if (D && D.expires_at > Date.now())
     return D;
   if (typeof chrome < "u" && chrome.storage?.local)
@@ -275,7 +275,7 @@ async function F(e) {
     }
 }
 async function _t() {
-  w(d.SESSION_LOADING);
+  w(f.SESSION_LOADING);
   try {
     let e = null;
     if (typeof chrome < "u" && chrome.storage?.local) {
@@ -284,26 +284,26 @@ async function _t() {
     } else
       e = D;
     if (!e)
-      return w(d.AUTH_REQUIRED), null;
+      return w(f.AUTH_REQUIRED), null;
     if (e.expires_at && e.expires_at > Date.now() + 6e4)
-      return D = e, w(d.AUTHENTICATED), D;
+      return D = e, w(f.AUTHENTICATED), D;
     if (e.refresh_token) {
       if (M())
-        return w(d.AUTH_ERROR, "Authentication temporarily rate-limited. Please wait."), null;
+        return w(f.AUTH_ERROR, "Authentication temporarily rate-limited. Please wait."), null;
       const r = await wt(e.refresh_token);
       if (r)
         return r;
     }
-    return await F(null), w(d.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
+    return await F(null), w(f.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
   } catch (e) {
-    return console.warn("[SupabaseClient] Error restoring session:", e), w(d.AUTH_ERROR, e.message), null;
+    return console.warn("[SupabaseClient] Error restoring session:", e), w(f.AUTH_ERROR, e.message), null;
   }
 }
 async function wt(e) {
   if (M())
-    return w(d.AUTH_ERROR, "Rate limited"), null;
+    return w(f.AUTH_ERROR, "Rate limited"), null;
   try {
-    const r = await fetch(`${S}/auth/v1/token?grant_type=refresh_token`, {
+    const r = await fetch(`${b}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -312,9 +312,9 @@ async function wt(e) {
       body: JSON.stringify({ refresh_token: e })
     });
     if (r.status === 429)
-      return ne(60), w(d.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
+      return ne(60), w(f.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
     if (!r.ok)
-      return await F(null), w(d.SESSION_EXPIRED, "Session expired or revoked."), null;
+      return await F(null), w(f.SESSION_EXPIRED, "Session expired or revoked."), null;
     const t = await r.json(), s = {
       access_token: t.access_token,
       refresh_token: t.refresh_token,
@@ -322,9 +322,9 @@ async function wt(e) {
       email: t.user?.email,
       expires_at: Date.now() + (t.expires_in ? t.expires_in * 1e3 : 3600 * 1e3)
     };
-    return await F(s), w(d.AUTHENTICATED), s;
+    return await F(s), w(f.AUTHENTICATED), s;
   } catch (r) {
-    return console.warn("[SupabaseClient] Network error during token refresh:", r), w(d.AUTH_ERROR, r.message), null;
+    return console.warn("[SupabaseClient] Network error during token refresh:", r), w(f.AUTH_ERROR, r.message), null;
   }
 }
 async function gt(e, r) {
@@ -335,7 +335,7 @@ async function gt(e, r) {
   if (!e || !r)
     throw new Error("Email and password are required");
   try {
-    const t = await fetch(`${S}/auth/v1/token?grant_type=password`, {
+    const t = await fetch(`${b}/auth/v1/token?grant_type=password`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -344,7 +344,7 @@ async function gt(e, r) {
       body: JSON.stringify({ email: e, password: r })
     });
     if (t.status === 429)
-      throw ne(60), w(d.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
+      throw ne(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
     if (!t.ok) {
       const o = await t.text();
       let n = "Invalid email or password";
@@ -362,9 +362,9 @@ async function gt(e, r) {
       email: s.user?.email || e,
       expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 3600 * 1e3)
     };
-    return await F(a), w(d.AUTHENTICATED), a;
+    return await F(a), w(f.AUTHENTICATED), a;
   } catch (t) {
-    throw w(d.AUTH_ERROR, t.message), t;
+    throw w(f.AUTH_ERROR, t.message), t;
   }
 }
 async function yt(e, r) {
@@ -375,7 +375,7 @@ async function yt(e, r) {
   if (!e || !r)
     throw new Error("Email and password are required");
   try {
-    const t = await fetch(`${S}/auth/v1/signup`, {
+    const t = await fetch(`${b}/auth/v1/signup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -384,7 +384,7 @@ async function yt(e, r) {
       body: JSON.stringify({ email: e, password: r })
     });
     if (t.status === 429)
-      throw ne(60), w(d.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
+      throw ne(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
     if (!t.ok) {
       const a = await t.text();
       let o = "Failed to create account";
@@ -404,22 +404,22 @@ async function yt(e, r) {
         email: s.user?.email || e,
         expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 36e5)
       };
-      return await F(a), w(d.AUTHENTICATED), { success: !0, session: a };
+      return await F(a), w(f.AUTHENTICATED), { success: !0, session: a };
     }
-    return w(d.AUTH_REQUIRED), {
+    return w(f.AUTH_REQUIRED), {
       success: !0,
       confirmationRequired: !0,
       user: s.user,
       message: "Account created. Please check your inbox to confirm your email before signing in."
     };
   } catch (t) {
-    throw w(d.AUTH_ERROR, t.message), t;
+    throw w(f.AUTH_ERROR, t.message), t;
   }
 }
 async function pt() {
   try {
-    const e = await E();
-    e?.access_token && fetch(`${S}/auth/v1/logout`, {
+    const e = await T();
+    e?.access_token && fetch(`${b}/auth/v1/logout`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -430,10 +430,10 @@ async function pt() {
     });
   } catch {
   }
-  return await F(null), w(d.AUTH_REQUIRED), { success: !0 };
+  return await F(null), w(f.AUTH_REQUIRED), { success: !0 };
 }
-async function C() {
-  const r = (await E())?.access_token || H;
+async function R() {
+  const r = (await T())?.access_token || H;
   return {
     "Content-Type": "application/json",
     apikey: H,
@@ -441,17 +441,28 @@ async function C() {
     Prefer: "return=representation"
   };
 }
-async function b(e, r = {}) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+async function A(e, r = {}) {
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const t = await C(), s = await fetch(`${S}/rest/v1/rpc/${e}`, {
+    const t = await R(), s = await fetch(`${b}/rest/v1/rpc/${e}`, {
       method: "POST",
       headers: t,
       body: JSON.stringify(r)
     });
     if (!s.ok) {
       const a = await s.text();
-      return console.error(`[SupabaseClient] RPC ${e} error:`, s.status, a), { success: !1, error: a };
+      console.error(`[SupabaseClient] RPC ${e} error:`, s.status, a);
+      let o = null;
+      try {
+        o = JSON.parse(a);
+      } catch {
+      }
+      return {
+        success: !1,
+        error: o?.message || o?.error_description || a,
+        code: o?.code || null,
+        raw: a
+      };
     }
     return await s.json();
   } catch (t) {
@@ -459,10 +470,10 @@ async function b(e, r = {}) {
   }
 }
 async function Ue(e) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return null;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return null;
   try {
-    const r = await C(), t = await fetch(
-      `${S}/rest/v1/profiles?leetcode_username=ilike.${encodeURIComponent(e)}&select=*`,
+    const r = await R(), t = await fetch(
+      `${b}/rest/v1/profiles?leetcode_username=ilike.${encodeURIComponent(e)}&select=*`,
       { method: "GET", headers: r }
     );
     if (!t.ok) return null;
@@ -473,12 +484,12 @@ async function Ue(e) {
   }
 }
 async function Ie(e, r) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return !1;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return !1;
   try {
-    const t = await E();
+    const t = await T();
     if (!t?.user_id)
       return !1;
-    const s = await C(), a = r?.stats || {}, o = r?.profile || {}, n = r?.contest || {}, i = {
+    const s = await R(), a = r?.stats || {}, o = r?.profile || {}, n = r?.contest || {}, i = {
       id: t.user_id,
       leetcode_username: e.toLowerCase(),
       display_name: o.realName || e,
@@ -492,7 +503,7 @@ async function Ie(e, r) {
       contest_rating: n.rating || 0,
       last_synced_at: (/* @__PURE__ */ new Date()).toISOString()
     };
-    return (await fetch(`${S}/rest/v1/profiles`, {
+    return (await fetch(`${b}/rest/v1/profiles`, {
       method: "POST",
       headers: {
         ...s,
@@ -505,12 +516,12 @@ async function Ie(e, r) {
   }
 }
 async function K() {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const e = await E();
+    const e = await T();
     if (!e?.user_id) return null;
-    const r = await C(), t = await fetch(
-      `${S}/rest/v1/user_settings?user_id=eq.${e.user_id}&select=*`,
+    const r = await R(), t = await fetch(
+      `${b}/rest/v1/user_settings?user_id=eq.${e.user_id}&select=*`,
       { method: "GET", headers: r }
     );
     if (!t.ok) return null;
@@ -521,12 +532,12 @@ async function K() {
   }
 }
 async function Ne(e) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return !1;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return !1;
   try {
-    const r = await E();
+    const r = await T();
     if (!r?.user_id) return !1;
-    const t = await C();
-    return (await fetch(`${S}/rest/v1/user_settings`, {
+    const t = await R();
+    return (await fetch(`${b}/rest/v1/user_settings`, {
       method: "POST",
       headers: {
         ...t,
@@ -543,56 +554,56 @@ async function Ne(e) {
   }
 }
 async function St() {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    return (await E())?.user_id ? await b("set_presence_offline") : null;
+    return (await T())?.user_id ? await A("set_presence_offline") : null;
   } catch {
     return null;
   }
 }
 async function Et() {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return [];
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return [];
   try {
-    const e = await b("get_online_friends");
+    const e = await A("get_online_friends");
     return Array.isArray(e) ? e : [];
   } catch (e) {
     return console.warn("[SupabaseClient] getOnlineFriends error:", e), [];
   }
 }
 async function ce(e) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
   try {
-    return await b("sync_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
+    return await A("sync_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
 async function Pe(e) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
   try {
-    return await b("remove_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
+    return await A("remove_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
 async function $e() {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return [];
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return [];
   try {
-    const e = await b("get_accepted_friends");
+    const e = await A("get_accepted_friends");
     return Array.isArray(e) ? e : e && Array.isArray(e.data) ? e.data : [];
   } catch (e) {
     return console.error("[SupabaseClient] getAcceptedFriends error:", e), [];
   }
 }
 async function bt() {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const e = await b("get_own_profile");
+    const e = await A("get_own_profile");
     if (e && typeof e == "object" && e.id) return e;
-    const r = await E();
+    const r = await T();
     if (!r?.user_id) return null;
-    const t = await C(), s = await fetch(
-      `${S}/rest/v1/profiles?id=eq.${encodeURIComponent(r.user_id)}&select=*`,
+    const t = await R(), s = await fetch(
+      `${b}/rest/v1/profiles?id=eq.${encodeURIComponent(r.user_id)}&select=*`,
       { method: "GET", headers: t }
     );
     if (!s.ok) return null;
@@ -603,9 +614,9 @@ async function bt() {
   }
 }
 async function re() {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return { success: !1 };
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return { success: !1 };
   try {
-    if (!(await E())?.user_id)
+    if (!(await T())?.user_id)
       return { success: !1, error: "No authenticated session" };
     const r = await bt();
     r?.leetcode_username && typeof chrome < "u" && chrome.storage?.local && await chrome.storage.local.set({
@@ -681,12 +692,12 @@ async function re() {
   }
 }
 async function Be(e, r, t) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e || !t) return !1;
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e || !t) return !1;
   try {
-    const s = await E();
+    const s = await T();
     if (!s?.user_id)
       return console.warn("[Roast] Authentication required to send cloud roasts"), !1;
-    const a = await b("send_roast", {
+    const a = await A("send_roast", {
       p_recipient_username: e.toLowerCase(),
       p_content: t.substring(0, 500)
     });
@@ -695,8 +706,8 @@ async function Be(e, r, t) {
     const o = await Ue(e);
     if (!o?.id)
       return console.warn(`[Roast] Target user ${e} has not registered on Supabase`), !1;
-    const n = await C();
-    return (await fetch(`${S}/rest/v1/roast_messages`, {
+    const n = await R();
+    return (await fetch(`${b}/rest/v1/roast_messages`, {
       method: "POST",
       headers: {
         ...n,
@@ -717,11 +728,11 @@ async function Be(e, r, t) {
   }
 }
 async function Me(e) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return [];
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return [];
   try {
-    if (!await E()) return [];
-    const t = await C(), s = await fetch(
-      `${S}/rest/v1/roast_messages?recipient_username=eq.${e.toLowerCase()}&status=neq.read&order=created_at.desc&limit=20`,
+    if (!await T()) return [];
+    const t = await R(), s = await fetch(
+      `${b}/rest/v1/roast_messages?recipient_username=eq.${e.toLowerCase()}&status=neq.read&order=created_at.desc&limit=20`,
       { method: "GET", headers: t }
     );
     return s.ok ? await s.json() : [];
@@ -730,10 +741,10 @@ async function Me(e) {
   }
 }
 async function Tt(e) {
-  if (!(!e?.length || m === "YOUR_SUPABASE_PROJECT_URL_HERE"))
+  if (!(!e?.length || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      const r = await C(), t = e.map((s) => `"${s}"`).join(",");
-      await fetch(`${S}/rest/v1/roast_messages?id=in.(${t})`, {
+      const r = await R(), t = e.map((s) => `"${s}"`).join(",");
+      await fetch(`${b}/rest/v1/roast_messages?id=in.(${t})`, {
         method: "PATCH",
         headers: r,
         body: JSON.stringify({
@@ -745,10 +756,10 @@ async function Tt(e) {
     }
 }
 async function At(e) {
-  if (!(!e?.length || m === "YOUR_SUPABASE_PROJECT_URL_HERE"))
+  if (!(!e?.length || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      const r = await C(), t = e.map((s) => `"${s}"`).join(",");
-      await fetch(`${S}/rest/v1/roast_messages?id=in.(${t})`, {
+      const r = await R(), t = e.map((s) => `"${s}"`).join(",");
+      await fetch(`${b}/rest/v1/roast_messages?id=in.(${t})`, {
         method: "PATCH",
         headers: r,
         body: JSON.stringify({
@@ -760,7 +771,7 @@ async function At(e) {
     }
 }
 async function He(e) {
-  if (!e || m === "YOUR_SUPABASE_PROJECT_URL_HERE") return !0;
+  if (!e || h === "YOUR_SUPABASE_PROJECT_URL_HERE") return !0;
   try {
     const r = await Me(e);
     if (!r || r.length === 0) return !0;
@@ -789,7 +800,7 @@ async function X(e) {
       last_own_profile_sync: Date.now()
     });
     const r = await G();
-    return r && L() === d.AUTHENTICATED && Ie(r, e).catch((t) => {
+    return r && L() === f.AUTHENTICATED && Ie(r, e).catch((t) => {
       console.warn("[Storage] Cloud sync for own profile failed (non-blocking):", t);
     }), !0;
   } catch (r) {
@@ -799,7 +810,7 @@ async function X(e) {
 async function Q() {
   try {
     const e = await G(), r = typeof chrome < "u" && chrome.storage?.local ? await chrome.storage.local.get(["friends_cache", "own_profile", "friends_list"]) : {}, t = r.friends_cache || {}, s = r.own_profile || null, a = r.friends_list || [], o = { ...t };
-    if (e && s && (o[e] = s), L() !== d.AUTHENTICATED)
+    if (e && s && (o[e] = s), L() !== f.AUTHENTICATED)
       return o;
     try {
       const n = await $e();
@@ -872,7 +883,7 @@ async function ue(e, r) {
         friends_list: i
       });
     }
-    return L() === d.AUTHENTICATED && (Ie(e, r).catch(() => {
+    return L() === f.AUTHENTICATED && (Ie(e, r).catch(() => {
     }), t && K().then((a) => {
       const o = a?.friends_list || [];
       o.includes(e) || Ne({ friends_list: [...o, e] }).catch(() => {
@@ -895,7 +906,7 @@ async function kt(e) {
         friends_list: a
       });
     }
-    return L() === d.AUTHENTICATED && (Pe(e).catch(() => {
+    return L() === f.AUTHENTICATED && (Pe(e).catch(() => {
     }), K().then((r) => {
       if (r?.friends_list) {
         const t = r.friends_list.filter((s) => s.toLowerCase() !== e.toLowerCase());
@@ -915,7 +926,7 @@ async function Fe() {
       if (e.friends_list && Array.isArray(e.friends_list))
         return e.friends_list;
     }
-    if (L() === d.AUTHENTICATED) {
+    if (L() === f.AUTHENTICATED) {
       const e = await K();
       if (e?.friends_list)
         return typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_list: e.friends_list }).catch(() => {
@@ -933,13 +944,13 @@ async function xe() {
   const e = await G();
   return e ? await He(e) : !1;
 }
-const Rt = m.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), de = /* @__PURE__ */ new Set([
+const Rt = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), de = /* @__PURE__ */ new Set([
   "completed",
   "declined",
   "expired",
   "cancelled",
   "forfeited"
-]), p = {
+]), E = {
   PENDING: "pending",
   SELECTING: "selecting",
   READY_CHECK: "ready_check",
@@ -950,10 +961,10 @@ const Rt = m.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), de = /* @__PURE__
   CANCELLED: "cancelled",
   FORFEITED: "forfeited"
 }, vt = 7200, Dt = 1440 * 60, be = 10;
-async function T(e, r = {}) {
-  if (m === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
+async function k(e, r = {}) {
+  if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const t = await C(), s = await fetch(`${Rt}/rest/v1/${e}`, {
+    const t = await R(), s = await fetch(`${Rt}/rest/v1/${e}`, {
       headers: { ...t, ...r.headers || {} },
       ...r
     });
@@ -968,16 +979,25 @@ async function Lt(e, r, t = "javascript") {
   if (e.toLowerCase() === r.toLowerCase())
     return { success: !1, error: "Cannot challenge yourself" };
   try {
-    const _ = await b("create_battle_challenge", {
+    const d = await A("create_battle_challenge", {
       p_challenged_username: r.toLowerCase(),
       p_language: t.toLowerCase()
     });
-    if (_ && _.success && _.battle)
-      return { success: !0, battle: _.battle };
-    if (_ && _.error)
-      return { success: !1, error: _.error };
-  } catch (_) {
-    console.warn("[BattleManager] create_battle_challenge RPC error, using REST fallback:", _);
+    if (d && d.success && d.battle)
+      return { success: !0, battle: d.battle };
+    if (d?.code === "PGRST202" || d?.error && typeof d.error == "string" && (d.error.includes("PGRST202") || d.error.includes("schema cache") || d.error.includes("Could not find the function")) || d?.raw && typeof d.raw == "string" && (d.raw.includes("PGRST202") || d.raw.includes("schema cache")))
+      console.warn("[BattleManager] create_battle_challenge RPC not found in schema cache. Running REST fallback.");
+    else if (d && d.error) {
+      let p = d.error;
+      try {
+        const S = JSON.parse(d.error);
+        p = S.message || S.error || p;
+      } catch {
+      }
+      return { success: !1, error: p };
+    }
+  } catch (d) {
+    console.warn("[BattleManager] create_battle_challenge RPC error, using REST fallback:", d);
   }
   const [s, a] = await Promise.all([
     V(e),
@@ -987,50 +1007,50 @@ async function Lt(e, r, t = "javascript") {
     return { success: !1, error: "You already have an active battle in progress" };
   if (a)
     return { success: !1, error: `${r} is currently in an active battle` };
-  const o = await E(), n = await T(`profiles?leetcode_username=in.("${e.toLowerCase()}","${r.toLowerCase()}")&select=id,leetcode_username`), i = n?.find((_) => _.leetcode_username.toLowerCase() === e.toLowerCase()), c = n?.find((_) => _.leetcode_username.toLowerCase() === r.toLowerCase()), l = o?.user_id || i?.id, u = c?.id, h = Date.now(), y = new Date(h + Dt * 1e3).toISOString(), g = {
+  const o = await T(), n = await k(`profiles?leetcode_username=in.("${e.toLowerCase()}","${r.toLowerCase()}")&select=id,leetcode_username`), i = n?.find((d) => d.leetcode_username.toLowerCase() === e.toLowerCase()), c = n?.find((d) => d.leetcode_username.toLowerCase() === r.toLowerCase()), l = o?.user_id || i?.id, u = c?.id, _ = Date.now(), y = new Date(_ + Dt * 1e3).toISOString(), g = {
     challenger_username: e,
     challenged_username: r,
     language: t.toLowerCase(),
-    status: p.PENDING,
+    status: E.PENDING,
     expires_at: y
   };
   l && (g.challenger_id = l), u && (g.challenged_id = u);
-  const A = await T("battles", {
+  const C = await k("battles", {
     method: "POST",
     body: JSON.stringify(g)
   });
-  return !A || A.length === 0 ? { success: !1, error: "Failed to create battle room" } : { success: !0, battle: A[0] };
+  return !C || C.length === 0 ? { success: !1, error: "Failed to create battle room" } : { success: !0, battle: C[0] };
 }
 async function V(e) {
   if (!e) return null;
-  const r = Array.from(de).join(","), t = e.toLowerCase(), s = await T(
+  const r = Array.from(de).join(","), t = e.toLowerCase(), s = await k(
     `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=not.in.(${r})&order=created_at.desc&limit=1`
   );
   return s && s.length > 0 ? s[0] : null;
 }
 async function U(e) {
   if (!e) return null;
-  const r = await T(`battles?id=eq.${e}&select=*`);
+  const r = await k(`battles?id=eq.${e}&select=*`);
   return r && r.length > 0 ? r[0] : null;
 }
 async function fe(e) {
-  return e ? await T(`battle_results?battle_id=eq.${e}&select=*`) || [] : [];
+  return e ? await k(`battle_results?battle_id=eq.${e}&select=*`) || [] : [];
 }
 async function Ot(e, r, t) {
   const s = await U(e);
   if (!s) return { success: !1, error: "Battle not found" };
   if ((s.challenged_username || s.challenged).toLowerCase() !== r.toLowerCase())
     return { success: !1, error: "You are not the invited opponent for this battle" };
-  if (s.status !== p.PENDING)
+  if (s.status !== E.PENDING)
     return { success: !1, error: `Battle is no longer pending (current: ${s.status})` };
   if (new Date(s.expires_at) < /* @__PURE__ */ new Date())
-    return await W(e, p.EXPIRED), { success: !1, error: "Challenge has expired" };
+    return await W(e, E.EXPIRED), { success: !1, error: "Challenge has expired" };
   if (!t)
-    return await W(e, p.DECLINED), { success: !0, battle: { ...s, status: p.DECLINED } };
-  const o = /* @__PURE__ */ new Date(), n = await T(`battles?id=eq.${e}`, {
+    return await W(e, E.DECLINED), { success: !0, battle: { ...s, status: E.DECLINED } };
+  const o = /* @__PURE__ */ new Date(), n = await k(`battles?id=eq.${e}`, {
     method: "PATCH",
     body: JSON.stringify({
-      status: p.SELECTING,
+      status: E.SELECTING,
       accepted_at: o.toISOString()
     })
   });
@@ -1039,12 +1059,12 @@ async function Ot(e, r, t) {
 async function Ut(e, r, t, s) {
   const a = await U(e);
   if (!a) return { success: !1, error: "Battle not found" };
-  if (a.status !== p.SELECTING)
+  if (a.status !== E.SELECTING)
     return { success: !1, error: "Battle is not in the problem selection phase" };
   const o = await qe(t);
   if (!o.valid)
     return { success: !1, error: o.error || "Invalid LeetCode problem" };
-  const i = (a.challenger_username || a.challenger).toLowerCase() === r.toLowerCase(), c = i ? "challenger_pick" : "challenged_pick", l = i ? "challenger_pick_title" : "challenged_pick_title", u = i ? a.challenged_pick : a.challenger_pick, h = i ? a.challenged_pick_title : a.challenger_pick_title, y = {
+  const i = (a.challenger_username || a.challenger).toLowerCase() === r.toLowerCase(), c = i ? "challenger_pick" : "challenged_pick", l = i ? "challenger_pick_title" : "challenged_pick_title", u = i ? a.challenged_pick : a.challenger_pick, _ = i ? a.challenged_pick_title : a.challenger_pick_title, y = {
     [c]: o.slug,
     [l]: o.title || s || o.slug
   };
@@ -1052,12 +1072,12 @@ async function Ut(e, r, t, s) {
     problem_1: o.slug,
     problem_1_title: o.title,
     problem_2: u,
-    problem_2_title: h || u,
-    status: p.READY_CHECK,
+    problem_2_title: _ || u,
+    status: E.READY_CHECK,
     challenger_ready: !1,
     challenged_ready: !1
   });
-  const g = await T(`battles?id=eq.${e}`, {
+  const g = await k(`battles?id=eq.${e}`, {
     method: "PATCH",
     body: JSON.stringify(y)
   });
@@ -1068,22 +1088,22 @@ async function Ut(e, r, t, s) {
   };
 }
 async function It(e, r) {
-  const t = await b("confirm_battle_ready", { p_battle_id: e });
+  const t = await A("confirm_battle_ready", { p_battle_id: e });
   if (t && t.success)
-    return { success: !0, battle: await U(e), bothReady: t.status === p.COUNTDOWN };
+    return { success: !0, battle: await U(e), bothReady: t.status === E.COUNTDOWN };
   const s = await U(e);
   if (!s) return { success: !1, error: "Battle not found" };
   const o = (s.challenger_username || s.challenger).toLowerCase() === r.toLowerCase(), n = o ? { challenger_ready: !0 } : { challenged_ready: !0 }, i = o ? s.challenged_ready : s.challenger_ready;
   if (i) {
-    const l = Date.now(), u = new Date(l).toISOString(), h = new Date(l + be * 1e3).toISOString(), y = new Date(l + (be + vt) * 1e3).toISOString();
+    const l = Date.now(), u = new Date(l).toISOString(), _ = new Date(l + be * 1e3).toISOString(), y = new Date(l + (be + vt) * 1e3).toISOString();
     Object.assign(n, {
-      status: p.COUNTDOWN,
+      status: E.COUNTDOWN,
       countdown_starts: u,
-      match_starts_at: h,
+      match_starts_at: _,
       match_deadline: y
     });
   }
-  const c = await T(`battles?id=eq.${e}`, {
+  const c = await k(`battles?id=eq.${e}`, {
     method: "PATCH",
     body: JSON.stringify(n)
   });
@@ -1102,7 +1122,7 @@ async function Nt(e, r, t) {
   if (!u) return { success: !1, error: "Battle not found" };
   if (de.has(u.status))
     return { success: !1, error: `Battle is already closed (${u.status})` };
-  const h = u.match_starts_at ? new Date(u.match_starts_at).getTime() : Date.now(), y = l ?? Math.max(0, Math.floor((Date.now() - h) / 1e3)), g = await b("record_battle_submission", {
+  const _ = u.match_starts_at ? new Date(u.match_starts_at).getTime() : Date.now(), y = l ?? Math.max(0, Math.floor((Date.now() - _) / 1e3)), g = await A("record_battle_submission", {
     p_battle_id: e,
     p_problem_slug: s,
     p_submission_id: a || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -1114,7 +1134,7 @@ async function Nt(e, r, t) {
   });
   if (g && g.success)
     return { success: !0, result: g };
-  const A = await T("battle_results", {
+  const C = await k("battle_results", {
     method: "POST",
     body: JSON.stringify({
       battle_id: e,
@@ -1131,37 +1151,37 @@ async function Nt(e, r, t) {
       points: o ? 1 : 0
     })
   });
-  return await Pt(e), { success: !0, result: A?.[0] };
+  return await Pt(e), { success: !0, result: C?.[0] };
 }
 async function Pt(e) {
-  const r = await b("evaluate_and_finalize_battle", { p_battle_id: e });
+  const r = await A("evaluate_and_finalize_battle", { p_battle_id: e });
   if (r && r.finalized)
     return r;
   const t = await U(e);
   if (!t || de.has(t.status)) return null;
   const s = await fe(e), a = t.challenger_username || t.challenger, o = t.challenged_username || t.challenged;
-  let n = 0, i = 0, c = 0, l = 0, u = !1, h = !1, y = !1, g = !1;
-  for (const f of s)
-    f.accepted && (f.username.toLowerCase() === a.toLowerCase() ? (n += f.points || 1, c += f.time_taken_seconds || 0, f.problem_slug === t.problem_1 && (u = !0), f.problem_slug === t.problem_2 && (h = !0)) : f.username.toLowerCase() === o.toLowerCase() && (i += f.points || 1, l += f.time_taken_seconds || 0, f.problem_slug === t.problem_1 && (y = !0), f.problem_slug === t.problem_2 && (g = !0)));
-  const A = u && h && y && g, _ = t.match_deadline && Date.now() >= new Date(t.match_deadline).getTime();
-  if (A || _) {
-    let f = "draw", R = "draw";
-    return n > i ? (f = a, R = "points") : i > n ? (f = o, R = "points") : n > 0 ? c < l ? (f = a, R = "tiebreaker_time") : l < c ? (f = o, R = "tiebreaker_time") : (f = "draw", R = "draw") : (f = "draw", R = "draw"), await W(e, p.COMPLETED, {
-      winner_username: f,
-      win_reason: R,
+  let n = 0, i = 0, c = 0, l = 0, u = !1, _ = !1, y = !1, g = !1;
+  for (const m of s)
+    m.accepted && (m.username.toLowerCase() === a.toLowerCase() ? (n += m.points || 1, c += m.time_taken_seconds || 0, m.problem_slug === t.problem_1 && (u = !0), m.problem_slug === t.problem_2 && (_ = !0)) : m.username.toLowerCase() === o.toLowerCase() && (i += m.points || 1, l += m.time_taken_seconds || 0, m.problem_slug === t.problem_1 && (y = !0), m.problem_slug === t.problem_2 && (g = !0)));
+  const C = u && _ && y && g, d = t.match_deadline && Date.now() >= new Date(t.match_deadline).getTime();
+  if (C || d) {
+    let m = "draw", p = "draw";
+    return n > i ? (m = a, p = "points") : i > n ? (m = o, p = "points") : n > 0 ? c < l ? (m = a, p = "tiebreaker_time") : l < c ? (m = o, p = "tiebreaker_time") : (m = "draw", p = "draw") : (m = "draw", p = "draw"), await W(e, E.COMPLETED, {
+      winner_username: m,
+      win_reason: p,
       completed_at: (/* @__PURE__ */ new Date()).toISOString()
-    }), { finalized: !0, winner: f, winReason: R };
+    }), { finalized: !0, winner: m, winReason: p };
   }
   return null;
 }
 async function $t(e, r) {
-  const t = await b("forfeit_battle", { p_battle_id: e });
+  const t = await A("forfeit_battle", { p_battle_id: e });
   if (t && t.success)
     return t;
   const s = await U(e);
   if (!s) return { success: !1, error: "Battle not found" };
   const a = s.challenger_username || s.challenger, o = s.challenged_username || s.challenged, n = a.toLowerCase() === r.toLowerCase() ? o : a;
-  return await W(e, p.FORFEITED, {
+  return await W(e, E.FORFEITED, {
     winner_username: n,
     win_reason: "forfeit",
     completed_at: (/* @__PURE__ */ new Date()).toISOString()
@@ -1169,20 +1189,20 @@ async function $t(e, r) {
 }
 async function Bt(e, r) {
   const t = await U(e);
-  return t ? (t.challenger_username || t.challenger).toLowerCase() !== r.toLowerCase() ? { success: !1, error: "Only the challenger can cancel a pending match" } : t.status !== p.PENDING ? { success: !1, error: "Can only cancel pending challenges" } : (await W(e, p.CANCELLED), { success: !0 }) : { success: !1, error: "Battle not found" };
+  return t ? (t.challenger_username || t.challenger).toLowerCase() !== r.toLowerCase() ? { success: !1, error: "Only the challenger can cancel a pending match" } : t.status !== E.PENDING ? { success: !1, error: "Can only cancel pending challenges" } : (await W(e, E.CANCELLED), { success: !0 }) : { success: !1, error: "Battle not found" };
 }
 async function Mt(e, r = 10) {
   if (!e) return [];
-  const t = e.toLowerCase(), s = await T(
+  const t = e.toLowerCase(), s = await k(
     `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=in.(completed,forfeited)&order=created_at.desc&limit=${r}`
   );
   return !s || s.length === 0 ? [] : await Promise.all(s.map(async (o) => {
     const n = await fe(o.id), i = o.challenger_username || o.challenger, c = o.challenged_username || o.challenged, l = i.toLowerCase() === e.toLowerCase() ? c : i, u = o.winner_username || o.winner;
-    let h = "draw";
-    return u && (u === "draw" ? h = "draw" : u.toLowerCase() === e.toLowerCase() ? h = "win" : h = "loss"), {
+    let _ = "draw";
+    return u && (u === "draw" ? _ = "draw" : u.toLowerCase() === e.toLowerCase() ? _ = "win" : _ = "loss"), {
       ...o,
       opponent: l,
-      outcome: h,
+      outcome: _,
       results: n
     };
   }));
@@ -1225,12 +1245,12 @@ async function qe(e) {
   }
 }
 async function me(e, r = "online") {
-  if (!(!e || !m || m === "YOUR_SUPABASE_PROJECT_URL_HERE"))
+  if (!(!e || !h || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      const t = await b("heartbeat_presence", { p_status: r });
+      const t = await A("heartbeat_presence", { p_status: r });
       if (t && t.success) return;
-      const s = await E();
-      s?.user_id && await T("user_presence", {
+      const s = await T();
+      s?.user_id && await k("user_presence", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=representation" },
         body: JSON.stringify({
@@ -1246,9 +1266,9 @@ async function me(e, r = "online") {
 }
 async function Ht(e) {
   const r = /* @__PURE__ */ new Map();
-  if (!e?.length || !m || m === "YOUR_SUPABASE_PROJECT_URL_HERE") return r;
+  if (!e?.length || !h || h === "YOUR_SUPABASE_PROJECT_URL_HERE") return r;
   try {
-    const t = await b("get_friends_presence", { p_usernames: e });
+    const t = await A("get_friends_presence", { p_usernames: e });
     if (t && typeof t == "object" && !t.error) {
       for (const [n, i] of Object.entries(t))
         r.set(n.toLowerCase(), {
@@ -1259,7 +1279,7 @@ async function Ht(e) {
         });
       return r;
     }
-    const s = e.map((n) => `"${n.toLowerCase()}"`).join(","), a = await T(`user_presence?username=in.(${s})&select=username,status,last_seen,in_battle`), o = Date.now() - 120 * 1e3;
+    const s = e.map((n) => `"${n.toLowerCase()}"`).join(","), a = await k(`user_presence?username=in.(${s})&select=username,status,last_seen,in_battle`), o = Date.now() - 120 * 1e3;
     for (const n of a || []) {
       const c = n.last_seen && new Date(n.last_seen).getTime() > o ? n.in_battle ? "in_battle" : n.status || "online" : "offline";
       r.set(n.username.toLowerCase(), {
@@ -1275,7 +1295,7 @@ async function Ht(e) {
   return r;
 }
 async function W(e, r, t = {}) {
-  await T(`battles?id=eq.${e}`, {
+  await k(`battles?id=eq.${e}`, {
     method: "PATCH",
     body: JSON.stringify({ status: r, ...t })
   });
@@ -1338,17 +1358,17 @@ function xt(e, r = null, t = null) {
       solvedToday: !1,
       solveDates: []
     };
-  function n(k, P) {
-    const tt = /* @__PURE__ */ new Date(k + "T00:00:00Z"), rt = /* @__PURE__ */ new Date(P + "T00:00:00Z");
+  function n(S, P) {
+    const tt = /* @__PURE__ */ new Date(S + "T00:00:00Z"), rt = /* @__PURE__ */ new Date(P + "T00:00:00Z");
     return Math.round((rt - tt) / 864e5);
   }
   let i = 1, c = 1;
-  for (let k = 1; k < o.length; k++) {
-    const P = n(o[k - 1], o[k]);
+  for (let S = 1; S < o.length; S++) {
+    const P = n(o[S - 1], o[S]);
     P === 1 ? (c++, c > i && (i = c)) : P > 1 && (c = 1);
   }
-  const l = Math.floor(Date.now() / 1e3), u = I(l, t), h = Math.floor((Date.now() - 864e5) / 1e3), y = I(h, t), g = o.includes(u), A = o[o.length - 1];
-  if (A !== u && A !== y)
+  const l = Math.floor(Date.now() / 1e3), u = I(l, t), _ = Math.floor((Date.now() - 864e5) / 1e3), y = I(_, t), g = o.includes(u), C = o[o.length - 1];
+  if (C !== u && C !== y)
     return {
       currentStreak: 0,
       longestStreak: i,
@@ -1356,20 +1376,20 @@ function xt(e, r = null, t = null) {
       solvedToday: !1,
       solveDates: o
     };
-  let _ = 0, f = /* @__PURE__ */ new Date(A + "T00:00:00Z");
-  for (let k = o.length - 1; k >= 0; k--) {
-    const P = f.toISOString().split("T")[0];
-    if (o[k] === P)
-      _++, f.setUTCDate(f.getUTCDate() - 1);
-    else if (o[k] < P)
+  let d = 0, m = /* @__PURE__ */ new Date(C + "T00:00:00Z");
+  for (let S = o.length - 1; S >= 0; S--) {
+    const P = m.toISOString().split("T")[0];
+    if (o[S] === P)
+      d++, m.setUTCDate(m.getUTCDate() - 1);
+    else if (o[S] < P)
       break;
   }
-  _ > i && (i = _);
-  const R = _ > 0 && !g;
+  d > i && (i = d);
+  const p = d > 0 && !g;
   return {
-    currentStreak: _,
+    currentStreak: d,
     longestStreak: i,
-    isAtRisk: R,
+    isAtRisk: p,
     solvedToday: g,
     solveDates: o
   };
@@ -2163,7 +2183,7 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
     // ===== Cloud Authentication & Account =====
     case "GET_AUTH_STATE":
       return (async () => {
-        const s = await E();
+        const s = await T();
         t({
           success: !0,
           state: L(),
@@ -2245,10 +2265,10 @@ async function ar(e = !1) {
       for (const u of i)
         if (u.toLowerCase() !== t.toLowerCase())
           try {
-            const h = await x(u), y = await J(h, r.user_timezone);
+            const _ = await x(u), y = await J(_, r.user_timezone);
             await ue(u, y), await et(Ke);
-          } catch (h) {
-            console.warn(`[ServiceWorker] Error updating friend ${u}:`, h.message);
+          } catch (_) {
+            console.warn(`[ServiceWorker] Error updating friend ${u}:`, _.message);
           }
       n = await Q();
     }
@@ -2290,7 +2310,7 @@ async function nr(e) {
     if (await le(t))
       return { success: !1, error: `${r} is already in your friends list` };
     const a = await x(r), o = await J(a);
-    return await ue(t, o), L() === d.AUTHENTICATED && ce(t).catch((n) => {
+    return await ue(t, o), L() === f.AUTHENTICATED && ce(t).catch((n) => {
       console.warn("[ServiceWorker] Cloud syncFriendship failed:", n);
     }), { success: !0, message: `${r} added successfully`, data: o };
   } catch (r) {
@@ -2299,7 +2319,7 @@ async function nr(e) {
 }
 async function cr(e) {
   try {
-    return await kt(e), L() === d.AUTHENTICATED && Pe(e).catch((r) => {
+    return await kt(e), L() === f.AUTHENTICATED && Pe(e).catch((r) => {
       console.warn("[ServiceWorker] Cloud removeFriendship failed:", r);
     }), { success: !0, message: `${e} removed` };
   } catch (r) {
@@ -2309,7 +2329,7 @@ async function cr(e) {
 async function ir() {
   try {
     let e = await Q();
-    return L() === d.AUTHENTICATED && (!e || Object.keys(e).length === 0) && (await re(), e = await Q()), { success: !0, friends: e };
+    return L() === f.AUTHENTICATED && (!e || Object.keys(e).length === 0) && (await re(), e = await Q()), { success: !0, friends: e };
   } catch (e) {
     return { success: !1, error: e.message };
   }
@@ -2559,7 +2579,7 @@ async function Sr(e, r) {
 }
 async function Ze() {
   try {
-    if (!(await E())?.user_id) return;
+    if (!(await T())?.user_id) return;
     const t = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
     t && await me(t, "online");
   } catch (e) {
