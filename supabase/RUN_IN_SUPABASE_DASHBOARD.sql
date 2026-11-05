@@ -1,19 +1,32 @@
 -- ============================================================================
--- LEETSTREAK COMPLETE MASTER SETUP (Run in Supabase Dashboard SQL Editor)
+-- LEETSTREAK FRESH-START COMPLETE DATABASE SETUP
 -- Direct URL: https://supabase.com/dashboard/project/pzsldcjgpiodzuivrbwt/sql/new
--- Fully idempotent (safe to run on fresh, empty, or existing database)
+--
+-- This script completely wipes the public schema and builds the full,
+-- production-ready LeetStreak database from scratch with zero errors.
 -- ============================================================================
 
--- 0. Required Extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- 1. CLEAN RESET: Drop and recreate public schema
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+
+-- Restore standard Supabase permissions on public schema
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON SCHEMA public TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres, service_role;
+
+-- 2. Required Extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA extensions;
 
 -- ============================================================================
--- 1. BASE RELATIONAL TABLES (Created in exact foreign key order)
+-- 3. RELATIONAL TABLES
 -- ============================================================================
 
--- 1.1 Profiles Table (Public Profile Data linked to auth.users)
-CREATE TABLE IF NOT EXISTS public.profiles (
+-- 3.1 Profiles Table (Public Profile Data linked to auth.users)
+CREATE TABLE public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     leetcode_username TEXT NOT NULL,
     display_name TEXT,
@@ -32,13 +45,13 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_lower_username ON public.profiles(LOWER(leetcode_username));
-CREATE INDEX IF NOT EXISTS idx_profiles_total_solved ON public.profiles(total_solved DESC);
-CREATE INDEX IF NOT EXISTS idx_profiles_streak ON public.profiles(current_streak DESC);
-CREATE INDEX IF NOT EXISTS idx_profiles_rating ON public.profiles(contest_rating DESC);
+CREATE UNIQUE INDEX idx_profiles_lower_username ON public.profiles(LOWER(leetcode_username));
+CREATE INDEX idx_profiles_total_solved ON public.profiles(total_solved DESC);
+CREATE INDEX idx_profiles_streak ON public.profiles(current_streak DESC);
+CREATE INDEX idx_profiles_rating ON public.profiles(contest_rating DESC);
 
--- 1.2 User Settings Table (Strictly Private to Owner)
-CREATE TABLE IF NOT EXISTS public.user_settings (
+-- 3.2 User Settings Table (Strictly Private to Owner)
+CREATE TABLE public.user_settings (
     user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
     hardcore_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     blocked_sites TEXT[] NOT NULL DEFAULT ARRAY['youtube.com', 'instagram.com', 'twitter.com', 'x.com', 'reddit.com']::text[],
@@ -53,8 +66,8 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 1.3 Friendships Table (Normalized Social Graph)
-CREATE TABLE IF NOT EXISTS public.friendships (
+-- 3.3 Friendships Table (Normalized Social Graph)
+CREATE TABLE public.friendships (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     addressee_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -65,11 +78,11 @@ CREATE TABLE IF NOT EXISTS public.friendships (
     CONSTRAINT chk_friendship_not_self CHECK (requester_id != addressee_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_friendships_requester ON public.friendships(requester_id, status);
-CREATE INDEX IF NOT EXISTS idx_friendships_addressee ON public.friendships(addressee_id, status);
+CREATE INDEX idx_friendships_requester ON public.friendships(requester_id, status);
+CREATE INDEX idx_friendships_addressee ON public.friendships(addressee_id, status);
 
--- 1.4 Roast Messages Table (Durable Recipient Delivery)
-CREATE TABLE IF NOT EXISTS public.roast_messages (
+-- 3.4 Roast Messages Table (Durable Recipient Delivery)
+CREATE TABLE public.roast_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     recipient_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -83,11 +96,11 @@ CREATE TABLE IF NOT EXISTS public.roast_messages (
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days')
 );
 
-CREATE INDEX IF NOT EXISTS idx_roasts_recipient_status ON public.roast_messages(recipient_id, status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_roasts_sender ON public.roast_messages(sender_id, created_at DESC);
+CREATE INDEX idx_roasts_recipient_status ON public.roast_messages(recipient_id, status, created_at DESC);
+CREATE INDEX idx_roasts_sender ON public.roast_messages(sender_id, created_at DESC);
 
--- 1.5 Battles Table (Canonical 1v1 Arena)
-CREATE TABLE IF NOT EXISTS public.battles (
+-- 3.5 Battles Table (Canonical 1v1 Arena)
+CREATE TABLE public.battles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     challenger_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     challenged_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -125,12 +138,12 @@ CREATE TABLE IF NOT EXISTS public.battles (
     CONSTRAINT chk_battle_participants_diff CHECK (challenger_id != challenged_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_battles_challenger ON public.battles(challenger_id, status);
-CREATE INDEX IF NOT EXISTS idx_battles_challenged ON public.battles(challenged_id, status);
-CREATE INDEX IF NOT EXISTS idx_battles_status ON public.battles(status, match_deadline);
+CREATE INDEX idx_battles_challenger ON public.battles(challenger_id, status);
+CREATE INDEX idx_battles_challenged ON public.battles(challenged_id, status);
+CREATE INDEX idx_battles_status ON public.battles(status, match_deadline);
 
--- 1.6 User Presence Table (Peer Status with Expiry & Active Battle Pointer)
-CREATE TABLE IF NOT EXISTS public.user_presence (
+-- 3.6 User Presence Table (Peer Status with Expiry & Active Battle Pointer)
+CREATE TABLE public.user_presence (
     user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
     last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -139,15 +152,10 @@ CREATE TABLE IF NOT EXISTS public.user_presence (
     active_battle_id UUID REFERENCES public.battles(id) ON DELETE SET NULL
 );
 
--- Ensure columns exist if table was partially created previously
-ALTER TABLE public.user_presence 
-ADD COLUMN IF NOT EXISTS in_battle BOOLEAN DEFAULT false,
-ADD COLUMN IF NOT EXISTS active_battle_id UUID REFERENCES public.battles(id) ON DELETE SET NULL;
+CREATE INDEX idx_presence_last_seen ON public.user_presence(last_seen DESC);
 
-CREATE INDEX IF NOT EXISTS idx_presence_last_seen ON public.user_presence(last_seen DESC);
-
--- 1.7 Battle Results Table (Submissions with Idempotency)
-CREATE TABLE IF NOT EXISTS public.battle_results (
+-- 3.7 Battle Results Table (Submissions with Idempotency)
+CREATE TABLE public.battle_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     battle_id UUID NOT NULL REFERENCES public.battles(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -165,14 +173,14 @@ CREATE TABLE IF NOT EXISTS public.battle_results (
     CONSTRAINT uq_battle_submission_idempotency UNIQUE(battle_id, user_id, problem_slug, leetcode_submission_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_battle_accepted_solve 
+CREATE UNIQUE INDEX uq_battle_accepted_solve 
 ON public.battle_results(battle_id, user_id, problem_slug) 
 WHERE accepted = TRUE;
 
-CREATE INDEX IF NOT EXISTS idx_battle_results_lookup ON public.battle_results(battle_id, user_id);
+CREATE INDEX idx_battle_results_lookup ON public.battle_results(battle_id, user_id);
 
--- 1.8 Battle Events Table (Durable Match Log)
-CREATE TABLE IF NOT EXISTS public.battle_events (
+-- 3.8 Battle Events Table (Durable Match Log)
+CREATE TABLE public.battle_events (
     id BIGSERIAL PRIMARY KEY,
     battle_id UUID NOT NULL REFERENCES public.battles(id) ON DELETE CASCADE,
     user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -188,10 +196,10 @@ CREATE TABLE IF NOT EXISTS public.battle_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_battle_events_replay ON public.battle_events(battle_id, id ASC);
+CREATE INDEX idx_battle_events_replay ON public.battle_events(battle_id, id ASC);
 
 -- ============================================================================
--- 2. ROW-LEVEL SECURITY (RLS) POLICIES
+-- 4. ROW-LEVEL SECURITY (RLS) POLICIES
 -- ============================================================================
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -203,53 +211,35 @@ ALTER TABLE public.battles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.battle_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.battle_events ENABLE ROW LEVEL SECURITY;
 
--- 2.1 Profiles Policies
-DROP POLICY IF EXISTS "profiles_select_public" ON public.profiles;
+-- 4.1 Profiles
 CREATE POLICY "profiles_select_public" ON public.profiles FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "profiles_insert_own" ON public.profiles;
 CREATE POLICY "profiles_insert_own" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
-
-DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 CREATE POLICY "profiles_update_own" ON public.profiles FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
--- 2.2 User Settings Policies
-DROP POLICY IF EXISTS "settings_select_own" ON public.user_settings;
+-- 4.2 User Settings (Private to Owner)
 CREATE POLICY "settings_select_own" ON public.user_settings FOR SELECT USING (auth.uid() = user_id);
-
-DROP POLICY IF EXISTS "settings_insert_own" ON public.user_settings;
 CREATE POLICY "settings_insert_own" ON public.user_settings FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-DROP POLICY IF EXISTS "settings_update_own" ON public.user_settings;
 CREATE POLICY "settings_update_own" ON public.user_settings FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
-DROP POLICY IF EXISTS "settings_delete_own" ON public.user_settings;
 CREATE POLICY "settings_delete_own" ON public.user_settings FOR DELETE USING (auth.uid() = user_id);
 
--- 2.3 Friendships Policies
-DROP POLICY IF EXISTS "friendships_select_participants" ON public.friendships;
+-- 4.3 Friendships
 CREATE POLICY "friendships_select_participants" ON public.friendships FOR SELECT 
 USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
 
-DROP POLICY IF EXISTS "friendships_insert_requester" ON public.friendships;
 CREATE POLICY "friendships_insert_requester" ON public.friendships FOR INSERT 
 WITH CHECK (auth.uid() = requester_id);
 
-DROP POLICY IF EXISTS "friendships_update_participants" ON public.friendships;
 CREATE POLICY "friendships_update_participants" ON public.friendships FOR UPDATE 
 USING (auth.uid() = requester_id OR auth.uid() = addressee_id)
 WITH CHECK (auth.uid() = requester_id OR auth.uid() = addressee_id);
 
-DROP POLICY IF EXISTS "friendships_delete_participants" ON public.friendships;
 CREATE POLICY "friendships_delete_participants" ON public.friendships FOR DELETE 
 USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
 
--- 2.4 Roast Messages Policies
-DROP POLICY IF EXISTS "roasts_select_participants" ON public.roast_messages;
+-- 4.4 Roast Messages
 CREATE POLICY "roasts_select_participants" ON public.roast_messages FOR SELECT 
 USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
 
-DROP POLICY IF EXISTS "roasts_insert_sender" ON public.roast_messages;
 CREATE POLICY "roasts_insert_sender" ON public.roast_messages FOR INSERT 
 WITH CHECK (
     auth.uid() = sender_id 
@@ -262,43 +252,34 @@ WITH CHECK (
     )
 );
 
-DROP POLICY IF EXISTS "roasts_update_recipient" ON public.roast_messages;
 CREATE POLICY "roasts_update_recipient" ON public.roast_messages FOR UPDATE 
 USING (auth.uid() = recipient_id) WITH CHECK (auth.uid() = recipient_id);
 
-DROP POLICY IF EXISTS "roasts_delete_participants" ON public.roast_messages;
 CREATE POLICY "roasts_delete_participants" ON public.roast_messages FOR DELETE 
 USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
 
--- 2.5 User Presence Policies
-DROP POLICY IF EXISTS "presence_select_authenticated" ON public.user_presence;
+-- 4.5 User Presence
 CREATE POLICY "presence_select_authenticated" ON public.user_presence FOR SELECT 
 USING (auth.role() = 'authenticated');
 
-DROP POLICY IF EXISTS "presence_insert_own" ON public.user_presence;
 CREATE POLICY "presence_insert_own" ON public.user_presence FOR INSERT 
 WITH CHECK (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "presence_update_own" ON public.user_presence;
 CREATE POLICY "presence_update_own" ON public.user_presence FOR UPDATE 
 USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
--- 2.6 Battles Policies
-DROP POLICY IF EXISTS "battles_select_participants" ON public.battles;
+-- 4.6 Battles
 CREATE POLICY "battles_select_participants" ON public.battles FOR SELECT 
 USING (auth.uid() = challenger_id OR auth.uid() = challenged_id);
 
-DROP POLICY IF EXISTS "battles_insert_challenger" ON public.battles;
 CREATE POLICY "battles_insert_challenger" ON public.battles FOR INSERT 
 WITH CHECK (auth.uid() = challenger_id AND challenger_id != challenged_id);
 
-DROP POLICY IF EXISTS "battles_update_participants" ON public.battles;
 CREATE POLICY "battles_update_participants" ON public.battles FOR UPDATE 
 USING (auth.uid() = challenger_id OR auth.uid() = challenged_id)
 WITH CHECK (auth.uid() = challenger_id OR auth.uid() = challenged_id);
 
--- 2.7 Battle Results Policies
-DROP POLICY IF EXISTS "battle_results_select_participants" ON public.battle_results;
+-- 4.7 Battle Results
 CREATE POLICY "battle_results_select_participants" ON public.battle_results FOR SELECT 
 USING (
     EXISTS (
@@ -308,7 +289,6 @@ USING (
     )
 );
 
-DROP POLICY IF EXISTS "battle_results_insert_own" ON public.battle_results;
 CREATE POLICY "battle_results_insert_own" ON public.battle_results FOR INSERT 
 WITH CHECK (
     auth.uid() = user_id 
@@ -320,8 +300,7 @@ WITH CHECK (
     )
 );
 
--- 2.8 Battle Events Policies
-DROP POLICY IF EXISTS "battle_events_select_participants" ON public.battle_events;
+-- 4.8 Battle Events
 CREATE POLICY "battle_events_select_participants" ON public.battle_events FOR SELECT 
 USING (
     EXISTS (
@@ -331,7 +310,6 @@ USING (
     )
 );
 
-DROP POLICY IF EXISTS "battle_events_insert_participants" ON public.battle_events;
 CREATE POLICY "battle_events_insert_participants" ON public.battle_events FOR INSERT 
 WITH CHECK (
     (user_id IS NULL OR user_id = auth.uid())
@@ -343,7 +321,7 @@ WITH CHECK (
 );
 
 -- ============================================================================
--- 3. REPLICA IDENTITY & REALTIME PUBLICATION
+-- 5. REPLICA IDENTITY & REALTIME PUBLICATION
 -- ============================================================================
 
 ALTER TABLE public.user_presence REPLICA IDENTITY FULL;
@@ -372,10 +350,10 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- 4. ATOMIC RPC STORED PROCEDURES
+-- 6. ATOMIC STORED PROCEDURES (SECURITY DEFINER)
 -- ============================================================================
 
--- 4.1 HEARTBEAT PRESENCE RPC
+-- 6.1 HEARTBEAT PRESENCE
 CREATE OR REPLACE FUNCTION public.heartbeat_presence(p_status TEXT DEFAULT 'online')
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -439,7 +417,7 @@ BEGIN
 END;
 $$;
 
--- 4.2 SET PRESENCE OFFLINE RPC
+-- 6.2 SET PRESENCE OFFLINE
 CREATE OR REPLACE FUNCTION public.set_presence_offline()
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -464,7 +442,7 @@ BEGIN
 END;
 $$;
 
--- 4.3 ONLINE FRIEND DISCOVERY RPC
+-- 6.3 ONLINE FRIEND DISCOVERY
 CREATE OR REPLACE FUNCTION public.get_online_friends()
 RETURNS TABLE (
     friend_id UUID,
@@ -542,7 +520,7 @@ BEGIN
 END;
 $$;
 
--- 4.4 GET FRIENDS PRESENCE MAP RPC
+-- 6.4 GET FRIENDS PRESENCE MAP
 CREATE OR REPLACE FUNCTION public.get_friends_presence(p_usernames TEXT[] DEFAULT NULL)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -592,7 +570,7 @@ BEGIN
 END;
 $$;
 
--- 4.5 SYNC FRIENDSHIP RPC
+-- 6.5 SYNC FRIENDSHIP
 CREATE OR REPLACE FUNCTION public.sync_friendship(p_target_username TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -640,7 +618,7 @@ BEGIN
 END;
 $$;
 
--- 4.6 ATOMIC ROAST MESSAGING RPC
+-- 6.6 ATOMIC ROAST MESSAGING
 CREATE OR REPLACE FUNCTION public.send_roast(p_recipient_username TEXT, p_content TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -726,7 +704,7 @@ BEGIN
 END;
 $$;
 
--- 4.7 ATOMIC BATTLE CHALLENGE RPC
+-- 6.7 ATOMIC BATTLE CHALLENGE
 CREATE OR REPLACE FUNCTION public.create_battle_challenge(
     p_challenged_username TEXT, 
     p_language TEXT DEFAULT 'javascript'
@@ -770,7 +748,6 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Cannot challenge yourself');
     END IF;
 
-    -- Ensure mutual friendship exists
     IF NOT EXISTS (
         SELECT 1 FROM public.friendships
         WHERE status = 'accepted'
@@ -783,7 +760,6 @@ BEGIN
         DO UPDATE SET status = 'accepted', updated_at = now();
     END IF;
 
-    -- Check if either player is already in an active battle
     SELECT id, status INTO v_existing_battle
     FROM public.battles
     WHERE (challenger_id = v_challenger_id OR challenged_id = v_challenger_id)
@@ -840,7 +816,7 @@ BEGIN
 END;
 $$;
 
--- 4.8 GET ACCEPTED FRIENDS RPC (Survives extension uninstallation/reinstall)
+-- 6.8 GET ACCEPTED FRIENDS (Survives uninstall / reinstall)
 CREATE OR REPLACE FUNCTION public.get_accepted_friends()
 RETURNS TABLE (
     friend_id UUID,
@@ -900,7 +876,7 @@ BEGIN
 END;
 $$;
 
--- 4.9 REMOVE FRIENDSHIP RPC
+-- 6.9 REMOVE FRIENDSHIP
 CREATE OR REPLACE FUNCTION public.remove_friendship(p_target_username TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -931,7 +907,7 @@ BEGIN
 END;
 $$;
 
--- 4.10 GET OWN PROFILE RPC
+-- 6.10 GET OWN PROFILE
 CREATE OR REPLACE FUNCTION public.get_own_profile()
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -972,7 +948,7 @@ BEGIN
 END;
 $$;
 
--- 4.11 RESTORE OR INIT PROFILE RPC
+-- 6.11 RESTORE OR INIT PROFILE
 CREATE OR REPLACE FUNCTION public.restore_or_init_profile(
     p_leetcode_username TEXT DEFAULT NULL,
     p_display_name TEXT DEFAULT NULL,
@@ -1053,7 +1029,5 @@ BEGIN
 END;
 $$;
 
--- ============================================================================
--- 5. RELOAD POSTGREST SCHEMA CACHE
--- ============================================================================
+-- 7. NOTIFY POSTGREST TO RELOAD SCHEMA CACHE
 NOTIFY pgrst, 'reload schema';
