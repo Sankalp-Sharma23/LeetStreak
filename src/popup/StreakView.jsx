@@ -3,9 +3,10 @@ import MilestoneCelebration from './MilestoneCelebration';
 import GoalsPanel from './GoalsPanel';
 import DailyQuestion from './DailyQuestion';
 import ProblemQueue from './ProblemQueue';
+import { AvatarWithPresence } from './PresenceIndicator';
 
 
-function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
+function StreakView({ friends, currentStreak, onRefresh, refreshing, presenceMap = {} }) {
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0);
   const [hoveredCell, setHoveredCell] = useState(null);
   const [showMilestone, setShowMilestone] = useState(false);
@@ -631,25 +632,31 @@ function StreakView({ friends, currentStreak, onRefresh, refreshing }) {
         <div className="mx-6 mb-6">
           <h3 className="text-sm font-semibold text-text-muted mb-3">Recent Activity 🎯</h3>
           <div className="space-y-3">
-            {friends.slice(0, 3).filter(f => f && f.profile && f.stats).map((friend, index) => (
-              <div key={index} className="bg-surface rounded-3xl p-4 shadow-md border border-surfaceHover transition-all duration-300 hover:shadow-lg">
-                <div className="flex items-center gap-3">
-                  <img 
-                    src={friend.profile?.avatar || 'https://via.placeholder.com/40'} 
-                    alt={friend.profile?.username || 'User'}
-                    className="w-6 h-6 rounded-full shadow-md"
-                  />
-                  <div className="flex-1">
-                    <div className="font-semibold text-sm text-text-main">{friend.profile?.username || 'Unknown'}</div>
-                    <div className="text-xs text-text-muted">{friend.stats?.total || 0} problems solved</div>
-                  </div>
-                  <div className="flex items-center gap-1 text-primary font-bold bg-primary/10 px-3 py-1 rounded-full border border-primary/20">
-                    <span>🔥</span>
-                    <span>{friend.stats?.streak || 0}</span>
+            {friends.slice(0, 3).filter(f => f && f.profile && f.stats).map((friend, index) => {
+              const uName = friend.profile?.username || 'Unknown';
+              const pInfo = presenceMap[uName] || presenceMap[uName.toLowerCase()];
+              const status = pInfo?.status || (pInfo?.isOnline ? 'online' : 'offline');
+              return (
+                <div key={index} className="bg-surface rounded-3xl p-4 shadow-md border border-surfaceHover transition-all duration-300 hover:shadow-lg">
+                  <div className="flex items-center gap-3">
+                    <AvatarWithPresence 
+                      src={friend.profile?.avatar} 
+                      alt={uName}
+                      size="sm"
+                      status={status}
+                    />
+                    <div className="flex-1">
+                      <div className="font-semibold text-sm text-text-main">{uName}</div>
+                      <div className="text-xs text-text-muted">{friend.stats?.total || 0} problems solved</div>
+                    </div>
+                    <div className="flex items-center gap-1 text-primary font-bold bg-primary/10 px-3 py-1 rounded-full border border-primary/20">
+                      <span>🔥</span>
+                      <span>{friend.stats?.streak || 0}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

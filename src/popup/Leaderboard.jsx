@@ -5,7 +5,7 @@ import { sortFriends } from '../shared/ranking-manager.js';
 
 export { getTotalSolved, getStreak, getRating, getUsername, sortFriends } from '../shared/ranking-manager.js';
 
-function Leaderboard({ friends, myData, myUsername, onRefresh, onRequireAuth }) {
+function Leaderboard({ friends, myData, myUsername, onRefresh, onRequireAuth, presenceMap = {} }) {
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [sortBy, setSortBy] = useState('total'); // 'total', 'streak', 'rating'
 
@@ -75,6 +75,9 @@ function Leaderboard({ friends, myData, myUsername, onRefresh, onRequireAuth }) 
           {sortedFriends.filter(f => f && (f.profile?.username || f.username)).map((friend, index) => {
             const friendUser = friend.profile?.username || friend.username;
             const isSelected = (selectedFriend?.profile?.username || selectedFriend?.username) === friendUser;
+            const pInfo = presenceMap[friendUser] || presenceMap[friendUser?.toLowerCase()];
+            const friendPresenceStatus = pInfo?.status || (pInfo?.isOnline ? 'online' : 'offline');
+
             return (
               <div key={friendUser}>
                 <FriendCard
@@ -87,6 +90,7 @@ function Leaderboard({ friends, myData, myUsername, onRefresh, onRequireAuth }) 
                   myUsername={myUsername}
                   mySubmissionCalendar={myData?.submissionCalendar}
                   onRequireAuth={onRequireAuth}
+                  presenceStatus={friendPresenceStatus}
                 />
               </div>
             );

@@ -13,7 +13,7 @@
  * (Terminal: COMPLETED, DECLINED, EXPIRED, CANCELLED, FORFEITED)
  */
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY, getAuthHeaders, callRpc } from './supabase-client.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, getAuthHeaders, getAuthSession, callRpc, getOnlineFriends as clientGetOnlineFriends } from './supabase-client.js';
 
 const BASE_URL = SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
 
@@ -85,7 +85,23 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     return { success: false, error: 'Cannot challenge yourself' };
   }
 
-  // Check if either participant is currently in an active battle
+  // 1. Attempt atomic server-authoritative RPC
+  try {
+    const rpcRes = await callRpc('create_battle_challenge', {
+      p_challenged_username: challenged.toLowerCase(),
+      p_language: language.toLowerCase()
+    });
+    if (rpcRes && rpcRes.success && rpcRes.battle) {
+      return { success: true, battle: rpcRes.battle };
+    }
+    if (rpcRes && rpcRes.error) {
+      return { success: false, error: rpcRes.error };
+    }
+  } catch (rpcErr) {
+    console.warn('[BattleManager] create_battle_challenge RPC error, using REST fallback:', rpcErr);
+  }
+
+  // 2. Direct REST fallback
   const [existingChallenger, existingChallenged] = await Promise.all([
     getActiveBattle(challenger),
     getActiveBattle(challenged)
@@ -98,13 +114,16 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     return { success: false, error: `${challenged} is currently in an active battle` };
   }
 
-  const now = Date.now();
-  const expiresAt = new Date(now + CHALLENGE_EXPIRY_SECONDS * 1000).toISOString();
-
-  // Lookup profile IDs if registered
+  const session = await getAuthSession();
   const profiles = await supabaseFetch(`profiles?leetcode_username=in.("${challenger.toLowerCase()}","${challenged.toLowerCase()}")&select=id,leetcode_username`);
   const challengerProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenger.toLowerCase());
   const challengedProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenged.toLowerCase());
+
+  const challengerId = session?.user_id || challengerProfile?.id;
+  const challengedId = challengedProfile?.id;
+
+  const now = Date.now();
+  const expiresAt = new Date(now + CHALLENGE_EXPIRY_SECONDS * 1000).toISOString();
 
   const payload = {
     challenger_username: challenger,
@@ -114,11 +133,8 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     expires_at: expiresAt
   };
 
-  // Bind foreign keys if profiles exist
-  if (challengerProfile?.id && challengedProfile?.id) {
-    payload.challenger_id = challengerProfile.id;
-    payload.challenged_id = challengedProfile.id;
-  }
+  if (challengerId) payload.challenger_id = challengerId;
+  if (challengedId) payload.challenged_id = challengedId;
 
   const data = await supabaseFetch('battles', {
     method: 'POST',
@@ -642,30 +658,71 @@ export async function validateLeetCodeProblem(slugOrUrl) {
   }
 }
 
-export async function updatePresence(username) {
+export async function updatePresence(username, status = 'online') {
   if (!username || !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return;
   try {
-    await supabaseFetch('user_presence', {
-      method: 'POST',
-      body: JSON.stringify({ username: username.toLowerCase(), last_seen: new Date().toISOString() })
-    });
-  } catch {}
+    // 1. Try atomic server-side heartbeat RPC
+    const rpcRes = await callRpc('heartbeat_presence', { p_status: status });
+    if (rpcRes && rpcRes.success) return;
+
+    // 2. Direct upsert fallback with session user_id
+    const session = await getAuthSession();
+    if (session?.user_id) {
+      await supabaseFetch('user_presence', {
+        method: 'POST',
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({
+          user_id: session.user_id,
+          username: username.toLowerCase(),
+          last_seen: new Date().toISOString(),
+          status: status
+        })
+      });
+    }
+  } catch (err) {
+    console.warn('[BattleManager] updatePresence failed:', err);
+  }
 }
 
 export async function getPresence(usernames) {
   const result = new Map();
   if (!usernames?.length || !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return result;
   try {
-    const list = usernames.map(u => `"${u.toLowerCase()}"`).join(',');
-    const data = await supabaseFetch(`user_presence?username=in.(${list})&select=username,last_seen`);
-    const threshold = Date.now() - 10 * 60 * 1000; // 10 minutes
-    for (const row of (data || [])) {
-      const isOnline = new Date(row.last_seen).getTime() > threshold;
-      result.set(row.username, { isOnline, last_seen: row.last_seen });
+    // 1. Try atomic RPC get_friends_presence
+    const rpcRes = await callRpc('get_friends_presence', { p_usernames: usernames });
+    if (rpcRes && typeof rpcRes === 'object' && !rpcRes.error) {
+      for (const [uname, info] of Object.entries(rpcRes)) {
+        result.set(uname.toLowerCase(), {
+          status: info.status || 'offline',
+          isOnline: !!info.isOnline,
+          inBattle: !!info.inBattle,
+          last_seen: info.last_seen
+        });
+      }
+      return result;
     }
-  } catch {}
+
+    // 2. Direct table query fallback with 120s threshold
+    const list = usernames.map(u => `"${u.toLowerCase()}"`).join(',');
+    const data = await supabaseFetch(`user_presence?username=in.(${list})&select=username,status,last_seen,in_battle`);
+    const threshold = Date.now() - 120 * 1000; // 120 seconds
+    for (const row of (data || [])) {
+      const isRecent = row.last_seen && new Date(row.last_seen).getTime() > threshold;
+      const status = !isRecent ? 'offline' : (row.in_battle ? 'in_battle' : (row.status || 'online'));
+      result.set(row.username.toLowerCase(), {
+        status,
+        isOnline: status === 'online' || status === 'in_battle',
+        inBattle: status === 'in_battle',
+        last_seen: row.last_seen
+      });
+    }
+  } catch (err) {
+    console.warn('[BattleManager] getPresence failed:', err);
+  }
   return result;
 }
+
+export { clientGetOnlineFriends as getOnlineFriends };
 
 async function updateBattleStatus(battleId, status, extra = {}) {
   await supabaseFetch(`battles?id=eq.${battleId}`, {

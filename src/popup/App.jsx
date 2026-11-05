@@ -34,6 +34,7 @@ function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [dataLoadingTakingLong, setDataLoadingTakingLong] = useState(false);
   const [authRedirectTarget, setAuthRedirectTarget] = useState(null);
+  const [presenceMap, setPresenceMap] = useState({});
 
   // Guard against duplicate execution
   const initStartedRef = React.useRef(false);
@@ -135,6 +136,40 @@ function App() {
     
     return () => clearTimeout(longLoadTimer);
   }, []); // Run once on mount!
+
+  // App-wide presence sync for social features
+  useEffect(() => {
+    let mounted = true;
+    const syncPresence = async () => {
+      if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+      try {
+        const stored = await chrome.storage.local.get(['my_leetcode_username', 'friends_cache']);
+        const uname = stored.my_leetcode_username;
+        if (!uname) return;
+
+        // Ping self presence
+        chrome.runtime.sendMessage({ type: 'BATTLE_PING_PRESENCE', username: uname }).catch(() => {});
+
+        // Fetch friends presence
+        const friendNames = Object.keys(stored.friends_cache || {});
+        if (friendNames.length > 0) {
+          const res = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_PRESENCE', usernames: friendNames });
+          if (mounted && res?.success && res.presenceMap) {
+            setPresenceMap(res.presenceMap);
+          }
+        }
+      } catch (err) {
+        console.warn('[App] Presence sync warning:', err);
+      }
+    };
+
+    syncPresence();
+    const interval = setInterval(syncPresence, 25000); // 25s
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [myUsername]);
 
 
   const handleDismissNotifications = async (notificationId) => {
@@ -502,6 +537,7 @@ function App() {
                     currentStreak={myStreak}
                     onRefresh={handleRefresh}
                     refreshing={refreshing}
+                    presenceMap={presenceMap}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full p-8 text-center">
@@ -547,6 +583,7 @@ function App() {
                   myUsername={myUsername}
                   friends={friendsList}
                   returnTarget={authRedirectTarget}
+                  presenceMap={presenceMap}
                   onAuthSuccess={(target) => {
                     const next = target || authRedirectTarget;
                     setAuthRedirectTarget(null);
@@ -562,6 +599,7 @@ function App() {
                       myData={myData}
                       myUsername={myUsername}
                       onRefresh={handleRefresh}
+                      presenceMap={presenceMap}
                       onRequireAuth={(target = 'leaderboard') => {
                         setAuthRedirectTarget(target);
                         setView('battle');

@@ -34,7 +34,10 @@ import {
   getAuthCooldownSeconds,
   signInWithEmail,
   signUpWithEmail,
-  signOut
+  signOut,
+  getOnlineFriends,
+  setPresenceOffline,
+  syncFriendship
 } from '../shared/supabase-client.js';
 import {
   createBattle,
@@ -74,6 +77,7 @@ import { syncBlockerRules, isBlockerActive } from './blocker-manager.js';
 
 const ALARM_NAME = 'leetfriends_sync';
 const SCHEDULE_CHECK_ALARM = 'schedule_transition_check';
+const PRESENCE_HEARTBEAT_ALARM = 'presence_heartbeat_alarm';
 const REQUEST_DELAY_MS = 500;
 
 // Global error handlers
@@ -99,12 +103,28 @@ chrome.runtime.onInstalled.addListener(async () => {
   setupDynamicAlarm();
   cleanupLegacyData();
   await syncBlockerRules();
+  // Register recurring presence heartbeat alarm (MV3 compliant)
+  try {
+    await chrome.alarms.clear(PRESENCE_HEARTBEAT_ALARM);
+    chrome.alarms.create(PRESENCE_HEARTBEAT_ALARM, {
+      delayInMinutes: 0.1,
+      periodInMinutes: 1
+    });
+  } catch {}
 });
 
-// Browser startup listener - reconcile network blocker rules
+// Browser startup listener - reconcile network blocker rules & presence
 chrome.runtime.onStartup.addListener(async () => {
-  console.log('[ServiceWorker] Browser startup - reconciling blocker rules');
+  console.log('[ServiceWorker] Browser startup - reconciling blocker rules & presence');
   await syncBlockerRules();
+  try {
+    await chrome.alarms.clear(PRESENCE_HEARTBEAT_ALARM);
+    chrome.alarms.create(PRESENCE_HEARTBEAT_ALARM, {
+      delayInMinutes: 0.1,
+      periodInMinutes: 1
+    });
+    await handlePresenceHeartbeat();
+  } catch {}
 });
 
 /**
@@ -182,6 +202,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await syncAllFriends();
     // Daily rollover reconciliation for Hardcore Mode blocker
     await syncBlockerRules();
+  } else if (alarm.name === PRESENCE_HEARTBEAT_ALARM) {
+    await handlePresenceHeartbeat();
   }
 });
 
@@ -297,6 +319,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       handleBattleGetPresence(message.usernames).then(sendResponse);
       return true;
 
+    case 'BATTLE_GET_ONLINE_FRIENDS':
+      getOnlineFriends()
+        .then(friends => sendResponse({ success: true, friends }))
+        .catch(err => sendResponse({ success: false, error: err.message, friends: [] }));
+      return true;
+
+    case 'SYNC_FRIENDSHIPS':
+      (async () => {
+        if (!Array.isArray(message.usernames)) {
+          return sendResponse({ success: true, count: 0 });
+        }
+        const results = await Promise.all(
+          message.usernames.map(u => syncFriendship(u).catch(() => ({ success: false })))
+        );
+        sendResponse({ success: true, count: results.filter(r => r?.success).length });
+      })().catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+
     case 'GET_LOGGED_IN_USER':
       handleGetLoggedInUser().then(sendResponse);
       return true;
@@ -321,7 +361,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'SIGN_IN_EMAIL':
       signInWithEmail(message.email, message.password)
-        .then(session => sendResponse({ success: true, session: { user_id: session.user_id, email: session.email } }))
+        .then(async session => {
+          try {
+            const stored = await chrome.storage.local.get(['my_leetcode_username', 'friends_cache']);
+            if (stored.my_leetcode_username) {
+              await updatePresence(stored.my_leetcode_username, 'online');
+            }
+            if (stored.friends_cache) {
+              const names = Object.keys(stored.friends_cache);
+              await Promise.all(names.map(name => syncFriendship(name).catch(() => {})));
+            }
+          } catch {}
+          sendResponse({ success: true, session: { user_id: session.user_id, email: session.email } });
+        })
         .catch(err => sendResponse({ success: false, error: err.message, isRateLimited: isAuthRateLimited() }));
       return true;
 
@@ -333,7 +385,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'SIGN_OUT':
       signOut()
-        .then(res => sendResponse(res))
+        .then(async res => {
+          try {
+            await setPresenceOffline();
+          } catch {}
+          sendResponse(res);
+        })
         .catch(err => sendResponse({ success: false, error: err.message }));
       return true;
 
@@ -911,6 +968,20 @@ async function handleBattleCancel(battleId, usernameOverride) {
     return await cancelBattle(battleId, username);
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+async function handlePresenceHeartbeat() {
+  try {
+    const session = await getAuthSession();
+    if (!session?.user_id) return;
+    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const username = stored.my_leetcode_username;
+    if (username) {
+      await updatePresence(username, 'online');
+    }
+  } catch (err) {
+    console.warn('[ServiceWorker] handlePresenceHeartbeat error:', err);
   }
 }
 

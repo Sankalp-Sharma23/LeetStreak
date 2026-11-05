@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Flame, Sparkles, BarChart2, Trophy, Award } from 'lucide-react';
+import { Flame, Sparkles, BarChart2, Trophy, Award, AlertCircle } from 'lucide-react';
 import { sendRoast } from '../shared/storage';
+import { AvatarWithPresence } from './PresenceIndicator';
 
 // Helper function to check if solved today
 function isSolvingToday(submissionCalendar) {
@@ -55,7 +56,18 @@ function formatLastActive(lastActiveDate) {
   return `${Math.floor(diffDays / 365)} years ago`;
 }
 
-function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, mySubmissionCalendar, rank = 0, sortBy = 'total', onRequireAuth }) {
+function FriendCard({ 
+  friend, 
+  isExpanded, 
+  onClick, 
+  isCurrentUser, 
+  myUsername, 
+  mySubmissionCalendar, 
+  rank = 0, 
+  sortBy = 'total', 
+  onRequireAuth,
+  presenceStatus = 'offline'
+}) {
   const [allSubmissionsExpanded, setAllSubmissionsExpanded] = useState(false);
   const [showSubmissionsSection, setShowSubmissionsSection] = useState(false);
   const [hoveredCell, setHoveredCell] = useState(null);
@@ -65,15 +77,19 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, my
   const [roastMessage, setRoastMessage] = useState('');
   const [isSendingRoast, setIsSendingRoast] = useState(false);
   const [roastSuccess, setRoastSuccess] = useState(false);
+  const [roastError, setRoastError] = useState('');
 
   const quickRoasts = [
     "Bro forgot how to code 💀",
     "Streak at 0? Yikes 😬",
-    "Are you even trying?"
+    "Are you even trying?",
+    "Need me to invert that binary tree for you? 🌲",
+    "Even my O(N^3) solution runs faster than your streak! 🐌"
   ];
 
   const handleStartRoast = (e) => {
     e.stopPropagation();
+    setRoastError('');
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, (res) => {
         if (!res || res.state !== 'AUTHENTICATED') {
@@ -95,7 +111,11 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, my
     e.stopPropagation();
     if (!myUsername || !roastMessage.trim()) return;
     
+    const targetUsername = friend?.profile?.username || friend?.username;
+    if (!targetUsername) return;
+
     setIsSendingRoast(true);
+    setRoastError('');
     try {
       const authRes = await new Promise(resolve => {
         chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, resolve);
@@ -108,19 +128,21 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, my
         return;
       }
 
-      const success = await sendRoast(friend.profile.username, myUsername, roastMessage);
+      const success = await sendRoast(targetUsername, myUsername, roastMessage);
       if (success) {
         setRoastSuccess(true);
         setTimeout(() => {
           setIsRoasting(false);
           setRoastSuccess(false);
           setRoastMessage('');
+          setRoastError('');
         }, 2000);
       } else {
-        alert('Failed to send roast. Make sure their profile is registered.');
+        setRoastError('Failed to deliver roast. Ensure your friend has signed into LeetStreak.');
       }
     } catch (err) {
       console.error('Error roasting:', err);
+      setRoastError(err.message || 'Network error sending roast.');
     } finally {
       setIsSendingRoast(false);
     }
@@ -317,19 +339,18 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, my
             {getRankBadge(rank)}
           </div>
 
-          {/* Avatar */}
-          <div className="relative">
-            <img
-              src={profile.avatar || 'https://via.placeholder.com/40'}
-              alt={profile.username}
-              className="w-10 h-10 rounded-full border-2 border-surface shadow-md object-cover"
-            />
-            {rank <= 3 && (
-              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full border-2 border-surface text-inverted text-xs flex items-center justify-center shadow-sm">
-                <Sparkles className="w-3 h-3" />
+          {/* Avatar with Presence Indicator */}
+          <AvatarWithPresence
+            src={profile.avatar}
+            alt={profile.username}
+            size="md"
+            status={presenceStatus}
+            badge={rank <= 3 ? (
+              <div className="w-4 h-4 bg-primary rounded-full border border-surface text-inverted text-[10px] flex items-center justify-center shadow-sm">
+                <Sparkles className="w-2.5 h-2.5" />
               </div>
-            )}
-          </div>
+            ) : null}
+          />
 
           {/* User Info */}
           <div className="flex-1 min-w-0">
@@ -574,7 +595,10 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, my
                     type="text" 
                     placeholder="Type custom roast..."
                     value={roastMessage}
-                    onChange={(e) => setRoastMessage(e.target.value)}
+                    onChange={(e) => {
+                      setRoastMessage(e.target.value);
+                      if (roastError) setRoastError('');
+                    }}
                     className="flex-1 bg-background/50 border border-surfaceHover focus:border-orange-500/50 rounded-lg px-3 py-1.5 text-xs text-text-main placeholder-text-muted/50 outline-none transition-colors"
                   />
                   <button
@@ -585,6 +609,12 @@ function FriendCard({ friend, isExpanded, onClick, isCurrentUser, myUsername, my
                     {isSendingRoast ? '...' : 'Send'}
                   </button>
                 </div>
+                {roastError && (
+                  <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-[10px] text-red-400 flex items-center gap-1.5 animate-shake">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    <span>{roastError}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>

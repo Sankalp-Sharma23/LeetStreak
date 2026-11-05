@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Swords, Trophy, Clock, ChevronRight, X, Check, AlertCircle, ExternalLink, Flag, RefreshCw, Loader2 } from 'lucide-react';
+import { Swords, Trophy, Clock, ChevronRight, X, Check, AlertCircle, ExternalLink, Flag, RefreshCw, Loader2, Sparkles, UserCheck } from 'lucide-react';
 import { BATTLE_STATUS, REVEAL_COUNTDOWN_SECONDS, SELECTION_WINDOW_SECONDS, calculateScores } from '../shared/battle-manager.js';
 import { SUPABASE_URL } from '../shared/supabase-client.js';
+import { PresenceIndicator, AvatarWithPresence } from './PresenceIndicator.jsx';
 
 // ─────────────────────────────────────────────────────────────
 // HELPERS
@@ -95,7 +96,7 @@ function HistoryRow({ battle }) {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 
-function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = null }) {
+function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = null, presenceMap: externalPresenceMap = null }) {
   const [battle, setBattle] = useState(null);
   const [myResult, setMyResult] = useState(null);
   const [oppResult, setOppResult] = useState(null);
@@ -105,6 +106,8 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
   const [error, setError] = useState('');
   const [friendsList, setFriendsList] = useState([]);
   const [presenceMap, setPresenceMap] = useState({});
+  const [onlineFriendsServer, setOnlineFriendsServer] = useState([]);
+  const [presenceRefreshing, setPresenceRefreshing] = useState(false);
   const [authState, setAuthState] = useState('AUTHENTICATED');
 
   // Exclusive Battle Auth Form State
@@ -326,28 +329,46 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
   }, [fetchBattleState]);
 
   // ─── Presence System ──────────────────────────────────────
-  const fetchPresence = useCallback(async () => {
+  const fetchPresence = useCallback(async (isManual = false) => {
     if (!myUsername) return;
+    if (isManual) setPresenceRefreshing(true);
     try {
       // 1. Ping my own presence
       await chrome.runtime.sendMessage({ type: 'BATTLE_PING_PRESENCE', username: myUsername });
       
-      // 2. Fetch presence for all friends
+      // 2. Fetch server-verified online friends
+      const onlineResp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_ONLINE_FRIENDS' });
+      if (onlineResp?.success && Array.isArray(onlineResp.friends)) {
+        setOnlineFriendsServer(onlineResp.friends);
+      }
+
+      // 3. Fetch presence map for all friends
       const usernames = friendsList.map(f => f?.username || f?.profile?.username).filter(Boolean);
       if (usernames.length > 0) {
         const resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_PRESENCE', usernames });
         if (resp?.success && resp.presenceMap) {
-          setPresenceMap(resp.presenceMap);
+          setPresenceMap(prev => ({ ...prev, ...resp.presenceMap }));
         }
+
+        // 4. Auto-sync friendships so RLS and relationships are established
+        chrome.runtime.sendMessage({ type: 'SYNC_FRIENDSHIPS', usernames }).catch(() => {});
       }
     } catch (err) {
       console.warn('[BattleView] Presence fetch error:', err);
+    } finally {
+      if (isManual) setPresenceRefreshing(false);
     }
   }, [myUsername, friendsList]);
 
   useEffect(() => {
+    if (externalPresenceMap && Object.keys(externalPresenceMap).length > 0) {
+      setPresenceMap(prev => ({ ...prev, ...externalPresenceMap }));
+    }
+  }, [externalPresenceMap]);
+
+  useEffect(() => {
     fetchPresence();
-    const presenceInterval = setInterval(fetchPresence, 30000); // 30s
+    const presenceInterval = setInterval(() => fetchPresence(false), 20000); // 20s
     return () => clearInterval(presenceInterval);
   }, [fetchPresence]);
 
@@ -649,41 +670,141 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
         {/* Hero */}
         <div className="relative px-4 pt-6 pb-4 border-b border-red-500/10">
           <div className="absolute inset-0 bg-gradient-to-b from-red-950/20 to-transparent pointer-events-none" />
-          <div className="relative flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-              <Swords className="w-5 h-5 text-red-400" />
+          <div className="relative flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                <Swords className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-text-main">Battle Mode</h2>
+                <p className="text-[10px] text-text-muted">Challenge a friend to a coding duel</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-sm font-bold text-text-main">Battle Mode</h2>
-              <p className="text-[10px] text-text-muted">Challenge a friend to a coding duel</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => fetchPresence(true)}
+              disabled={presenceRefreshing}
+              className="text-[10px] text-text-muted hover:text-primary flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-surfaceHover hover:border-primary/40 transition-all active:scale-95"
+              title="Refresh online status"
+            >
+              <RefreshCw className={`w-3 h-3 ${presenceRefreshing ? 'animate-spin text-primary' : ''}`} />
+              <span>{presenceRefreshing ? 'Syncing…' : 'Sync Status'}</span>
+            </button>
           </div>
 
-          {/* Friend selector */}
-          <div className="relative mb-3">
-            <select
-              value={selectedFriend}
-              onChange={e => setSelectedFriend(e.target.value)}
-              className="w-full px-3 py-2.5 text-xs bg-surface border border-surfaceHover rounded-xl focus:outline-none focus:border-red-500/50 text-text-main appearance-none cursor-pointer"
-            >
-              <option value="">Select an online friend to challenge…</option>
-              {friendsList
-                .filter(f => {
-                  const name = f?.username || f?.profile?.username;
-                  return presenceMap[name]?.isOnline;
-                })
-                .map(f => {
-                  const name = f?.username || f?.profile?.username;
-                  const streak = f?.stats?.streak || 0;
-                  return (
-                    <option key={name} value={name}>
-                      🟢 {name} — {streak}🔥 streak
-                    </option>
-                  );
-                })}
-            </select>
-            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted rotate-90 pointer-events-none" />
-          </div>
+          {/* Online Friends Status Header */}
+          {(() => {
+            const getFriendStatus = (f) => {
+              const name = f?.username || f?.profile?.username;
+              if (!name) return 'offline';
+              const p = presenceMap[name] || presenceMap[name.toLowerCase()];
+              const serverFriend = onlineFriendsServer.find(of => of.leetcode_username?.toLowerCase() === name.toLowerCase());
+              if (serverFriend) return serverFriend.status;
+              if (p?.inBattle || p?.status === 'in_battle') return 'in_battle';
+              if (p?.isOnline || p?.status === 'online') return 'online';
+              return 'offline';
+            };
+
+            const onlineFriends = friendsList.filter(f => getFriendStatus(f) === 'online');
+            const busyFriends = friendsList.filter(f => getFriendStatus(f) === 'in_battle');
+            const offlineFriends = friendsList.filter(f => getFriendStatus(f) === 'offline');
+
+            const selectedFriendData = friendsList.find(f => (f?.username || f?.profile?.username)?.toLowerCase() === selectedFriend.toLowerCase());
+            const selectedStatus = selectedFriendData ? getFriendStatus(selectedFriendData) : 'offline';
+
+            return (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-text-main">Select an Online Friend:</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                      onlineFriends.length > 0
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-zinc-700/30 text-zinc-400 border-zinc-700/50'
+                    }`}>
+                      {onlineFriends.length} online
+                    </span>
+                  </div>
+                </div>
+
+                {onlineFriends.length === 0 && (
+                  <div className="mb-3 px-3 py-2 bg-surface/60 rounded-xl border border-surfaceHover text-[10px] text-text-muted flex items-center gap-2">
+                    <PresenceIndicator status="offline" size="sm" />
+                    <span>No friends currently online. As friends open LeetStreak, they will appear automatically.</span>
+                  </div>
+                )}
+
+                {/* Friend selector */}
+                <div className="relative mb-3">
+                  <select
+                    value={selectedFriend}
+                    onChange={e => setSelectedFriend(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs bg-surface border border-surfaceHover rounded-xl focus:outline-none focus:border-red-500/50 text-text-main appearance-none cursor-pointer"
+                  >
+                    <option value="">-- Choose a friend to challenge --</option>
+                    {onlineFriends.length > 0 && (
+                      <optgroup label="🟢 Online Now (Ready to Duel)">
+                        {onlineFriends.map(f => {
+                          const name = f?.username || f?.profile?.username;
+                          const streak = f?.stats?.streak || 0;
+                          return (
+                            <option key={name} value={name}>
+                              🟢 {name} — {streak}🔥 streak
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
+                    {busyFriends.length > 0 && (
+                      <optgroup label="🟡 In Battle (Busy)">
+                        {busyFriends.map(f => {
+                          const name = f?.username || f?.profile?.username;
+                          return (
+                            <option key={name} value={name} disabled>
+                              🟡 {name} (In a Match)
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
+                    {offlineFriends.length > 0 && (
+                      <optgroup label="⚪ Offline Friends">
+                        {offlineFriends.map(f => {
+                          const name = f?.username || f?.profile?.username;
+                          return (
+                            <option key={name} value={name}>
+                              ⚪ {name} (Offline)
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
+                  </select>
+                  <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted rotate-90 pointer-events-none" />
+                </div>
+
+                {/* Selected Friend Preview Badge */}
+                {selectedFriend && selectedFriendData && (
+                  <div className="flex items-center gap-2.5 p-2 bg-surface rounded-xl border border-surfaceHover mb-3 animate-fade-in">
+                    <AvatarWithPresence
+                      src={selectedFriendData?.profile?.avatar}
+                      alt={selectedFriend}
+                      size="sm"
+                      status={selectedStatus}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-text-main truncate">{selectedFriend}</div>
+                      <div className="text-[10px] text-text-muted flex items-center gap-1">
+                        <PresenceIndicator status={selectedStatus} size="sm" showLabel />
+                        <span>•</span>
+                        <span>{selectedFriendData?.stats?.streak || 0}🔥 streak</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Language selector */}
           <div className="relative mb-3">

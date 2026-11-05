@@ -80,6 +80,8 @@ erDiagram
         text username
         timestamptz last_seen
         text status "online | in_battle | offline"
+        boolean in_battle "Direct flag for quick query"
+        uuid active_battle_id FK "REFERENCES battles(id) ON DELETE SET NULL"
     }
 
     BATTLES {
@@ -168,8 +170,9 @@ stateDiagram-v2
 ## 3. SQL Migrations & Version Control
 
 Versioned migrations are located under `supabase/migrations/`:
-1. **Migration Script:** [`supabase/migrations/20261105000001_security_and_relational_schema.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000001_security_and_relational_schema.sql)
-2. **Rollback Script:** [`supabase/migrations/20261105000001_security_and_relational_schema.down.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000001_security_and_relational_schema.down.sql)
+1. **Security & Relational Schema:** [`supabase/migrations/20261105000001_security_and_relational_schema.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000001_security_and_relational_schema.sql)
+2. **Presence & Social Remediation:** [`supabase/migrations/20261105000002_presence_and_social_remediation.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000002_presence_and_social_remediation.sql)
+   - Rollback Script: [`supabase/migrations/20261105000002_presence_and_social_remediation.down.sql`](file:///l:/LeetStreak/supabase/migrations/20261105000002_presence_and_social_remediation.down.sql)
 
 ### Migration Order & Deployment Instructions
 ```bash

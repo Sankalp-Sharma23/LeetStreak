@@ -586,6 +586,96 @@ export async function upsertUserSettings(settingsObj) {
 }
 
 // ============================================================================
+// SOCIAL GRAPH, PRESENCE & ROASTS API
+// ============================================================================
+
+/**
+ * Send heartbeat to update user presence atomically
+ */
+export async function heartbeatPresence(status = 'online') {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return null;
+  try {
+    const session = await getAuthSession();
+    if (!session?.user_id) return null;
+    return await callRpc('heartbeat_presence', { p_status: status });
+  } catch (err) {
+    console.warn('[SupabaseClient] heartbeatPresence error:', err);
+    return null;
+  }
+}
+
+/**
+ * Set user presence to offline explicitly on logout
+ */
+export async function setPresenceOffline() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return null;
+  try {
+    const session = await getAuthSession();
+    if (!session?.user_id) return null;
+    return await callRpc('set_presence_offline');
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Fetch online friends with active presence and battle status in single server query
+ */
+export async function getOnlineFriends() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return [];
+  try {
+    const res = await callRpc('get_online_friends');
+    return Array.isArray(res) ? res : [];
+  } catch (err) {
+    console.warn('[SupabaseClient] getOnlineFriends error:', err);
+    return [];
+  }
+}
+
+/**
+ * Get map of presence statuses for specific usernames or all friends
+ */
+export async function getFriendsPresence(usernames = null) {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return {};
+  try {
+    const res = await callRpc('get_friends_presence', { p_usernames: usernames });
+    return res && typeof res === 'object' && !res.error ? res : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+/**
+ * Synchronize friendship between authenticated user and target friend
+ */
+export async function syncFriendship(targetUsername) {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE' || !targetUsername) return { success: false };
+  try {
+    const res = await callRpc('sync_friendship', { p_target_username: targetUsername.toLowerCase() });
+    return res || { success: false };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Create battle challenge via server-authoritative RPC
+ */
+export async function createBattleChallenge(challengedUsername, language = 'javascript') {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE' || !challengedUsername) {
+    return { success: false, error: 'Supabase configuration or username missing' };
+  }
+  try {
+    return await callRpc('create_battle_challenge', {
+      p_challenged_username: challengedUsername.toLowerCase(),
+      p_language: language.toLowerCase()
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ============================================================================
 // ROAST MESSAGES API (Normalized & Durable)
 // ============================================================================
 
@@ -602,6 +692,17 @@ export async function sendRoast(targetUsername, fromUsername, message) {
       return false;
     }
 
+    // 1. Try atomic server-side RPC first
+    const rpcRes = await callRpc('send_roast', {
+      p_recipient_username: targetUsername.toLowerCase(),
+      p_content: message.substring(0, 500)
+    });
+
+    if (rpcRes && rpcRes.success) {
+      return true;
+    }
+
+    // 2. Fallback to direct REST insert
     const targetProfile = await getProfile(targetUsername);
     if (!targetProfile?.id) {
       console.warn(`[Roast] Target user ${targetUsername} has not registered on Supabase`);
