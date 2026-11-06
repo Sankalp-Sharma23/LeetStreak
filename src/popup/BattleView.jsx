@@ -262,11 +262,14 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
   const elapsedSeconds = useElapsedTimer(problemStartTime);
 
   // ─── Derived state ───────────────────────────────────────
+  const challengerName = battle?.challenger_username || battle?.challenger;
+  const challengedName = battle?.challenged_username || battle?.challenged;
+  const amChallenger = challengerName && myUsername
+    ? challengerName.toLowerCase() === myUsername.toLowerCase()
+    : false;
   const opponent = battle
-    ? (battle.challenger === myUsername ? battle.challenged : battle.challenger)
+    ? (amChallenger ? challengedName : challengerName)
     : null;
-
-  const amChallenger = battle?.challenger === myUsername;
 
   const view = (() => {
     if (!battle) return 'home';
@@ -299,15 +302,17 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
   const fetchBattleState = useCallback(async () => {
     if (!myUsername) return;
     try {
-      const resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS' });
+      const resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS', username: myUsername });
       if (resp?.battle) {
-        const prev = battleRef.current;
         setBattle(resp.battle);
 
-        // Fix 5: Use ref to compare status — avoids stale closure
-        if (prev?.status === BATTLE_STATUS.READY_CHECK &&
-            resp.battle.status === BATTLE_STATUS.COUNTDOWN) {
-          setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+        if (resp.battle.status === BATTLE_STATUS.COUNTDOWN) {
+          if (resp.battle.match_starts_at) {
+            const rem = Math.max(0, Math.round((new Date(resp.battle.match_starts_at).getTime() - Date.now()) / 1000));
+            setRevealCountdown(rem > 0 ? rem : null);
+          } else if (revealCountdown === null) {
+            setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+          }
         }
       } else {
         setBattle(null);
@@ -1085,7 +1090,7 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
 
   // ─── READY CHECK ──────────────────────────────────────────
   if (view === 'ready_check') {
-    const isChallenger = battle.challenger === myUsername;
+    const isChallenger = amChallenger;
     const myReady = isChallenger ? battle.challenger_ready : battle.challenged_ready;
     const oppReady = isChallenger ? battle.challenged_ready : battle.challenger_ready;
 

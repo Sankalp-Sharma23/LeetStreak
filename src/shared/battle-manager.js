@@ -197,7 +197,19 @@ export async function getActiveBattle(username) {
   const data = await supabaseFetch(
     `battles?or=(challenger_username.ilike.${normalized},challenged_username.ilike.${normalized})&status=not.in.(${terminalList})&order=created_at.desc&limit=1`
   );
-  return data && data.length > 0 ? data[0] : null;
+  if (!data || data.length === 0) return null;
+  const b = data[0];
+
+  // Auto-advance COUNTDOWN -> IN_PROGRESS when 10s countdown completes
+  if (b.status === BATTLE_STATUS.COUNTDOWN && b.match_starts_at && new Date(b.match_starts_at) <= new Date()) {
+    b.status = BATTLE_STATUS.IN_PROGRESS;
+    supabaseFetch(`battles?id=eq.${b.id}&status=eq.countdown`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: BATTLE_STATUS.IN_PROGRESS })
+    }).catch(() => {});
+  }
+
+  return b;
 }
 
 /**
