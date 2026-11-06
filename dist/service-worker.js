@@ -1,7 +1,7 @@
-function st(e, r = 1, t = 50) {
+function ft(e, r = 1, t = 50) {
   return !e || typeof e != "string" ? { valid: !1, error: "Username is required" } : (e = e.trim(), e.length < r || e.length > t ? { valid: !1, error: `Username must be ${r}-${t} characters` } : /^[a-zA-Z0-9_-]+$/.test(e) ? { valid: !0, username: e.toLowerCase() } : { valid: !1, error: "Username contains invalid characters" });
 }
-class at {
+class mt {
   constructor(r, t) {
     this.maxCalls = r, this.windowMs = t, this.calls = [];
   }
@@ -23,17 +23,17 @@ class at {
     return Math.max(0, s);
   }
 }
-const ot = /* @__PURE__ */ new Set([
+const gt = /* @__PURE__ */ new Set([
   "leetcode.com",
   "assets.leetcode.com"
 ]);
-function nt(e, r) {
+function yt(e, r) {
   try {
     const t = new URL(e);
     return t.protocol !== "https:" ? {
       valid: !1,
       reason: `Insecure transport: ${e} does not use HTTPS`
-    } : (!ot.has(t.hostname) && !t.hostname.endsWith(".supabase.co") && console.warn(`[SecurityAuditor] Request to external domain: ${t.hostname}`), !r.headers?.get("strict-transport-security") && t.hostname === "leetcode.com" && console.warn(`[SecurityAuditor] Warning: Missing HSTS header on response from ${t.hostname}`), { valid: !0 });
+    } : (!gt.has(t.hostname) && !t.hostname.endsWith(".supabase.co") && console.warn(`[SecurityAuditor] Request to external domain: ${t.hostname}`), !r.headers?.get("strict-transport-security") && t.hostname === "leetcode.com" && console.warn(`[SecurityAuditor] Warning: Missing HSTS header on response from ${t.hostname}`), { valid: !0 });
   } catch (t) {
     return {
       valid: !1,
@@ -41,47 +41,47 @@ function nt(e, r) {
     };
   }
 }
-async function ct(e, r = {}) {
+async function ht(e, r = {}) {
   if (!e.startsWith("https://"))
     throw new Error(`Security Violation: Insecure HTTP request blocked for ${e}`);
-  const t = await fetch(e, r), s = nt(e, t);
+  const t = await fetch(e, r), s = yt(e, t);
   return s.valid || console.error(`[SecurityAuditor] Security policy failed: ${s.reason}`), t;
 }
-const V = "https://leetcode.com/graphql", it = 2, se = 6e3, pe = new at(30, 6e4);
-function Se(e) {
+const Q = "https://leetcode.com/graphql", pt = 2, oe = 6e3, Te = new mt(30, 6e4);
+function Ae(e) {
   return new Promise((r) => setTimeout(r, e));
 }
-async function lt(e, r, t = it) {
+async function _t(e, r, t = pt) {
   let s;
-  if (!pe.isAllowed()) {
-    const a = pe.getTimeUntilReset();
-    throw new Error(`Rate limit exceeded. Please wait ${Math.ceil(a / 1e3)} seconds.`);
+  if (!Te.isAllowed()) {
+    const i = Te.getTimeUntilReset();
+    throw new Error(`Rate limit exceeded. Please wait ${Math.ceil(i / 1e3)} seconds.`);
   }
-  for (let a = 0; a < t; a++)
+  for (let i = 0; i < t; i++)
     try {
       if (typeof navigator < "u" && !navigator.onLine)
         throw new Error("No internet connection. Please check your network.");
-      const o = new AbortController(), n = setTimeout(() => o.abort(), se), i = await ct(e, {
+      const a = new AbortController(), o = setTimeout(() => a.abort(), oe), c = await ht(e, {
         ...r,
-        signal: o.signal
+        signal: a.signal
       });
-      if (clearTimeout(n), i.status === 429) {
-        const c = parseInt(i.headers.get("Retry-After")) || Math.pow(2, a);
-        console.log(`[API] Rate limited. Retrying after ${c}s`), await Se(c * 1e3);
+      if (clearTimeout(o), c.status === 429) {
+        const n = parseInt(c.headers.get("Retry-After")) || Math.pow(2, i);
+        console.log(`[API] Rate limited. Retrying after ${n}s`), await Ae(n * 1e3);
         continue;
       }
-      return i;
-    } catch (o) {
-      if (s = o, o.name === "AbortError" && (console.error(`[API] Request timeout (${se}ms)`), s = new Error(`Request timed out after ${se / 1e3} seconds`)), o.message.includes("No internet connection"))
-        throw o;
-      if (a < t - 1) {
-        const n = Math.pow(2, a) * 1e3;
-        console.log(`[API] Retry ${a + 1}/${t} in ${n}ms`), await Se(n);
+      return c;
+    } catch (a) {
+      if (s = a, a.name === "AbortError" && (console.error(`[API] Request timeout (${oe}ms)`), s = new Error(`Request timed out after ${oe / 1e3} seconds`)), a.message.includes("No internet connection"))
+        throw a;
+      if (i < t - 1) {
+        const o = Math.pow(2, i) * 1e3;
+        console.log(`[API] Retry ${i + 1}/${t} in ${o}ms`), await Ae(o);
       }
     }
   throw s || new Error("Network request failed after multiple retries");
 }
-const ut = `
+const wt = `
   query getUserProfile($username: String!) {
     matchedUser(username: $username) {
       username
@@ -104,7 +104,7 @@ const ut = `
       globalRanking
     }
   }
-`, dt = `
+`, St = `
   query getUserBadges($username: String!) {
     matchedUser(username: $username) {
       badges {
@@ -114,7 +114,7 @@ const ut = `
       }
     }
   }
-`, ft = `
+`, bt = `
   query getRecentSubmissions($username: String!) {
     recentSubmissionList(username: $username, limit: 15) {
       title
@@ -124,7 +124,7 @@ const ut = `
       lang
     }
   }
-`, mt = `
+`, Et = `
   query allSubmissions($username: String!) {
     matchedUser(username: $username) {
       recentAcSubmissions(limit: 1000) {
@@ -136,122 +136,122 @@ const ut = `
     }
   }
 `;
-async function q(e) {
+async function G(e) {
   try {
     console.log(`[API] Fetching data for user: ${e}`);
-    const r = await lt(V, {
+    const r = await _t(Q, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        query: ut,
+        query: wt,
         variables: { username: e }
       })
     });
     if (console.log(`[API] Profile response status: ${r.status}`), !r.ok) {
-      const c = await r.text();
-      throw console.error("[API] Profile request failed:", r.status, c), new Error(`API request failed: ${r.status}`);
+      const n = await r.text();
+      throw console.error("[API] Profile request failed:", r.status, n), new Error(`API request failed: ${r.status}`);
     }
     const t = await r.json();
     if (console.log("[API] Profile data received:", t), t.errors)
       throw console.error("[API] GraphQL errors:", t.errors), new Error(t.errors[0]?.message || "GraphQL error");
     if (!t.data?.matchedUser)
       throw console.error("[API] No matched user in response"), new Error("User not found or profile is private");
-    const s = t.data.matchedUser, a = s.submissionCalendar ? JSON.parse(s.submissionCalendar) : {};
+    const s = t.data.matchedUser, i = s.submissionCalendar ? JSON.parse(s.submissionCalendar) : {};
+    let a = [];
+    try {
+      const n = await fetch(Q, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          query: St,
+          variables: { username: e }
+        })
+      });
+      n.ok && (a = (await n.json()).data?.matchedUser?.badges || []);
+    } catch (n) {
+      console.warn("[API] Failed to fetch badges:", n);
+    }
     let o = [];
     try {
-      const c = await fetch(V, {
+      const n = await fetch(Q, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          query: dt,
+          query: bt,
           variables: { username: e }
         })
       });
-      c.ok && (o = (await c.json()).data?.matchedUser?.badges || []);
-    } catch (c) {
-      console.warn("[API] Failed to fetch badges:", c);
+      n.ok && (o = (await n.json()).data?.recentSubmissionList || []);
+    } catch (n) {
+      console.warn("[API] Failed to fetch recent submissions:", n);
     }
-    let n = [];
+    let c = [];
     try {
-      const c = await fetch(V, {
+      const n = await fetch(Q, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          query: ft,
+          query: Et,
           variables: { username: e }
         })
       });
-      c.ok && (n = (await c.json()).data?.recentSubmissionList || []);
-    } catch (c) {
-      console.warn("[API] Failed to fetch recent submissions:", c);
-    }
-    let i = [];
-    try {
-      const c = await fetch(V, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          query: mt,
-          variables: { username: e }
-        })
-      });
-      if (c.ok) {
-        const l = await c.json();
-        l.errors ? console.warn("[API] All submissions query error:", l.errors) : (i = l.data?.matchedUser?.recentAcSubmissions || [], console.log(`[API] Fetched ${i.length} all-time accepted submissions (limit 1000)`), i.length > 0 && console.log("[API] Sample submissions:", i.slice(0, 5).map((u) => u.titleSlug)));
+      if (n.ok) {
+        const l = await n.json();
+        l.errors ? console.warn("[API] All submissions query error:", l.errors) : (c = l.data?.matchedUser?.recentAcSubmissions || [], console.log(`[API] Fetched ${c.length} all-time accepted submissions (limit 1000)`), c.length > 0 && console.log("[API] Sample submissions:", c.slice(0, 5).map((u) => u.titleSlug)));
       }
-    } catch (c) {
-      console.warn("[API] Failed to fetch all submissions:", c);
+    } catch (n) {
+      console.warn("[API] Failed to fetch all submissions:", n);
     }
     return console.log(`[API] Successfully fetched data for ${e}`), {
       profile: {
         ...s,
-        badges: o,
-        recentSubmissions: n
+        badges: a,
+        recentSubmissions: o
       },
-      allAcceptedSubmissions: i,
+      allAcceptedSubmissions: c,
       contestRanking: t.data.userContestRanking,
-      submissionCalendar: a
+      submissionCalendar: i
     };
   } catch (r) {
     throw console.error("Error fetching LeetCode data:", r), r;
   }
 }
-const Ee = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Ue = typeof import.meta < "u" && Ee ? Ee : typeof process < "u" && process.env ? process.env : {}, h = Ue.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", F = Ue.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", T = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), f = {
+const ke = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Ue = typeof import.meta < "u" && ke ? ke : typeof process < "u" && process.env ? process.env : {}, h = Ue.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", F = Ue.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", T = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), f = {
   SESSION_LOADING: "SESSION_LOADING",
   AUTHENTICATED: "AUTHENTICATED",
   AUTH_REQUIRED: "AUTH_REQUIRED",
   SESSION_EXPIRED: "SESSION_EXPIRED",
   AUTH_ERROR: "AUTH_ERROR"
 };
-let L = null, ae = f.SESSION_LOADING, be = null, W = 0;
-const ht = /* @__PURE__ */ new Set();
-function w(e, r = null) {
-  ae = e, be = r;
-  for (const t of ht)
+let L = null, ne = f.SESSION_LOADING, Me = null, W = 0;
+const Tt = /* @__PURE__ */ new Set();
+function _(e, r = null) {
+  ne = e, Me = r;
+  for (const t of Tt)
     try {
-      t(ae, L, be);
+      t(ne, L, Me);
     } catch (s) {
       console.warn("[SupabaseClient] Error in auth listener callback:", s);
     }
 }
-function O() {
-  return ae;
+function D() {
+  return ne;
 }
-function H() {
+function x() {
   return Date.now() < W;
 }
-function ie() {
+function de() {
   return Math.max(0, Math.ceil((W - Date.now()) / 1e3));
 }
-function le(e = 60) {
+function fe(e = 60) {
   W = Date.now() + e * 1e3, typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ supabase_auth_cooldown_until: W }).catch(() => {
   });
 }
@@ -267,15 +267,15 @@ async function A() {
     }
   return null;
 }
-async function x(e) {
+async function q(e) {
   if (L = e, typeof chrome < "u" && chrome.storage?.local)
     try {
       e ? await chrome.storage.local.set({ supabase_auth_session: e }) : await chrome.storage.local.remove(["supabase_auth_session"]);
     } catch {
     }
 }
-async function _t() {
-  w(f.SESSION_LOADING);
+async function At() {
+  _(f.SESSION_LOADING);
   try {
     let e = null;
     if (typeof chrome < "u" && chrome.storage?.local) {
@@ -284,24 +284,24 @@ async function _t() {
     } else
       e = L;
     if (!e)
-      return w(f.AUTH_REQUIRED), null;
+      return _(f.AUTH_REQUIRED), null;
     if (e.expires_at && e.expires_at > Date.now() + 6e4)
-      return L = e, w(f.AUTHENTICATED), L;
+      return L = e, _(f.AUTHENTICATED), L;
     if (e.refresh_token) {
-      if (H())
-        return w(f.AUTH_ERROR, "Authentication temporarily rate-limited. Please wait."), null;
-      const r = await wt(e.refresh_token);
+      if (x())
+        return _(f.AUTH_ERROR, "Authentication temporarily rate-limited. Please wait."), null;
+      const r = await kt(e.refresh_token);
       if (r)
         return r;
     }
-    return await x(null), w(f.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
+    return await q(null), _(f.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
   } catch (e) {
-    return console.warn("[SupabaseClient] Error restoring session:", e), w(f.AUTH_ERROR, e.message), null;
+    return console.warn("[SupabaseClient] Error restoring session:", e), _(f.AUTH_ERROR, e.message), null;
   }
 }
-async function wt(e) {
-  if (H())
-    return w(f.AUTH_ERROR, "Rate limited"), null;
+async function kt(e) {
+  if (x())
+    return _(f.AUTH_ERROR, "Rate limited"), null;
   try {
     const r = await fetch(`${T}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
@@ -312,9 +312,9 @@ async function wt(e) {
       body: JSON.stringify({ refresh_token: e })
     });
     if (r.status === 429)
-      return le(60), w(f.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
+      return fe(60), _(f.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
     if (!r.ok)
-      return await x(null), w(f.SESSION_EXPIRED, "Session expired or revoked."), null;
+      return await q(null), _(f.SESSION_EXPIRED, "Session expired or revoked."), null;
     const t = await r.json(), s = {
       access_token: t.access_token,
       refresh_token: t.refresh_token,
@@ -322,14 +322,14 @@ async function wt(e) {
       email: t.user?.email,
       expires_at: Date.now() + (t.expires_in ? t.expires_in * 1e3 : 3600 * 1e3)
     };
-    return await x(s), w(f.AUTHENTICATED), s;
+    return await q(s), _(f.AUTHENTICATED), s;
   } catch (r) {
-    return console.warn("[SupabaseClient] Network error during token refresh:", r), w(f.AUTH_ERROR, r.message), null;
+    return console.warn("[SupabaseClient] Network error during token refresh:", r), _(f.AUTH_ERROR, r.message), null;
   }
 }
-async function gt(e, r) {
-  if (H()) {
-    const t = ie();
+async function Mt(e, r) {
+  if (x()) {
+    const t = de();
     throw new Error(`Rate limit cooldown active. Please wait ${t} seconds.`);
   }
   if (!e || !r)
@@ -344,32 +344,32 @@ async function gt(e, r) {
       body: JSON.stringify({ email: e, password: r })
     });
     if (t.status === 429)
-      throw le(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
+      throw fe(60), _(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
     if (!t.ok) {
-      const o = await t.text();
-      let n = "Invalid email or password";
+      const a = await t.text();
+      let o = "Invalid email or password";
       try {
-        const i = JSON.parse(o);
-        n = i.error_description || i.msg || n;
+        const c = JSON.parse(a);
+        o = c.error_description || c.msg || o;
       } catch {
       }
-      throw new Error(n);
+      throw new Error(o);
     }
-    const s = await t.json(), a = {
+    const s = await t.json(), i = {
       access_token: s.access_token,
       refresh_token: s.refresh_token,
       user_id: s.user?.id,
       email: s.user?.email || e,
       expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 3600 * 1e3)
     };
-    return await x(a), w(f.AUTHENTICATED), a;
+    return await q(i), _(f.AUTHENTICATED), i;
   } catch (t) {
-    throw w(f.AUTH_ERROR, t.message), t;
+    throw _(f.AUTH_ERROR, t.message), t;
   }
 }
-async function yt(e, r) {
-  if (H()) {
-    const t = ie();
+async function Ct(e, r) {
+  if (x()) {
+    const t = de();
     throw new Error(`Rate limit cooldown active. Please wait ${t} seconds.`);
   }
   if (!e || !r)
@@ -384,39 +384,39 @@ async function yt(e, r) {
       body: JSON.stringify({ email: e, password: r })
     });
     if (t.status === 429)
-      throw le(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
+      throw fe(60), _(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
     if (!t.ok) {
-      const a = await t.text();
-      let o = "Failed to create account";
+      const i = await t.text();
+      let a = "Failed to create account";
       try {
-        const n = JSON.parse(a);
-        o = n.error_description || n.msg || o;
+        const o = JSON.parse(i);
+        a = o.error_description || o.msg || a;
       } catch {
       }
-      throw new Error(o);
+      throw new Error(a);
     }
     const s = await t.json();
     if (s.access_token) {
-      const a = {
+      const i = {
         access_token: s.access_token,
         refresh_token: s.refresh_token,
         user_id: s.user?.id,
         email: s.user?.email || e,
         expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 36e5)
       };
-      return await x(a), w(f.AUTHENTICATED), { success: !0, session: a };
+      return await q(i), _(f.AUTHENTICATED), { success: !0, session: i };
     }
-    return w(f.AUTH_REQUIRED), {
+    return _(f.AUTH_REQUIRED), {
       success: !0,
       confirmationRequired: !0,
       user: s.user,
       message: "Account created. Please check your inbox to confirm your email before signing in."
     };
   } catch (t) {
-    throw w(f.AUTH_ERROR, t.message), t;
+    throw _(f.AUTH_ERROR, t.message), t;
   }
 }
-async function pt() {
+async function vt() {
   try {
     const e = await A();
     e?.access_token && fetch(`${T}/auth/v1/logout`, {
@@ -430,9 +430,9 @@ async function pt() {
     });
   } catch {
   }
-  return await x(null), w(f.AUTH_REQUIRED), { success: !0 };
+  return await q(null), _(f.AUTH_REQUIRED), { success: !0 };
 }
-async function R() {
+async function v() {
   const r = (await A())?.access_token || F;
   return {
     "Content-Type": "application/json",
@@ -441,27 +441,27 @@ async function R() {
     Prefer: "return=representation"
   };
 }
-async function E(e, r = {}) {
+async function w(e, r = {}) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const t = await R(), s = await fetch(`${T}/rest/v1/rpc/${e}`, {
+    const t = await v(), s = await fetch(`${T}/rest/v1/rpc/${e}`, {
       method: "POST",
       headers: t,
       body: JSON.stringify(r)
     });
     if (!s.ok) {
-      const a = await s.text();
-      console.error(`[SupabaseClient] RPC ${e} error:`, s.status, a);
-      let o = null;
+      const i = await s.text();
+      console.error(`[SupabaseClient] RPC ${e} error:`, s.status, i);
+      let a = null;
       try {
-        o = JSON.parse(a);
+        a = JSON.parse(i);
       } catch {
       }
       return {
         success: !1,
-        error: o?.message || o?.error_description || a,
-        code: o?.code || null,
-        raw: a
+        error: a?.message || a?.error_description || i,
+        code: a?.code || null,
+        raw: i
       };
     }
     return await s.json();
@@ -469,10 +469,10 @@ async function E(e, r = {}) {
     return console.error(`[SupabaseClient] RPC ${e} exception:`, t), { success: !1, error: t.message };
   }
 }
-async function Ne(e) {
+async function Be(e) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return null;
   try {
-    const r = await R(), t = await fetch(
+    const r = await v(), t = await fetch(
       `${T}/rest/v1/profiles?leetcode_username=ilike.${encodeURIComponent(e)}&select=*`,
       { method: "GET", headers: r }
     );
@@ -483,24 +483,24 @@ async function Ne(e) {
     return console.error("Supabase getProfile error:", r), null;
   }
 }
-async function N(e, r) {
+async function P(e, r) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return !1;
   try {
     const t = await A();
     if (!t?.user_id)
       return !1;
-    const s = await R(), a = r?.stats || {}, o = r?.profile || {}, n = r?.contest || {}, i = {
+    const s = await v(), i = r?.stats || {}, a = r?.profile || {}, o = r?.contest || {}, c = {
       id: t.user_id,
       leetcode_username: e.toLowerCase(),
-      display_name: o.realName || e,
-      avatar_url: o.avatar || "",
-      total_solved: a.total || 0,
-      easy_solved: a.easy || 0,
-      medium_solved: a.medium || 0,
-      hard_solved: a.hard || 0,
-      current_streak: a.streak || 0,
-      longest_streak: a.longestStreak || 0,
-      contest_rating: n.rating || 0,
+      display_name: a.realName || e,
+      avatar_url: a.avatar || "",
+      total_solved: i.total || 0,
+      easy_solved: i.easy || 0,
+      medium_solved: i.medium || 0,
+      hard_solved: i.hard || 0,
+      current_streak: i.streak || 0,
+      longest_streak: i.longestStreak || 0,
+      contest_rating: o.rating || 0,
       last_synced_at: (/* @__PURE__ */ new Date()).toISOString()
     };
     return (await fetch(`${T}/rest/v1/profiles`, {
@@ -509,7 +509,7 @@ async function N(e, r) {
         ...s,
         Prefer: "resolution=merge-duplicates,return=representation"
       },
-      body: JSON.stringify(i)
+      body: JSON.stringify(c)
     })).ok;
   } catch (t) {
     return console.error("Supabase upsertProfile error:", t), !1;
@@ -520,7 +520,7 @@ async function ee() {
   try {
     const e = await A();
     if (!e?.user_id) return null;
-    const r = await R(), t = await fetch(
+    const r = await v(), t = await fetch(
       `${T}/rest/v1/user_settings?user_id=eq.${e.user_id}&select=*`,
       { method: "GET", headers: r }
     );
@@ -531,12 +531,12 @@ async function ee() {
     return console.error("Supabase getUserSettings error:", e), null;
   }
 }
-async function Ie(e) {
+async function He(e) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return !1;
   try {
     const r = await A();
     if (!r?.user_id) return !1;
-    const t = await R();
+    const t = await v();
     return (await fetch(`${T}/rest/v1/user_settings`, {
       method: "POST",
       headers: {
@@ -553,72 +553,72 @@ async function Ie(e) {
     return console.error("Supabase upsertUserSettings error:", r), !1;
   }
 }
-async function St() {
+async function Rt() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    return (await A())?.user_id ? await E("set_presence_offline") : null;
+    return (await A())?.user_id ? await w("set_presence_offline") : null;
   } catch {
     return null;
   }
 }
-async function Et() {
+async function Lt() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return [];
   try {
-    const e = await E("get_online_friends");
+    const e = await w("get_online_friends");
     return Array.isArray(e) ? e : [];
   } catch (e) {
     return console.warn("[SupabaseClient] getOnlineFriends error:", e), [];
   }
 }
-async function ue(e) {
+async function me(e) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
   try {
-    return await E("sync_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
+    return await w("sync_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function Pe(e) {
+async function $e(e) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
   try {
-    return await E("remove_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
+    return await w("remove_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function $e() {
+async function xe() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return [];
   try {
-    const e = await E("get_accepted_friends");
+    const e = await w("get_accepted_friends");
     return Array.isArray(e) ? e : e && Array.isArray(e.data) ? e.data : [];
   } catch (e) {
     return console.error("[SupabaseClient] getAcceptedFriends error:", e), [];
   }
 }
-async function bt() {
+async function Pt() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const e = await E("get_own_profile");
+    const e = await w("get_own_profile");
     if (e && typeof e == "object" && e.id) return e;
     const r = await A();
     if (!r?.user_id) return null;
-    const t = await R(), s = await fetch(
+    const t = await v(), s = await fetch(
       `${T}/rest/v1/profiles?id=eq.${encodeURIComponent(r.user_id)}&select=*`,
       { method: "GET", headers: t }
     );
     if (!s.ok) return null;
-    const a = await s.json();
-    return a && a.length > 0 ? a[0] : null;
+    const i = await s.json();
+    return i && i.length > 0 ? i[0] : null;
   } catch (e) {
     return console.error("[SupabaseClient] getOwnProfile error:", e), null;
   }
 }
-async function oe() {
+async function ce() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return { success: !1 };
   try {
     if (!(await A())?.user_id)
       return { success: !1, error: "No authenticated session" };
-    const r = await bt();
+    const r = await Pt();
     r?.leetcode_username && typeof chrome < "u" && chrome.storage?.local && await chrome.storage.local.set({
       my_leetcode_username: r.leetcode_username,
       own_profile: {
@@ -642,12 +642,12 @@ async function oe() {
         lastUpdated: r.last_synced_at ? new Date(r.last_synced_at).getTime() : Date.now()
       }
     });
-    const t = await $e();
+    const t = await xe();
     if (typeof chrome < "u" && chrome.storage?.local) {
-      const s = await chrome.storage.local.get(["friends_cache", "friends_list"]), a = s.friends_cache || {}, o = s.friends_list || [], n = { ...a }, i = new Set(o);
+      const s = await chrome.storage.local.get(["friends_cache", "friends_list"]), i = s.friends_cache || {}, a = s.friends_list || [], o = { ...i }, c = new Set(a);
       for (const l of t) {
         const u = (l.leetcode_username || "").toLowerCase();
-        u && (i.add(u), n[u] = {
+        u && (c.add(u), o[u] = {
           username: u,
           profile: {
             username: u,
@@ -671,15 +671,15 @@ async function oe() {
         });
       }
       await chrome.storage.local.set({
-        friends_cache: n,
-        friends_list: Array.from(i)
+        friends_cache: o,
+        friends_list: Array.from(c)
       });
-      const c = Object.keys(a).filter(
+      const n = Object.keys(i).filter(
         (l) => !t.some((u) => (u.leetcode_username || "").toLowerCase() === l.toLowerCase())
       );
-      if (c.length > 0)
-        for (const l of c)
-          ue(l).catch(() => {
+      if (n.length > 0)
+        for (const l of n)
+          me(l).catch(() => {
           });
     }
     return {
@@ -691,31 +691,31 @@ async function oe() {
     return console.error("[SupabaseClient] restoreAccountSocialData error:", e), { success: !1, error: e.message };
   }
 }
-async function Be(e, r, t) {
+async function Fe(e, r, t) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e || !t) return !1;
   try {
     const s = await A();
     if (!s?.user_id)
       return console.warn("[Roast] Authentication required to send cloud roasts"), !1;
-    const a = await E("send_roast", {
+    const i = await w("send_roast", {
       p_recipient_username: e.toLowerCase(),
       p_content: t.substring(0, 500)
     });
-    if (a && a.success)
+    if (i && i.success)
       return !0;
-    const o = await Ne(e);
-    if (!o?.id)
+    const a = await Be(e);
+    if (!a?.id)
       return console.warn(`[Roast] Target user ${e} has not registered on Supabase`), !1;
-    const n = await R();
+    const o = await v();
     return (await fetch(`${T}/rest/v1/roast_messages`, {
       method: "POST",
       headers: {
-        ...n,
+        ...o,
         Prefer: "return=representation"
       },
       body: JSON.stringify({
         sender_id: s.user_id,
-        recipient_id: o.id,
+        recipient_id: a.id,
         sender_username: r,
         recipient_username: e.toLowerCase(),
         content: t.substring(0, 500),
@@ -727,11 +727,11 @@ async function Be(e, r, t) {
     return console.error("Error sending roast:", s), !1;
   }
 }
-async function Me(e) {
+async function qe(e) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return [];
   try {
     if (!await A()) return [];
-    const t = await R(), s = await fetch(
+    const t = await v(), s = await fetch(
       `${T}/rest/v1/roast_messages?recipient_username=eq.${e.toLowerCase()}&status=neq.read&order=created_at.desc&limit=20`,
       { method: "GET", headers: t }
     );
@@ -740,10 +740,10 @@ async function Me(e) {
     return console.warn("Error fetching unread roasts:", r), [];
   }
 }
-async function Tt(e) {
+async function Dt(e) {
   if (!(!e?.length || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      const r = await R(), t = e.map((s) => `"${s}"`).join(",");
+      const r = await v(), t = e.map((s) => `"${s}"`).join(",");
       await fetch(`${T}/rest/v1/roast_messages?id=in.(${t})`, {
         method: "PATCH",
         headers: r,
@@ -755,10 +755,10 @@ async function Tt(e) {
     } catch {
     }
 }
-async function At(e) {
+async function It(e) {
   if (!(!e?.length || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      const r = await R(), t = e.map((s) => `"${s}"`).join(",");
+      const r = await v(), t = e.map((s) => `"${s}"`).join(",");
       await fetch(`${T}/rest/v1/roast_messages?id=in.(${t})`, {
         method: "PATCH",
         headers: r,
@@ -770,18 +770,18 @@ async function At(e) {
     } catch {
     }
 }
-async function He(e) {
+async function Ge(e) {
   if (!e || h === "YOUR_SUPABASE_PROJECT_URL_HERE") return !0;
   try {
-    const r = await Me(e);
+    const r = await qe(e);
     if (!r || r.length === 0) return !0;
     const t = r.map((s) => s.id);
-    return await At(t), !0;
+    return await It(t), !0;
   } catch (r) {
     return console.error("Error clearing roasts:", r), !1;
   }
 }
-async function Q() {
+async function V() {
   return typeof chrome > "u" || !chrome.storage?.local ? null : (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username || null;
 }
 async function Y() {
@@ -799,8 +799,8 @@ async function te(e) {
       own_profile: e,
       last_own_profile_sync: Date.now()
     });
-    const r = await Q();
-    return r && O() === f.AUTHENTICATED && N(r, e).catch((t) => {
+    const r = await V();
+    return r && D() === f.AUTHENTICATED && P(r, e).catch((t) => {
       console.warn("[Storage] Cloud sync for own profile failed (non-blocking):", t);
     }), !0;
   } catch (r) {
@@ -809,58 +809,58 @@ async function te(e) {
 }
 async function K() {
   try {
-    const e = await Q(), r = typeof chrome < "u" && chrome.storage?.local ? await chrome.storage.local.get(["friends_cache", "own_profile", "friends_list"]) : {}, t = r.friends_cache || {}, s = r.own_profile || null, a = r.friends_list || [], o = { ...t };
-    if (e && s && (o[e] = s), O() !== f.AUTHENTICATED)
-      return o;
+    const e = await V(), r = typeof chrome < "u" && chrome.storage?.local ? await chrome.storage.local.get(["friends_cache", "own_profile", "friends_list"]) : {}, t = r.friends_cache || {}, s = r.own_profile || null, i = r.friends_list || [], a = { ...t };
+    if (e && s && (a[e] = s), D() !== f.AUTHENTICATED)
+      return a;
     try {
-      const n = await $e();
-      if (Array.isArray(n) && n.length > 0) {
-        let i = !1;
-        n.forEach((c) => {
-          const l = (c.leetcode_username || "").toLowerCase();
-          l && !o[l] && (o[l] = {
+      const o = await xe();
+      if (Array.isArray(o) && o.length > 0) {
+        let c = !1;
+        o.forEach((n) => {
+          const l = (n.leetcode_username || "").toLowerCase();
+          l && !a[l] && (a[l] = {
             username: l,
             profile: {
               username: l,
-              realName: c.display_name || l,
-              avatar: c.avatar_url || ""
+              realName: n.display_name || l,
+              avatar: n.avatar_url || ""
             },
             stats: {
-              total: c.total_solved || 0,
-              easy: c.easy_solved || 0,
-              medium: c.medium_solved || 0,
-              hard: c.hard_solved || 0,
-              streak: c.current_streak || 0,
-              longestStreak: c.longest_streak || 0
+              total: n.total_solved || 0,
+              easy: n.easy_solved || 0,
+              medium: n.medium_solved || 0,
+              hard: n.hard_solved || 0,
+              streak: n.current_streak || 0,
+              longestStreak: n.longest_streak || 0
             },
-            contest: { rating: c.contest_rating || 0 },
-            friend_id: c.friend_id,
-            friendship_id: c.friendship_id,
-            lastUpdated: c.last_synced_at ? new Date(c.last_synced_at).getTime() : Date.now()
-          }, i = !0);
-        }), i && typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_cache: o }).catch(() => {
+            contest: { rating: n.contest_rating || 0 },
+            friend_id: n.friend_id,
+            friendship_id: n.friendship_id,
+            lastUpdated: n.last_synced_at ? new Date(n.last_synced_at).getTime() : Date.now()
+          }, c = !0);
+        }), c && typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_cache: a }).catch(() => {
         });
       }
-    } catch (n) {
-      console.warn("[Storage] Permanent friends refresh skipped/failed:", n.message);
+    } catch (o) {
+      console.warn("[Storage] Permanent friends refresh skipped/failed:", o.message);
     }
-    return o;
+    return a;
   } catch (e) {
     return console.error("Error getting friends:", e), {};
   }
 }
-async function de(e) {
+async function ge(e) {
   if (!e) return null;
   try {
-    const r = await Q();
+    const r = await V();
     if (r && e.toLowerCase() === r.toLowerCase())
       return await Y();
     if (typeof chrome < "u" && chrome.storage?.local) {
-      const a = await chrome.storage.local.get(["friends_cache"]);
-      if (a.friends_cache && a.friends_cache[e])
-        return a.friends_cache[e];
+      const i = await chrome.storage.local.get(["friends_cache"]);
+      if (i.friends_cache && i.friends_cache[e])
+        return i.friends_cache[e];
     }
-    const t = await Ne(e);
+    const t = await Be(e);
     if (!t) return null;
     const s = t.leetcode_data || {};
     return s.lastUpdated = t.last_synced_at ? new Date(t.last_synced_at).getTime() : Date.now(), s;
@@ -868,25 +868,25 @@ async function de(e) {
     return console.error("Error getting single friend:", r), null;
   }
 }
-async function fe(e, r) {
+async function ye(e, r) {
   if (!e || !r) return { success: !1 };
   try {
-    const t = await Q();
+    const t = await V();
     if (t && e.toLowerCase() === t.toLowerCase())
       return await te(r), { success: !0 };
     if (typeof chrome < "u" && chrome.storage?.local) {
-      const a = await chrome.storage.local.get(["friends_cache", "friends_list"]), o = a.friends_cache || {}, n = a.friends_list || [];
-      o[e] = r;
-      const i = n.includes(e) ? n : [...n, e];
+      const i = await chrome.storage.local.get(["friends_cache", "friends_list"]), a = i.friends_cache || {}, o = i.friends_list || [];
+      a[e] = r;
+      const c = o.includes(e) ? o : [...o, e];
       await chrome.storage.local.set({
-        friends_cache: o,
-        friends_list: i
+        friends_cache: a,
+        friends_list: c
       });
     }
-    return O() === f.AUTHENTICATED && (N(e, r).catch(() => {
-    }), t && ee().then((a) => {
-      const o = a?.friends_list || [];
-      o.includes(e) || Ie({ friends_list: [...o, e] }).catch(() => {
+    return D() === f.AUTHENTICATED && (P(e, r).catch(() => {
+    }), t && ee().then((i) => {
+      const a = i?.friends_list || [];
+      a.includes(e) || He({ friends_list: [...a, e] }).catch(() => {
       });
     }).catch(() => {
     })), { success: !0 };
@@ -894,23 +894,23 @@ async function fe(e, r) {
     return console.error("Error saving friend:", t), { success: !1, error: t.message };
   }
 }
-async function kt(e) {
+async function Nt(e) {
   if (!e) return !1;
   try {
     if (typeof chrome < "u" && chrome.storage?.local) {
       const r = await chrome.storage.local.get(["friends_cache", "friends_list"]), t = r.friends_cache || {}, s = r.friends_list || [];
       delete t[e];
-      const a = s.filter((o) => o.toLowerCase() !== e.toLowerCase());
+      const i = s.filter((a) => a.toLowerCase() !== e.toLowerCase());
       await chrome.storage.local.set({
         friends_cache: t,
-        friends_list: a
+        friends_list: i
       });
     }
-    return O() === f.AUTHENTICATED && (Pe(e).catch(() => {
+    return D() === f.AUTHENTICATED && ($e(e).catch(() => {
     }), ee().then((r) => {
       if (r?.friends_list) {
         const t = r.friends_list.filter((s) => s.toLowerCase() !== e.toLowerCase());
-        Ie({ friends_list: t }).catch(() => {
+        He({ friends_list: t }).catch(() => {
         });
       }
     }).catch(() => {
@@ -919,14 +919,14 @@ async function kt(e) {
     return console.error("Error removing friend:", r), !1;
   }
 }
-async function Fe() {
+async function We() {
   try {
     if (typeof chrome < "u" && chrome.storage?.local) {
       const e = await chrome.storage.local.get(["friends_list"]);
       if (e.friends_list && Array.isArray(e.friends_list))
         return e.friends_list;
     }
-    if (O() === f.AUTHENTICATED) {
+    if (D() === f.AUTHENTICATED) {
       const e = await ee();
       if (e?.friends_list)
         return typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_list: e.friends_list }).catch(() => {
@@ -937,303 +937,2767 @@ async function Fe() {
     return console.error("Error getting friends list:", e), [];
   }
 }
-async function Ct(e, r, t) {
-  return await Be(e, r, t);
+async function Ot(e, r, t) {
+  return await Fe(e, r, t);
 }
-async function xe() {
-  const e = await Q();
-  return e ? await He(e) : !1;
+async function Ye() {
+  const e = await V();
+  return e ? await Ge(e) : !1;
 }
-const Rt = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), me = /* @__PURE__ */ new Set([
+const Ut = [
+  {
+    slug: "two-sum",
+    title: "Two Sum",
+    difficulty: "Easy",
+    topics: [
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "best-time-to-buy-and-sell-stock",
+    title: "Best Time to Buy and Sell Stock",
+    difficulty: "Easy",
+    topics: [
+      "Arrays"
+    ]
+  },
+  {
+    slug: "contains-duplicate",
+    title: "Contains Duplicate",
+    difficulty: "Easy",
+    topics: [
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "product-of-array-except-self",
+    title: "Product of Array Except Self",
+    difficulty: "Medium",
+    topics: [
+      "Arrays"
+    ]
+  },
+  {
+    slug: "maximum-subarray",
+    title: "Maximum Subarray",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "maximum-product-subarray",
+    title: "Maximum Product Subarray",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "find-minimum-in-rotated-sorted-array",
+    title: "Find Minimum in Rotated Sorted Array",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "search-in-rotated-sorted-array",
+    title: "Search in Rotated Sorted Array",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "3sum",
+    title: "3Sum",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "container-with-most-water",
+    title: "Container With Most Water",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "trapping-rain-water",
+    title: "Trapping Rain Water",
+    difficulty: "Hard",
+    topics: [
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "move-zeroes",
+    title: "Move Zeroes",
+    difficulty: "Easy",
+    topics: [
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "squares-of-a-sorted-array",
+    title: "Squares of a Sorted Array",
+    difficulty: "Easy",
+    topics: [
+      "Arrays",
+      "Two Pointers",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "rotate-array",
+    title: "Rotate Array",
+    difficulty: "Medium",
+    topics: [
+      "Arrays"
+    ]
+  },
+  {
+    slug: "merge-intervals",
+    title: "Merge Intervals",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Sorting",
+      "Intervals"
+    ]
+  },
+  {
+    slug: "insert-interval",
+    title: "Insert Interval",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Intervals"
+    ]
+  },
+  {
+    slug: "non-overlapping-intervals",
+    title: "Non-overlapping Intervals",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Intervals",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "meeting-rooms",
+    title: "Meeting Rooms",
+    difficulty: "Easy",
+    topics: [
+      "Arrays",
+      "Intervals",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "meeting-rooms-ii",
+    title: "Meeting Rooms II",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Intervals",
+      "Heaps"
+    ]
+  },
+  {
+    slug: "spiral-matrix",
+    title: "Spiral Matrix",
+    difficulty: "Medium",
+    topics: [
+      "Arrays"
+    ]
+  },
+  {
+    slug: "set-matrix-zeroes",
+    title: "Set Matrix Zeroes",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "rotate-image",
+    title: "Rotate Image",
+    difficulty: "Medium",
+    topics: [
+      "Arrays"
+    ]
+  },
+  {
+    slug: "word-search",
+    title: "Word Search",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "jump-game",
+    title: "Jump Game",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "jump-game-ii",
+    title: "Jump Game II",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "gas-station",
+    title: "Gas Station",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "candy",
+    title: "Candy",
+    difficulty: "Hard",
+    topics: [
+      "Arrays",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "valid-anagram",
+    title: "Valid Anagram",
+    difficulty: "Easy",
+    topics: [
+      "Strings",
+      "Hashing",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "group-anagrams",
+    title: "Group Anagrams",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Hashing",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "longest-substring-without-repeating-characters",
+    title: "Longest Substring Without Repeating Characters",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Hashing",
+      "Sliding Window"
+    ]
+  },
+  {
+    slug: "longest-repeating-character-replacement",
+    title: "Longest Repeating Character Replacement",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Sliding Window"
+    ]
+  },
+  {
+    slug: "minimum-window-substring",
+    title: "Minimum Window Substring",
+    difficulty: "Hard",
+    topics: [
+      "Strings",
+      "Sliding Window",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "valid-palindrome",
+    title: "Valid Palindrome",
+    difficulty: "Easy",
+    topics: [
+      "Strings",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "palindromic-substrings",
+    title: "Palindromic Substrings",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "longest-palindromic-substring",
+    title: "Longest Palindromic Substring",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "encode-and-decode-strings",
+    title: "Encode and Decode Strings",
+    difficulty: "Medium",
+    topics: [
+      "Strings"
+    ]
+  },
+  {
+    slug: "count-and-say",
+    title: "Count and Say",
+    difficulty: "Medium",
+    topics: [
+      "Strings"
+    ]
+  },
+  {
+    slug: "string-to-integer-atoi",
+    title: "String to Integer (atoi)",
+    difficulty: "Medium",
+    topics: [
+      "Strings"
+    ]
+  },
+  {
+    slug: "reverse-string",
+    title: "Reverse String",
+    difficulty: "Easy",
+    topics: [
+      "Strings",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "reverse-words-in-a-string",
+    title: "Reverse Words in a String",
+    difficulty: "Medium",
+    topics: [
+      "Strings"
+    ]
+  },
+  {
+    slug: "find-all-anagrams-in-a-string",
+    title: "Find All Anagrams in a String",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Hashing",
+      "Sliding Window"
+    ]
+  },
+  {
+    slug: "permutation-in-string",
+    title: "Permutation in String",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Hashing",
+      "Sliding Window"
+    ]
+  },
+  {
+    slug: "sliding-window-maximum",
+    title: "Sliding Window Maximum",
+    difficulty: "Hard",
+    topics: [
+      "Sliding Window",
+      "Queues",
+      "Heaps"
+    ]
+  },
+  {
+    slug: "binary-search",
+    title: "Binary Search",
+    difficulty: "Easy",
+    topics: [
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "search-a-2d-matrix",
+    title: "Search a 2D Matrix",
+    difficulty: "Medium",
+    topics: [
+      "Binary Search",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "koko-eating-bananas",
+    title: "Koko Eating Bananas",
+    difficulty: "Medium",
+    topics: [
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "time-based-key-value-store",
+    title: "Time Based Key-Value Store",
+    difficulty: "Medium",
+    topics: [
+      "Binary Search",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "median-of-two-sorted-arrays",
+    title: "Median of Two Sorted Arrays",
+    difficulty: "Hard",
+    topics: [
+      "Binary Search",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "reverse-linked-list",
+    title: "Reverse Linked List",
+    difficulty: "Easy",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "merge-two-sorted-lists",
+    title: "Merge Two Sorted Lists",
+    difficulty: "Easy",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "linked-list-cycle",
+    title: "Linked List Cycle",
+    difficulty: "Easy",
+    topics: [
+      "Linked Lists",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "reorder-list",
+    title: "Reorder List",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "remove-nth-node-from-end-of-list",
+    title: "Remove Nth Node From End of List",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "copy-list-with-random-pointer",
+    title: "Copy List with Random Pointer",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "add-two-numbers",
+    title: "Add Two Numbers",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists",
+      "Math"
+    ]
+  },
+  {
+    slug: "lru-cache",
+    title: "LRU Cache",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "merge-k-sorted-lists",
+    title: "Merge K Sorted Lists",
+    difficulty: "Hard",
+    topics: [
+      "Linked Lists",
+      "Heaps"
+    ]
+  },
+  {
+    slug: "reverse-nodes-in-k-group",
+    title: "Reverse Nodes in k-Group",
+    difficulty: "Hard",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "valid-parentheses",
+    title: "Valid Parentheses",
+    difficulty: "Easy",
+    topics: [
+      "Stacks"
+    ]
+  },
+  {
+    slug: "min-stack",
+    title: "Min Stack",
+    difficulty: "Medium",
+    topics: [
+      "Stacks"
+    ]
+  },
+  {
+    slug: "evaluate-reverse-polish-notation",
+    title: "Evaluate Reverse Polish Notation",
+    difficulty: "Medium",
+    topics: [
+      "Stacks"
+    ]
+  },
+  {
+    slug: "generate-parentheses",
+    title: "Generate Parentheses",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "daily-temperatures",
+    title: "Daily Temperatures",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "car-fleet",
+    title: "Car Fleet",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Arrays",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "largest-rectangle-in-histogram",
+    title: "Largest Rectangle in Histogram",
+    difficulty: "Hard",
+    topics: [
+      "Stacks",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "number-of-recent-calls",
+    title: "Number of Recent Calls",
+    difficulty: "Easy",
+    topics: [
+      "Queues"
+    ]
+  },
+  {
+    slug: "implement-queue-using-stacks",
+    title: "Implement Queue using Stacks",
+    difficulty: "Easy",
+    topics: [
+      "Queues",
+      "Stacks"
+    ]
+  },
+  {
+    slug: "design-circular-queue",
+    title: "Design Circular Queue",
+    difficulty: "Medium",
+    topics: [
+      "Queues"
+    ]
+  },
+  {
+    slug: "invert-binary-tree",
+    title: "Invert Binary Tree",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "maximum-depth-of-binary-tree",
+    title: "Maximum Depth of Binary Tree",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "diameter-of-binary-tree",
+    title: "Diameter of Binary Tree",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "balanced-binary-tree",
+    title: "Balanced Binary Tree",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "same-tree",
+    title: "Same Tree",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "subtree-of-another-tree",
+    title: "Subtree of Another Tree",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "lowest-common-ancestor-of-a-binary-search-tree",
+    title: "Lowest Common Ancestor of a BST",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "binary-tree-level-order-traversal",
+    title: "Binary Tree Level Order Traversal",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "binary-tree-right-side-view",
+    title: "Binary Tree Right Side View",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "count-good-nodes-in-binary-tree",
+    title: "Count Good Nodes in Binary Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "validate-binary-search-tree",
+    title: "Validate Binary Search Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "kth-smallest-element-in-a-bst",
+    title: "Kth Smallest Element in a BST",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "construct-binary-tree-from-preorder-and-inorder-traversal",
+    title: "Construct Binary Tree from Preorder and Inorder",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "binary-tree-maximum-path-sum",
+    title: "Binary Tree Maximum Path Sum",
+    difficulty: "Hard",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "serialize-and-deserialize-binary-tree",
+    title: "Serialize and Deserialize Binary Tree",
+    difficulty: "Hard",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "kth-largest-element-in-an-array",
+    title: "Kth Largest Element in an Array",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "last-stone-weight",
+    title: "Last Stone Weight",
+    difficulty: "Easy",
+    topics: [
+      "Heaps"
+    ]
+  },
+  {
+    slug: "k-closest-points-to-origin",
+    title: "K Closest Points to Origin",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "task-scheduler",
+    title: "Task Scheduler",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "design-twitter",
+    title: "Design Twitter",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "find-median-from-data-stream",
+    title: "Find Median from Data Stream",
+    difficulty: "Hard",
+    topics: [
+      "Heaps"
+    ]
+  },
+  {
+    slug: "number-of-islands",
+    title: "Number of Islands",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "max-area-of-island",
+    title: "Max Area of Island",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "clone-graph",
+    title: "Clone Graph",
+    difficulty: "Medium",
+    topics: [
+      "Graphs",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "walls-and-gates",
+    title: "Walls and Gates",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "rotting-oranges",
+    title: "Rotting Oranges",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "pacific-atlantic-water-flow",
+    title: "Pacific Atlantic Water Flow",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "course-schedule",
+    title: "Course Schedule",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "course-schedule-ii",
+    title: "Course Schedule II",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "number-of-connected-components-in-an-undirected-graph",
+    title: "Number of Connected Components",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "graph-valid-tree",
+    title: "Graph Valid Tree",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "word-ladder",
+    title: "Word Ladder",
+    difficulty: "Hard",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "alien-dictionary",
+    title: "Alien Dictionary",
+    difficulty: "Hard",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "climbing-stairs",
+    title: "Climbing Stairs",
+    difficulty: "Easy",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "min-cost-climbing-stairs",
+    title: "Min Cost Climbing Stairs",
+    difficulty: "Easy",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "house-robber",
+    title: "House Robber",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "house-robber-ii",
+    title: "House Robber II",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "longest-palindromic-subsequence",
+    title: "Longest Palindromic Subsequence",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "decode-ways",
+    title: "Decode Ways",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "coin-change",
+    title: "Coin Change",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "maximum-product-subarray",
+    title: "Maximum Product Subarray",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "word-break",
+    title: "Word Break",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "longest-increasing-subsequence",
+    title: "Longest Increasing Subsequence",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "partition-equal-subset-sum",
+    title: "Partition Equal Subset Sum",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "unique-paths",
+    title: "Unique Paths",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Math"
+    ]
+  },
+  {
+    slug: "unique-paths-ii",
+    title: "Unique Paths II",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "longest-common-subsequence",
+    title: "Longest Common Subsequence",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Strings"
+    ]
+  },
+  {
+    slug: "edit-distance",
+    title: "Edit Distance",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Strings"
+    ]
+  },
+  {
+    slug: "triangle",
+    title: "Triangle",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "burst-balloons",
+    title: "Burst Balloons",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "regular-expression-matching",
+    title: "Regular Expression Matching",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming",
+      "Strings"
+    ]
+  },
+  {
+    slug: "wildcard-matching",
+    title: "Wildcard Matching",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming",
+      "Strings"
+    ]
+  },
+  {
+    slug: "interleaving-string",
+    title: "Interleaving String",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Strings"
+    ]
+  },
+  {
+    slug: "subsets",
+    title: "Subsets",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "combination-sum",
+    title: "Combination Sum",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "combination-sum-ii",
+    title: "Combination Sum II",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "permutations",
+    title: "Permutations",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "permutations-ii",
+    title: "Permutations II",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "word-search-ii",
+    title: "Word Search II",
+    difficulty: "Hard",
+    topics: [
+      "Backtracking",
+      "Tries"
+    ]
+  },
+  {
+    slug: "palindrome-partitioning",
+    title: "Palindrome Partitioning",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "letter-combinations-of-a-phone-number",
+    title: "Letter Combinations of a Phone Number",
+    difficulty: "Medium",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "n-queens",
+    title: "N-Queens",
+    difficulty: "Hard",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "sudoku-solver",
+    title: "Sudoku Solver",
+    difficulty: "Hard",
+    topics: [
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "implement-trie-prefix-tree",
+    title: "Implement Trie (Prefix Tree)",
+    difficulty: "Medium",
+    topics: [
+      "Tries"
+    ]
+  },
+  {
+    slug: "design-add-and-search-words-data-structure",
+    title: "Design Add and Search Words Data Structure",
+    difficulty: "Medium",
+    topics: [
+      "Tries",
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "number-of-1-bits",
+    title: "Number of 1 Bits",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation"
+    ]
+  },
+  {
+    slug: "counting-bits",
+    title: "Counting Bits",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "reverse-bits",
+    title: "Reverse Bits",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation"
+    ]
+  },
+  {
+    slug: "missing-number",
+    title: "Missing Number",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation",
+      "Arrays",
+      "Hashing",
+      "Math"
+    ]
+  },
+  {
+    slug: "single-number",
+    title: "Single Number",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "sum-of-two-integers",
+    title: "Sum of Two Integers",
+    difficulty: "Medium",
+    topics: [
+      "Bit Manipulation",
+      "Math"
+    ]
+  },
+  {
+    slug: "reverse-integer",
+    title: "Reverse Integer",
+    difficulty: "Medium",
+    topics: [
+      "Math"
+    ]
+  },
+  {
+    slug: "palindrome-number",
+    title: "Palindrome Number",
+    difficulty: "Easy",
+    topics: [
+      "Math"
+    ]
+  },
+  {
+    slug: "excel-sheet-column-number",
+    title: "Excel Sheet Column Number",
+    difficulty: "Easy",
+    topics: [
+      "Math",
+      "Strings"
+    ]
+  },
+  {
+    slug: "happy-number",
+    title: "Happy Number",
+    difficulty: "Easy",
+    topics: [
+      "Math",
+      "Hashing",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "plus-one",
+    title: "Plus One",
+    difficulty: "Easy",
+    topics: [
+      "Math",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "sqrt-x",
+    title: "Sqrt(x)",
+    difficulty: "Easy",
+    topics: [
+      "Math",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "power-x-n",
+    title: "Pow(x, n)",
+    difficulty: "Medium",
+    topics: [
+      "Math"
+    ]
+  },
+  {
+    slug: "multiply-strings",
+    title: "Multiply Strings",
+    difficulty: "Medium",
+    topics: [
+      "Math",
+      "Strings"
+    ]
+  },
+  {
+    slug: "count-primes",
+    title: "Count Primes",
+    difficulty: "Medium",
+    topics: [
+      "Math"
+    ]
+  },
+  {
+    slug: "excel-sheet-column-title",
+    title: "Excel Sheet Column Title",
+    difficulty: "Easy",
+    topics: [
+      "Math",
+      "Strings"
+    ]
+  },
+  {
+    slug: "sort-an-array",
+    title: "Sort an Array",
+    difficulty: "Medium",
+    topics: [
+      "Sorting"
+    ]
+  },
+  {
+    slug: "merge-sorted-array",
+    title: "Merge Sorted Array",
+    difficulty: "Easy",
+    topics: [
+      "Sorting",
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "sort-colors",
+    title: "Sort Colors",
+    difficulty: "Medium",
+    topics: [
+      "Sorting",
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "insertion-sort-list",
+    title: "Insertion Sort List",
+    difficulty: "Medium",
+    topics: [
+      "Sorting",
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "sort-list",
+    title: "Sort List",
+    difficulty: "Medium",
+    topics: [
+      "Sorting",
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "maximum-gap",
+    title: "Maximum Gap",
+    difficulty: "Hard",
+    topics: [
+      "Sorting",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "top-k-frequent-elements",
+    title: "Top K Frequent Elements",
+    difficulty: "Medium",
+    topics: [
+      "Hashing",
+      "Heaps",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "two-sum-ii-input-array-is-sorted",
+    title: "Two Sum II - Input Array Is Sorted",
+    difficulty: "Medium",
+    topics: [
+      "Two Pointers",
+      "Binary Search",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "4sum",
+    title: "4Sum",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Two Pointers",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "longest-consecutive-sequence",
+    title: "Longest Consecutive Sequence",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "encode-and-decode-tinyurl",
+    title: "Encode and Decode TinyURL",
+    difficulty: "Medium",
+    topics: [
+      "Hashing"
+    ]
+  },
+  {
+    slug: "design-hashmap",
+    title: "Design HashMap",
+    difficulty: "Easy",
+    topics: [
+      "Hashing"
+    ]
+  },
+  {
+    slug: "design-hashset",
+    title: "Design HashSet",
+    difficulty: "Easy",
+    topics: [
+      "Hashing"
+    ]
+  },
+  {
+    slug: "number-of-provinces",
+    title: "Number of Provinces",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "keys-and-rooms",
+    title: "Keys and Rooms",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "01-matrix",
+    title: "01 Matrix",
+    difficulty: "Medium",
+    topics: [
+      "Graphs",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "surrounded-regions",
+    title: "Surrounded Regions",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "find-the-town-judge",
+    title: "Find the Town Judge",
+    difficulty: "Easy",
+    topics: [
+      "Graphs",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "redundant-connection",
+    title: "Redundant Connection",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "minimum-height-trees",
+    title: "Minimum Height Trees",
+    difficulty: "Medium",
+    topics: [
+      "Graphs",
+      "Trees"
+    ]
+  },
+  {
+    slug: "longest-zigzag-path-in-a-binary-tree",
+    title: "Longest ZigZag Path in a Binary Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "path-sum-iii",
+    title: "Path Sum III",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "flatten-binary-tree-to-linked-list",
+    title: "Flatten Binary Tree to Linked List",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "convert-sorted-array-to-binary-search-tree",
+    title: "Convert Sorted Array to BST",
+    difficulty: "Easy",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "delete-node-in-a-bst",
+    title: "Delete Node in a BST",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "insert-into-a-binary-search-tree",
+    title: "Insert into a Binary Search Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "number-of-ways-to-stay-in-the-same-place-after-some-steps",
+    title: "Number of Ways to Stay in Same Place",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "target-sum",
+    title: "Target Sum",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Backtracking",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "ones-and-zeroes",
+    title: "Ones and Zeroes",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "last-stone-weight-ii",
+    title: "Last Stone Weight II",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "count-square-submatrices-with-all-ones",
+    title: "Count Square Submatrices with All Ones",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "number-of-submatrices-that-sum-to-target",
+    title: "Number of Submatrices That Sum to Target",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming",
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "rotate-list",
+    title: "Rotate List",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "odd-even-linked-list",
+    title: "Odd Even Linked List",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "remove-duplicates-from-sorted-list",
+    title: "Remove Duplicates from Sorted List",
+    difficulty: "Easy",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "remove-duplicates-from-sorted-list-ii",
+    title: "Remove Duplicates from Sorted List II",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "palindrome-linked-list",
+    title: "Palindrome Linked List",
+    difficulty: "Easy",
+    topics: [
+      "Linked Lists",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "intersection-of-two-linked-lists",
+    title: "Intersection of Two Linked Lists",
+    difficulty: "Easy",
+    topics: [
+      "Linked Lists",
+      "Two Pointers",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "flatten-a-multilevel-doubly-linked-list",
+    title: "Flatten a Multilevel Doubly Linked List",
+    difficulty: "Medium",
+    topics: [
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "find-peak-element",
+    title: "Find Peak Element",
+    difficulty: "Medium",
+    topics: [
+      "Binary Search",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "search-in-a-sorted-array-of-unknown-size",
+    title: "Search in a Sorted Array of Unknown Size",
+    difficulty: "Medium",
+    topics: [
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "count-of-range-sum",
+    title: "Count of Range Sum",
+    difficulty: "Hard",
+    topics: [
+      "Binary Search",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "russian-doll-envelopes",
+    title: "Russian Doll Envelopes",
+    difficulty: "Hard",
+    topics: [
+      "Binary Search",
+      "Dynamic Programming",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "count-of-smaller-numbers-after-self",
+    title: "Count of Smaller Numbers After Self",
+    difficulty: "Hard",
+    topics: [
+      "Binary Search",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "next-permutation",
+    title: "Next Permutation",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "first-missing-positive",
+    title: "First Missing Positive",
+    difficulty: "Hard",
+    topics: [
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "game-of-life",
+    title: "Game of Life",
+    difficulty: "Medium",
+    topics: [
+      "Arrays"
+    ]
+  },
+  {
+    slug: "finding-the-users-active-minutes",
+    title: "Finding the Users Active Minutes",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "longest-common-prefix",
+    title: "Longest Common Prefix",
+    difficulty: "Easy",
+    topics: [
+      "Strings",
+      "Tries"
+    ]
+  },
+  {
+    slug: "add-binary",
+    title: "Add Binary",
+    difficulty: "Easy",
+    topics: [
+      "Strings",
+      "Math",
+      "Bit Manipulation"
+    ]
+  },
+  {
+    slug: "roman-to-integer",
+    title: "Roman to Integer",
+    difficulty: "Easy",
+    topics: [
+      "Strings",
+      "Math",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "integer-to-roman",
+    title: "Integer to Roman",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Math"
+    ]
+  },
+  {
+    slug: "zigzag-conversion",
+    title: "ZigZag Conversion",
+    difficulty: "Medium",
+    topics: [
+      "Strings"
+    ]
+  },
+  {
+    slug: "multiply-strings",
+    title: "Multiply Strings",
+    difficulty: "Medium",
+    topics: [
+      "Strings",
+      "Math"
+    ]
+  },
+  {
+    slug: "basic-calculator",
+    title: "Basic Calculator",
+    difficulty: "Hard",
+    topics: [
+      "Stacks",
+      "Math",
+      "Strings"
+    ]
+  },
+  {
+    slug: "basic-calculator-ii",
+    title: "Basic Calculator II",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Math",
+      "Strings"
+    ]
+  },
+  {
+    slug: "score-of-parentheses",
+    title: "Score of Parentheses",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Strings"
+    ]
+  },
+  {
+    slug: "number-of-atoms",
+    title: "Number of Atoms",
+    difficulty: "Hard",
+    topics: [
+      "Stacks",
+      "Strings",
+      "Hashing",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "decode-string",
+    title: "Decode String",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Strings"
+    ]
+  },
+  {
+    slug: "flatten-nested-list-iterator",
+    title: "Flatten Nested List Iterator",
+    difficulty: "Medium",
+    topics: [
+      "Stacks",
+      "Queues"
+    ]
+  },
+  {
+    slug: "design-snake-game",
+    title: "Design Snake Game",
+    difficulty: "Medium",
+    topics: [
+      "Queues",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "task-scheduler",
+    title: "Task Scheduler",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Greedy",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "reorganize-string",
+    title: "Reorganize String",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Hashing",
+      "Greedy",
+      "Strings"
+    ]
+  },
+  {
+    slug: "furthest-building-you-can-reach",
+    title: "Furthest Building You Can Reach",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "single-threaded-cpu",
+    title: "Single-Threaded CPU",
+    difficulty: "Medium",
+    topics: [
+      "Heaps",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "process-tasks-using-servers",
+    title: "Process Tasks Using Servers",
+    difficulty: "Medium",
+    topics: [
+      "Heaps"
+    ]
+  },
+  {
+    slug: "minimum-cost-to-hire-k-workers",
+    title: "Minimum Cost to Hire K Workers",
+    difficulty: "Hard",
+    topics: [
+      "Heaps",
+      "Sorting",
+      "Greedy"
+    ]
+  },
+  {
+    slug: "swim-in-rising-water",
+    title: "Swim in Rising Water",
+    difficulty: "Hard",
+    topics: [
+      "Heaps",
+      "Graphs",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "number-of-ways-to-reorder-array-to-get-same-bst",
+    title: "Number of Ways to Reorder Array to Get Same BST",
+    difficulty: "Hard",
+    topics: [
+      "Trees",
+      "Binary Search Trees",
+      "Dynamic Programming",
+      "Math"
+    ]
+  },
+  {
+    slug: "flatten-binary-tree-to-linked-list",
+    title: "Flatten Binary Tree to Linked List",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Linked Lists"
+    ]
+  },
+  {
+    slug: "path-sum",
+    title: "Path Sum",
+    difficulty: "Easy",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "path-sum-ii",
+    title: "Path Sum II",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "sum-root-to-leaf-numbers",
+    title: "Sum Root to Leaf Numbers",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "binary-tree-zigzag-level-order-traversal",
+    title: "Binary Tree Zigzag Level Order Traversal",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "populating-next-right-pointers-in-each-node",
+    title: "Populating Next Right Pointers in Each Node",
+    difficulty: "Medium",
+    topics: [
+      "Trees"
+    ]
+  },
+  {
+    slug: "recover-binary-search-tree",
+    title: "Recover Binary Search Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "count-of-nodes-in-complete-tree",
+    title: "Count Complete Tree Nodes",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "find-duplicate-subtrees",
+    title: "Find Duplicate Subtrees",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "convert-bst-to-greater-tree",
+    title: "Convert BST to Greater Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "trim-a-binary-search-tree",
+    title: "Trim a Binary Search Tree",
+    difficulty: "Medium",
+    topics: [
+      "Trees",
+      "Binary Search Trees"
+    ]
+  },
+  {
+    slug: "range-sum-query-immutable",
+    title: "Range Sum Query - Immutable",
+    difficulty: "Easy",
+    topics: [
+      "Arrays",
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "range-sum-query-2d-immutable",
+    title: "Range Sum Query 2D - Immutable",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Dynamic Programming",
+      "Math"
+    ]
+  },
+  {
+    slug: "number-of-longest-increasing-subsequence",
+    title: "Number of Longest Increasing Subsequence",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "russian-doll-envelopes",
+    title: "Russian Doll Envelopes",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming",
+      "Binary Search",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "frog-jump",
+    title: "Frog Jump",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming"
+    ]
+  },
+  {
+    slug: "dungeon-game",
+    title: "Dungeon Game",
+    difficulty: "Hard",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "minimum-path-sum",
+    title: "Minimum Path Sum",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "maximal-square",
+    title: "Maximal Square",
+    difficulty: "Medium",
+    topics: [
+      "Dynamic Programming",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "number-of-substrings-containing-all-three-characters",
+    title: "Number of Substrings Containing All Three Characters",
+    difficulty: "Medium",
+    topics: [
+      "Sliding Window",
+      "Strings",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "count-number-of-nice-subarrays",
+    title: "Count Number of Nice Subarrays",
+    difficulty: "Medium",
+    topics: [
+      "Sliding Window",
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "replace-the-substring-for-balanced-string",
+    title: "Replace the Substring for Balanced String",
+    difficulty: "Medium",
+    topics: [
+      "Sliding Window",
+      "Strings"
+    ]
+  },
+  {
+    slug: "max-consecutive-ones-iii",
+    title: "Max Consecutive Ones III",
+    difficulty: "Medium",
+    topics: [
+      "Sliding Window",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "subarrays-with-k-different-integers",
+    title: "Subarrays with K Different Integers",
+    difficulty: "Hard",
+    topics: [
+      "Sliding Window",
+      "Arrays",
+      "Hashing"
+    ]
+  },
+  {
+    slug: "number-of-substrings-with-only-1s",
+    title: "Number of Substrings With Only 1s",
+    difficulty: "Medium",
+    topics: [
+      "Sliding Window",
+      "Strings",
+      "Math"
+    ]
+  },
+  {
+    slug: "bitwise-and-of-numbers-range",
+    title: "Bitwise AND of Numbers Range",
+    difficulty: "Medium",
+    topics: [
+      "Bit Manipulation",
+      "Math"
+    ]
+  },
+  {
+    slug: "number-of-1-bits",
+    title: "Number of 1 Bits",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation"
+    ]
+  },
+  {
+    slug: "power-of-two",
+    title: "Power of Two",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation",
+      "Math"
+    ]
+  },
+  {
+    slug: "power-of-three",
+    title: "Power of Three",
+    difficulty: "Easy",
+    topics: [
+      "Math"
+    ]
+  },
+  {
+    slug: "power-of-four",
+    title: "Power of Four",
+    difficulty: "Easy",
+    topics: [
+      "Bit Manipulation",
+      "Math"
+    ]
+  },
+  {
+    slug: "find-the-duplicate-number",
+    title: "Find the Duplicate Number",
+    difficulty: "Medium",
+    topics: [
+      "Arrays",
+      "Two Pointers",
+      "Bit Manipulation",
+      "Binary Search"
+    ]
+  },
+  {
+    slug: "single-number-ii",
+    title: "Single Number II",
+    difficulty: "Medium",
+    topics: [
+      "Bit Manipulation"
+    ]
+  },
+  {
+    slug: "single-number-iii",
+    title: "Single Number III",
+    difficulty: "Medium",
+    topics: [
+      "Bit Manipulation",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "maximum-xor-of-two-numbers-in-an-array",
+    title: "Maximum XOR of Two Numbers in an Array",
+    difficulty: "Medium",
+    topics: [
+      "Bit Manipulation",
+      "Tries"
+    ]
+  },
+  {
+    slug: "total-hamming-distance",
+    title: "Total Hamming Distance",
+    difficulty: "Medium",
+    topics: [
+      "Bit Manipulation",
+      "Arrays"
+    ]
+  },
+  {
+    slug: "erect-the-fence",
+    title: "Erect the Fence",
+    difficulty: "Hard",
+    topics: [
+      "Greedy",
+      "Math",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "minimum-number-of-arrows-to-burst-balloons",
+    title: "Minimum Number of Arrows to Burst Balloons",
+    difficulty: "Medium",
+    topics: [
+      "Greedy",
+      "Intervals",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "partition-labels",
+    title: "Partition Labels",
+    difficulty: "Medium",
+    topics: [
+      "Greedy",
+      "Strings",
+      "Two Pointers"
+    ]
+  },
+  {
+    slug: "bag-of-tokens",
+    title: "Bag of Tokens",
+    difficulty: "Medium",
+    topics: [
+      "Greedy",
+      "Two Pointers",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "lemonade-change",
+    title: "Lemonade Change",
+    difficulty: "Easy",
+    topics: [
+      "Greedy"
+    ]
+  },
+  {
+    slug: "assign-cookies",
+    title: "Assign Cookies",
+    difficulty: "Easy",
+    topics: [
+      "Greedy",
+      "Sorting"
+    ]
+  },
+  {
+    slug: "is-graph-bipartite",
+    title: "Is Graph Bipartite?",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "find-eventual-safe-states",
+    title: "Find Eventual Safe States",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "all-paths-from-source-to-target",
+    title: "All Paths From Source to Target",
+    difficulty: "Medium",
+    topics: [
+      "Graphs",
+      "Backtracking"
+    ]
+  },
+  {
+    slug: "time-needed-to-inform-all-employees",
+    title: "Time Needed to Inform All Employees",
+    difficulty: "Medium",
+    topics: [
+      "Graphs",
+      "Trees"
+    ]
+  },
+  {
+    slug: "count-unreachable-pairs-of-nodes-in-an-undirected-graph",
+    title: "Count Unreachable Pairs of Nodes",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  },
+  {
+    slug: "minimum-score-of-a-path-between-two-cities",
+    title: "Minimum Score of a Path Between Two Cities",
+    difficulty: "Medium",
+    topics: [
+      "Graphs"
+    ]
+  }
+], Bt = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), he = /* @__PURE__ */ new Set([
   "completed",
   "declined",
   "expired",
   "cancelled",
   "forfeited"
-]), y = {
+]), E = {
   PENDING: "pending",
-  SELECTING: "selecting",
+  ACCEPTED: "accepted",
   READY_CHECK: "ready_check",
   COUNTDOWN: "countdown",
   IN_PROGRESS: "in_progress",
   COMPLETED: "completed",
   DECLINED: "declined",
-  EXPIRED: "expired",
   CANCELLED: "cancelled",
   FORFEITED: "forfeited"
-}, vt = 7200, Dt = 1440 * 60, Te = 10;
+}, Ht = 1440 * 60, Ce = 10;
 async function b(e, r = {}) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
-    const t = await R(), { headers: s, ...a } = r, o = await fetch(`${Rt}/rest/v1/${e}`, {
-      ...a,
+    const t = await v(), { headers: s, ...i } = r, a = await fetch(`${Bt}/rest/v1/${e}`, {
+      ...i,
       headers: { ...t, ...s || {} }
     });
-    return o.ok ? o.json() : (console.error(`[Battle] Supabase error ${o.status} on ${e}:`, await o.text()), null);
+    return a.ok ? a.json() : (console.error(`[Battle] Supabase error ${a.status} on ${e}:`, await a.text()), null);
   } catch (t) {
     return console.error("[Battle] Supabase fetch error:", t), null;
   }
 }
-async function Lt(e, r, t = "javascript") {
+function $t({ topics: e = [], difficulty: r = "Medium", count: t = 5 }) {
+  const s = Ut || [];
+  if (!s.length) return [];
+  const i = Array.isArray(e) && e.length > 0 ? e.map((l) => l.toLowerCase()) : [];
+  let a = s;
+  if (i.length > 0) {
+    const l = s.filter(
+      (u) => Array.isArray(u.topics) && u.topics.some((d) => i.includes(d.toLowerCase()))
+    );
+    l.length >= t, a = l;
+  }
+  let o = [];
+  const c = (r || "Medium").toLowerCase(), n = (l) => [...l].sort(() => Math.random() - 0.5);
+  if (c === "mixed") {
+    const l = n(a.filter((g) => g.difficulty?.toLowerCase() === "easy")), u = n(a.filter((g) => g.difficulty?.toLowerCase() === "medium")), d = n(a.filter((g) => g.difficulty?.toLowerCase() === "hard")), m = Math.max(1, Math.floor(t * 0.25)), S = t >= 5 ? 1 : 0, y = t - m - S;
+    if (o.push(...l.slice(0, m)), o.push(...u.slice(0, y)), o.push(...d.slice(0, S)), o.length < t) {
+      const g = new Set(o.map((B) => B.slug)), U = n(a.filter((B) => !g.has(B.slug)));
+      o.push(...U.slice(0, t - o.length));
+    }
+  } else {
+    const l = a.filter((u) => u.difficulty?.toLowerCase() === c);
+    if (l.length >= t)
+      o = n(l).slice(0, t);
+    else {
+      const u = new Set(l.map((m) => m.slug)), d = n(a.filter((m) => !u.has(m.slug)));
+      o = [...l, ...d].slice(0, t);
+    }
+  }
+  if (o.length < t) {
+    const l = new Set(o.map((d) => d.slug)), u = n(s.filter((d) => !l.has(d.slug)));
+    o.push(...u.slice(0, t - o.length));
+  }
+  return o.slice(0, t).map((l, u) => ({
+    sequence_number: u + 1,
+    slug: l.slug,
+    title: l.title,
+    url: `https://leetcode.com/problems/${l.slug}/`,
+    difficulty: l.difficulty,
+    topics: l.topics || []
+  }));
+}
+async function je(e, r, t = {}) {
+  const {
+    topics: s = ["Arrays", "Strings"],
+    difficulty: i = "Medium",
+    durationMinutes: a = 30,
+    problemCount: o = 5,
+    language: c = "javascript"
+  } = t;
   if (!e || !r)
     return { success: !1, error: "Challenger and opponent usernames are required" };
   if (e.toLowerCase() === r.toLowerCase())
     return { success: !1, error: "Cannot challenge yourself" };
   try {
-    const d = await Y();
-    e && d && await N(e, d);
+    const p = await Y();
+    e && p && await P(e, p);
   } catch {
   }
   try {
-    const d = await E("create_battle_challenge", {
+    const p = await w("create_battle_v2", {
       p_challenged_username: r.toLowerCase(),
-      p_language: t.toLowerCase(),
+      p_topics: s,
+      p_difficulty: i,
+      p_duration_minutes: a,
+      p_problem_count: o,
+      p_language: c.toLowerCase(),
       p_challenger_username: e.toLowerCase()
     });
-    if (d && d.success && d.battle)
-      return { success: !0, battle: d.battle };
-    const m = d?.code === "PGRST202" || d?.error && typeof d.error == "string" && (d.error.includes("PGRST202") || d.error.includes("schema cache") || d.error.includes("Could not find the function")) || d?.raw && typeof d.raw == "string" && (d.raw.includes("PGRST202") || d.raw.includes("schema cache")), k = d?.error && typeof d.error == "string" && d.error.toLowerCase().includes("challenger profile not found");
-    if (m || k)
-      console.warn("[BattleManager] RPC fallback triggered (missing RPC or profile). Executing REST fallback.");
-    else if (d && d.error) {
-      let S = d.error;
+    if (p && p.success && p.battle)
+      return { success: !0, battle: p.battle };
+    if (!(p?.code === "PGRST202" || typeof p?.error == "string" && p.error.includes("PGRST202")) && p?.error) {
+      let ae = p.error;
       try {
-        const v = JSON.parse(d.error);
-        S = v.message || v.error || S;
+        const Ee = JSON.parse(p.error);
+        ae = Ee.message || Ee.error || ae;
       } catch {
       }
-      return { success: !1, error: S };
+      return { success: !1, error: ae };
     }
-  } catch (d) {
-    console.warn("[BattleManager] create_battle_challenge RPC error, using REST fallback:", d);
+  } catch (p) {
+    console.warn("[BattleManager] create_battle_v2 RPC error, falling back to REST:", p);
   }
-  const [s, a] = await Promise.all([
-    X(e),
-    X(r)
+  const [n, l] = await Promise.all([
+    Z(e),
+    Z(r)
   ]);
-  if (s)
-    return { success: !1, error: "You already have an active battle in progress" };
-  if (a)
-    return { success: !1, error: `${r} is currently in an active battle` };
-  const o = await A(), n = await b(`profiles?leetcode_username=in.("${e.toLowerCase()}","${r.toLowerCase()}")&select=id,leetcode_username`);
-  let i = n?.find((d) => d.leetcode_username.toLowerCase() === e.toLowerCase()), c = n?.find((d) => d.leetcode_username.toLowerCase() === r.toLowerCase());
-  if (!i && o?.user_id) {
-    const d = await Y();
-    await N(e, d || { profile: { realName: e } }), i = { id: o.user_id, leetcode_username: e.toLowerCase() };
+  if (n) return { success: !1, error: "You already have an active battle in progress" };
+  if (l) return { success: !1, error: `${r} is currently in an active battle` };
+  const u = await A(), d = await b(
+    `profiles?leetcode_username=in.("${e.toLowerCase()}","${r.toLowerCase()}")&select=id,leetcode_username`
+  );
+  let m = d?.find((p) => p.leetcode_username.toLowerCase() === e.toLowerCase()), S = d?.find((p) => p.leetcode_username.toLowerCase() === r.toLowerCase());
+  if (!m && u?.user_id) {
+    const p = await Y();
+    await P(e, p || { profile: { realName: e } }), m = { id: u.user_id, leetcode_username: e.toLowerCase() };
   }
-  const l = o?.user_id || i?.id, u = c?.id, _ = Date.now(), p = new Date(_ + Dt * 1e3).toISOString(), g = {
+  const y = u?.user_id || m?.id, g = S?.id;
+  if (!g) return { success: !1, error: `${r} does not have a LeetStreak account.` };
+  const U = Date.now(), B = new Date(U + Ht * 1e3).toISOString(), k = {
+    challenger_id: y,
+    challenged_id: g,
     challenger_username: e,
     challenged_username: r,
-    language: t.toLowerCase(),
-    status: y.PENDING,
-    expires_at: p
-  };
-  l && (g.challenger_id = l), u && (g.challenged_id = u);
-  const C = await b("battles", {
+    language: c.toLowerCase(),
+    status: E.PENDING,
+    topics: s,
+    difficulty: i,
+    duration_minutes: a,
+    problem_count: o,
+    expires_at: B
+  }, M = await b("battles", {
     method: "POST",
-    body: JSON.stringify(g)
+    body: JSON.stringify(k)
   });
-  return !C || C.length === 0 ? { success: !1, error: "Failed to create battle room" } : { success: !0, battle: C[0] };
+  return !M || M.length === 0 ? { success: !1, error: "Failed to create battle room" } : { success: !0, battle: M[0] };
 }
-async function X(e) {
+async function Je(e) {
+  if (!e) return { success: !1, error: "Battle ID required" };
+  const r = await w("accept_battle_v2", { p_battle_id: e });
+  if (r && r.success && r.battle)
+    return { success: !0, battle: r.battle };
+  const t = await C(e);
+  if (!t) return { success: !1, error: "Battle not found" };
+  const s = await b(`battles?id=eq.${e}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: E.ACCEPTED,
+      accepted_at: (/* @__PURE__ */ new Date()).toISOString()
+    })
+  });
+  return t.challenger_id && t.challenged_id && await b("battle_participants", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify([
+      { battle_id: e, user_id: t.challenger_id, username: t.challenger_username, is_ready: !1 },
+      { battle_id: e, user_id: t.challenged_id, username: t.challenged_username, is_ready: !1 }
+    ])
+  }).catch(() => {
+  }), { success: !0, battle: s?.[0] || t };
+}
+async function xt(e, r) {
+  if (!e) return { success: !1, error: "Battle ID required" };
+  const t = await C(e);
+  if (!t) return { success: !1, error: "Battle not found" };
+  const s = $t({
+    topics: t.topics || ["Arrays", "Strings"],
+    difficulty: t.difficulty || "Medium",
+    count: t.problem_count || 5
+  }), i = await w("confirm_ready_v2", {
+    p_battle_id: e,
+    p_problems: s
+  });
+  return i && i.success ? {
+    success: !0,
+    battle: await C(e) || i.battle,
+    bothReady: i.bothReady,
+    status: i.status
+  } : await Ve(e, r);
+}
+async function Ft(e, r, t = {}) {
+  const {
+    submissionId: s,
+    timeTakenMs: i = 0,
+    runtimeMs: a = null,
+    memoryMb: o = null,
+    language: c = "javascript",
+    username: n = "user"
+  } = t, l = await w("record_battle_solve", {
+    p_battle_id: e,
+    p_problem_slug: r,
+    p_submission_id: s || `sub_${Date.now()}`,
+    p_time_taken_ms: i,
+    p_runtime_ms: a,
+    p_memory_mb: o,
+    p_language: c
+  });
+  return l && l.success ? l : {
+    success: (await Qe(e, n, {
+      problemSlug: r,
+      submissionId: s,
+      accepted: !0,
+      runtime_ms: a,
+      memory_mb: o,
+      language: c,
+      timeTakenSeconds: Math.floor(i / 1e3)
+    }))?.success || !1,
+    solved_count: 1,
+    next_problem_slug: null,
+    battle_complete: !1
+  };
+}
+async function ze(e) {
   if (!e) return null;
-  const r = Array.from(me).join(","), t = e.toLowerCase(), s = await b(
+  const r = await w("get_battle_state_v2", { p_battle_id: e });
+  if (r && r.success)
+    return r;
+  const [t, s, i, a] = await Promise.all([
+    C(e),
+    b(`battle_problems?battle_id=eq.${e}&order=sequence_number.asc`),
+    b(`battle_participants?battle_id=eq.${e}`),
+    re(e)
+  ]);
+  return t ? {
+    success: !0,
+    battle: t,
+    problems: s || [],
+    participants: i || [],
+    results: a || []
+  } : null;
+}
+async function qt(e, r) {
+  const t = await w("forfeit_battle_v2", { p_battle_id: e });
+  return t && t.success ? t : await Ze(e, r);
+}
+async function Gt(e, r, t = "javascript") {
+  return await je(e, r, { language: t });
+}
+async function Z(e) {
+  if (!e) return null;
+  const r = Array.from(he).join(","), t = e.toLowerCase(), s = await b(
     `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=not.in.(${r})&order=created_at.desc&limit=1`
   );
   if (!s || s.length === 0) return null;
-  const a = s[0];
-  return a.status === y.COUNTDOWN && a.match_starts_at && new Date(a.match_starts_at) <= /* @__PURE__ */ new Date() && (a.status = y.IN_PROGRESS, b(`battles?id=eq.${a.id}&status=eq.countdown`, {
+  const i = s[0], a = Date.now(), o = i.start_at || i.match_starts_at;
+  i.status === E.COUNTDOWN && o && new Date(o).getTime() <= a && (i.status = E.IN_PROGRESS, b(`battles?id=eq.${i.id}&status=eq.countdown`, {
     method: "PATCH",
-    body: JSON.stringify({ status: y.IN_PROGRESS })
+    body: JSON.stringify({ status: E.IN_PROGRESS })
   }).catch(() => {
-  })), a;
+  }));
+  const c = i.end_at || i.match_deadline;
+  return i.status === E.IN_PROGRESS && c && new Date(c).getTime() <= a && Ke(i.id).catch(() => {
+  }), i;
 }
-async function I(e) {
+async function C(e) {
   if (!e) return null;
   const r = await b(`battles?id=eq.${e}&select=*`);
   return r && r.length > 0 ? r[0] : null;
 }
-async function he(e) {
+async function re(e) {
   return e ? await b(`battle_results?battle_id=eq.${e}&select=*`) || [] : [];
 }
-async function Ot(e, r, t) {
-  const s = await I(e);
-  if (!s) return { success: !1, error: "Battle not found" };
-  if ((s.challenged_username || s.challenged).toLowerCase() !== r.toLowerCase())
-    return { success: !1, error: "You are not the invited opponent for this battle" };
-  if (s.status !== y.PENDING)
-    return { success: !1, error: `Battle is no longer pending (current: ${s.status})` };
-  if (new Date(s.expires_at) < /* @__PURE__ */ new Date())
-    return await J(e, y.EXPIRED), { success: !1, error: "Challenge has expired" };
-  if (!t)
-    return await J(e, y.DECLINED), { success: !0, battle: { ...s, status: y.DECLINED } };
-  const o = /* @__PURE__ */ new Date(), n = await b(`battles?id=eq.${e}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      status: y.SELECTING,
-      accepted_at: o.toISOString()
-    })
-  });
-  return !n || n.length === 0 ? { success: !1, error: "Failed to accept battle" } : { success: !0, battle: n[0] };
+async function Wt(e, r, t) {
+  return t ? await Je(e) : (await se(e, E.DECLINED), { success: !0 });
 }
-async function Ut(e, r, t, s) {
-  const a = await I(e);
-  if (!a) return { success: !1, error: "Battle not found" };
-  if (a.status !== y.SELECTING)
-    return { success: !1, error: "Battle is not in the problem selection phase" };
-  const o = await qe(t);
-  if (!o.valid)
-    return { success: !1, error: o.error || "Invalid LeetCode problem" };
-  const i = (a.challenger_username || a.challenger).toLowerCase() === r.toLowerCase(), c = i ? "challenger_pick" : "challenged_pick", l = i ? "challenger_pick_title" : "challenged_pick_title", u = i ? a.challenged_pick : a.challenger_pick, _ = i ? a.challenged_pick_title : a.challenger_pick_title, p = {
-    [c]: o.slug,
-    [l]: o.title || s || o.slug
+async function Yt(e, r, t, s) {
+  const i = await C(e);
+  if (!i) return { success: !1, error: "Battle not found" };
+  const a = await Xe(t);
+  if (!a.valid)
+    return { success: !1, error: a.error || "Invalid LeetCode problem" };
+  const c = (i.challenger_username || i.challenger).toLowerCase() === r.toLowerCase(), n = c ? "challenger_pick" : "challenged_pick", l = c ? "challenger_pick_title" : "challenged_pick_title", u = c ? i.challenged_pick : i.challenger_pick, d = c ? i.challenged_pick_title : i.challenger_pick_title, m = {
+    [n]: a.slug,
+    [l]: a.title || s || a.slug
   };
-  u && Object.assign(p, {
-    problem_1: o.slug,
-    problem_1_title: o.title,
+  u && Object.assign(m, {
+    problem_1: a.slug,
+    problem_1_title: a.title,
     problem_2: u,
-    problem_2_title: _ || u,
-    status: y.READY_CHECK,
+    problem_2_title: d || u,
+    status: E.READY_CHECK,
     challenger_ready: !1,
     challenged_ready: !1
   });
-  const g = await b(`battles?id=eq.${e}`, {
+  const S = await b(`battles?id=eq.${e}`, {
     method: "PATCH",
-    body: JSON.stringify(p)
+    body: JSON.stringify(m)
   });
-  return !g || g.length === 0 ? { success: !1, error: "Failed to save problem selection" } : {
+  return !S || S.length === 0 ? { success: !1, error: "Failed to save problem selection" } : {
     success: !0,
-    battle: g[0],
+    battle: S[0],
     bothPicked: !!u
   };
 }
-async function Nt(e, r) {
-  const t = await E("confirm_battle_ready", { p_battle_id: e });
+async function Ve(e, r) {
+  const t = await w("confirm_battle_ready", { p_battle_id: e });
   if (t && t.success)
-    return { success: !0, battle: await I(e), bothReady: t.status === y.COUNTDOWN };
-  const s = await I(e);
+    return { success: !0, battle: await C(e), bothReady: t.status === E.COUNTDOWN };
+  const s = await C(e);
   if (!s) return { success: !1, error: "Battle not found" };
-  const o = (s.challenger_username || s.challenger).toLowerCase() === r.toLowerCase(), n = o ? { challenger_ready: !0 } : { challenged_ready: !0 }, i = o ? s.challenged_ready : s.challenger_ready;
-  if (i) {
-    const l = Date.now(), u = new Date(l).toISOString(), _ = new Date(l + Te * 1e3).toISOString(), p = new Date(l + (Te + vt) * 1e3).toISOString();
-    Object.assign(n, {
-      status: y.COUNTDOWN,
-      countdown_starts: u,
-      match_starts_at: _,
-      match_deadline: p
+  const a = (s.challenger_username || s.challenger).toLowerCase() === r.toLowerCase(), o = a ? { challenger_ready: !0 } : { challenged_ready: !0 }, c = a ? s.challenged_ready : s.challenger_ready;
+  if (c) {
+    const l = Date.now(), u = (s.duration_minutes || 30) * 60, d = new Date(l).toISOString(), m = new Date(l + Ce * 1e3).toISOString(), S = new Date(l + (Ce + u) * 1e3).toISOString();
+    Object.assign(o, {
+      status: E.COUNTDOWN,
+      countdown_starts: d,
+      match_starts_at: m,
+      match_deadline: S,
+      start_at: m,
+      end_at: S
     });
   }
-  const c = await b(`battles?id=eq.${e}`, {
+  const n = await b(`battles?id=eq.${e}`, {
     method: "PATCH",
-    body: JSON.stringify(n)
+    body: JSON.stringify(o)
   });
-  return !c || c.length === 0 ? { success: !1, error: "Failed to record readiness" } : { success: !0, battle: c[0], bothReady: !!i };
+  return !n || n.length === 0 ? { success: !1, error: "Failed to record readiness" } : { success: !0, battle: n[0], bothReady: !!c };
 }
-async function It(e, r, t) {
+async function Qe(e, r, t) {
   const {
     problemSlug: s,
-    submissionId: a,
-    accepted: o,
-    runtime_ms: n,
-    memory_mb: i,
-    language: c,
+    submissionId: i,
+    accepted: a,
+    runtime_ms: o,
+    memory_mb: c,
+    language: n,
     timeTakenSeconds: l
-  } = t, u = await I(e);
+  } = t, u = await C(e);
   if (!u) return { success: !1, error: "Battle not found" };
-  if (me.has(u.status))
+  if (he.has(u.status))
     return { success: !1, error: `Battle is already closed (${u.status})` };
-  const _ = u.match_starts_at ? new Date(u.match_starts_at).getTime() : Date.now(), p = l ?? Math.max(0, Math.floor((Date.now() - _) / 1e3)), g = await E("record_battle_submission", {
-    p_battle_id: e,
-    p_problem_slug: s,
-    p_submission_id: a || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-    p_accepted: !!o,
-    p_time_taken: p,
-    p_runtime_ms: n || null,
-    p_memory_mb: i || null,
-    p_language: c || u.language || "javascript"
-  });
-  if (g && g.success)
-    return { success: !0, result: g };
-  const C = await b("battle_results", {
+  const d = u.start_at || u.match_starts_at ? new Date(u.start_at || u.match_starts_at).getTime() : Date.now(), m = l ?? Math.max(0, Math.floor((Date.now() - d) / 1e3)), S = await b("battle_results", {
     method: "POST",
     body: JSON.stringify({
       battle_id: e,
       username: r,
       problem_slug: s,
-      leetcode_submission_id: a || `sub_${Date.now()}`,
-      accepted: !!o,
+      leetcode_submission_id: i || `sub_${Date.now()}`,
+      accepted: !!a,
       submitted_at: (/* @__PURE__ */ new Date()).toISOString(),
-      time_taken_seconds: p,
-      runtime_ms: n || null,
-      memory_mb: i || null,
-      language: c || u.language || "javascript",
+      time_taken_seconds: m,
+      runtime_ms: o || null,
+      memory_mb: c || null,
+      language: n || u.language || "javascript",
       attempts: 1,
-      points: o ? 1 : 0
+      points: a ? 1 : 0
     })
   });
-  return await Pt(e), { success: !0, result: C?.[0] };
+  return await Ke(e), { success: !0, result: S?.[0] };
 }
-async function Pt(e) {
-  const r = await E("evaluate_and_finalize_battle", { p_battle_id: e });
+async function Ke(e) {
+  const r = await w("evaluate_and_finalize_battle", { p_battle_id: e });
   if (r && r.finalized)
     return r;
-  const t = await I(e);
-  if (!t || me.has(t.status)) return null;
-  const s = await he(e), a = t.challenger_username || t.challenger, o = t.challenged_username || t.challenged;
-  let n = 0, i = 0, c = 0, l = 0, u = !1, _ = !1, p = !1, g = !1;
-  for (const m of s)
-    m.accepted && (m.username.toLowerCase() === a.toLowerCase() ? (n += m.points || 1, c += m.time_taken_seconds || 0, m.problem_slug === t.problem_1 && (u = !0), m.problem_slug === t.problem_2 && (_ = !0)) : m.username.toLowerCase() === o.toLowerCase() && (i += m.points || 1, l += m.time_taken_seconds || 0, m.problem_slug === t.problem_1 && (p = !0), m.problem_slug === t.problem_2 && (g = !0)));
-  const C = u && _ && p && g, d = t.match_deadline && Date.now() >= new Date(t.match_deadline).getTime();
-  if (C || d) {
-    let m = "draw", k = "draw";
-    return n > i ? (m = a, k = "points") : i > n ? (m = o, k = "points") : n > 0 ? c < l ? (m = a, k = "tiebreaker_time") : l < c ? (m = o, k = "tiebreaker_time") : (m = "draw", k = "draw") : (m = "draw", k = "draw"), await J(e, y.COMPLETED, {
-      winner_username: m,
-      win_reason: k,
+  const t = await C(e);
+  if (!t || he.has(t.status)) return null;
+  const s = await re(e), i = t.challenger_username, a = t.challenged_username;
+  let o = 0, c = 0, n = 0, l = 0;
+  for (const y of s)
+    y.accepted && (y.username.toLowerCase() === i.toLowerCase() ? (o += y.points || 1, n += y.time_taken_seconds || 0) : y.username.toLowerCase() === a.toLowerCase() && (c += y.points || 1, l += y.time_taken_seconds || 0));
+  const u = t.end_at || t.match_deadline, d = u && Date.now() >= new Date(u).getTime(), m = t.problem_count || 2;
+  if (o >= m && c >= m || d) {
+    let y = "draw", g = "draw";
+    return o > c ? (y = i, g = "points") : c > o ? (y = a, g = "points") : o > 0 ? n < l ? (y = i, g = "tiebreaker_time") : l < n ? (y = a, g = "tiebreaker_time") : (y = "draw", g = "draw") : (y = "draw", g = "draw"), await se(e, E.COMPLETED, {
+      winner_username: y,
+      win_reason: g,
       completed_at: (/* @__PURE__ */ new Date()).toISOString()
-    }), { finalized: !0, winner: m, winReason: k };
+    }), { finalized: !0, winner: y, winReason: g };
   }
   return null;
 }
-async function $t(e, r) {
-  const t = await E("forfeit_battle", { p_battle_id: e });
+async function Ze(e, r) {
+  const t = await w("forfeit_battle", { p_battle_id: e });
   if (t && t.success)
     return t;
-  const s = await I(e);
+  const s = await C(e);
   if (!s) return { success: !1, error: "Battle not found" };
-  const a = s.challenger_username || s.challenger, o = s.challenged_username || s.challenged, n = a.toLowerCase() === r.toLowerCase() ? o : a;
-  return await J(e, y.FORFEITED, {
-    winner_username: n,
+  const i = s.challenger_username, a = s.challenged_username, o = i.toLowerCase() === r.toLowerCase() ? a : i;
+  return await se(e, E.FORFEITED, {
+    winner_username: o,
     win_reason: "forfeit",
     completed_at: (/* @__PURE__ */ new Date()).toISOString()
-  }), { success: !0, winner: n };
+  }), { success: !0, winner: o };
 }
-async function Bt(e, r) {
-  const t = await I(e);
-  return t ? (t.challenger_username || t.challenger).toLowerCase() !== r.toLowerCase() ? { success: !1, error: "Only the challenger can cancel a pending match" } : t.status !== y.PENDING ? { success: !1, error: "Can only cancel pending challenges" } : (await J(e, y.CANCELLED), { success: !0 }) : { success: !1, error: "Battle not found" };
+async function jt(e, r) {
+  const t = await C(e);
+  return t ? t.challenger_username.toLowerCase() !== r.toLowerCase() ? { success: !1, error: "Only the challenger can cancel a pending match" } : t.status !== E.PENDING ? { success: !1, error: "Can only cancel pending challenges" } : (await se(e, E.CANCELLED), { success: !0 }) : { success: !1, error: "Battle not found" };
 }
-async function Mt(e, r = 10) {
+async function Jt(e, r = 10) {
   if (!e) return [];
   const t = e.toLowerCase(), s = await b(
     `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=in.(completed,forfeited)&order=created_at.desc&limit=${r}`
   );
-  return !s || s.length === 0 ? [] : await Promise.all(s.map(async (o) => {
-    const n = await he(o.id), i = o.challenger_username || o.challenger, c = o.challenged_username || o.challenged, l = i.toLowerCase() === e.toLowerCase() ? c : i, u = o.winner_username || o.winner;
-    let _ = "draw";
-    return u && (u === "draw" ? _ = "draw" : u.toLowerCase() === e.toLowerCase() ? _ = "win" : _ = "loss"), {
-      ...o,
+  return !s || s.length === 0 ? [] : await Promise.all(s.map(async (a) => {
+    const o = await re(a.id), c = a.challenger_username, n = a.challenged_username, l = c.toLowerCase() === e.toLowerCase() ? n : c, u = a.winner_username;
+    let d = "draw";
+    return u && (u === "draw" ? d = "draw" : u.toLowerCase() === e.toLowerCase() ? d = "win" : d = "loss"), {
+      ...a,
       opponent: l,
-      outcome: _,
-      results: n
+      outcome: d,
+      results: o
     };
   }));
 }
-async function qe(e) {
+async function Xe(e) {
   try {
     let r = e.trim();
     if (r.includes("leetcode.com/problems/")) {
-      const o = r.match(/problems\/([^/?#]+)/);
-      if (!o) return { valid: !1, error: "Invalid LeetCode URL structure" };
-      r = o[1].replace(/\/$/, "");
+      const a = r.match(/problems\/([^/?#]+)/);
+      if (!a) return { valid: !1, error: "Invalid LeetCode URL structure" };
+      r = a[1].replace(/\/$/, "");
     }
     if (!/^[a-z0-9-]+$/i.test(r))
       return { valid: !1, error: "Invalid problem slug format" };
@@ -1252,29 +3716,29 @@ async function qe(e) {
       })
     });
     if (!t.ok) return { valid: !1, error: "Failed to contact LeetCode API" };
-    const a = (await t.json())?.data?.question;
-    return a ? a.isPaidOnly ? { valid: !1, error: "Premium problem — please select a free problem" } : {
+    const i = (await t.json())?.data?.question;
+    return i ? i.isPaidOnly ? { valid: !1, error: "Premium problem — please select a free problem" } : {
       valid: !0,
       slug: r.toLowerCase(),
-      title: a.title,
-      difficulty: a.difficulty,
+      title: i.title,
+      difficulty: i.difficulty,
       url: `https://leetcode.com/problems/${r.toLowerCase()}/`
     } : { valid: !1, error: "Problem not found on LeetCode" };
   } catch (r) {
     return console.warn("[Battle] validateLeetCodeProblem error:", r), { valid: !1, error: "Connection error while validating problem" };
   }
 }
-async function Z(e, r = "online") {
+async function X(e, r = "online") {
   if (!(!e || !h || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
-      let t = await E("heartbeat_presence", {
+      let t = await w("heartbeat_presence", {
         p_status: r,
         p_username: e.toLowerCase()
       });
       if (t && t.success) return;
       if (t?.code === "PGRST202" || typeof t?.error == "string" && t.error.includes("PGRST202")) {
-        const a = await E("heartbeat_presence", { p_status: r });
-        if (a && (a.success || a === !0)) return;
+        const i = await w("heartbeat_presence", { p_status: r });
+        if (i && (i.success || i === !0)) return;
       }
       const s = await A();
       s?.user_id && await b("user_presence", {
@@ -1291,29 +3755,29 @@ async function Z(e, r = "online") {
       console.warn("[BattleManager] updatePresence failed:", t);
     }
 }
-async function Ht(e) {
+async function zt(e) {
   const r = /* @__PURE__ */ new Map();
   if (!e?.length || !h || h === "YOUR_SUPABASE_PROJECT_URL_HERE") return r;
   try {
-    const t = await E("get_friends_presence", { p_usernames: e });
+    const t = await w("get_friends_presence", { p_usernames: e });
     if (t && typeof t == "object" && !t.error) {
-      for (const [n, i] of Object.entries(t))
-        r.set(n.toLowerCase(), {
-          status: i.status || "offline",
-          isOnline: !!i.isOnline,
-          inBattle: !!i.inBattle,
-          last_seen: i.last_seen
+      for (const [o, c] of Object.entries(t))
+        r.set(o.toLowerCase(), {
+          status: c.status || "offline",
+          isOnline: !!c.isOnline,
+          inBattle: !!c.inBattle,
+          last_seen: c.last_seen
         });
       return r;
     }
-    const s = e.map((n) => `"${n.toLowerCase()}"`).join(","), a = await b(`user_presence?username=in.(${s})&select=username,status,last_seen,in_battle`), o = Date.now() - 120 * 1e3;
-    for (const n of a || []) {
-      const c = n.last_seen && new Date(n.last_seen).getTime() > o ? n.in_battle ? "in_battle" : n.status || "online" : "offline";
-      r.set(n.username.toLowerCase(), {
-        status: c,
-        isOnline: c === "online" || c === "in_battle",
-        inBattle: c === "in_battle",
-        last_seen: n.last_seen
+    const s = e.map((o) => `"${o.toLowerCase()}"`).join(","), i = await b(`user_presence?username=in.(${s})&select=username,status,last_seen,in_battle`), a = Date.now() - 120 * 1e3;
+    for (const o of i || []) {
+      const n = o.last_seen && new Date(o.last_seen).getTime() > a ? o.in_battle ? "in_battle" : o.status || "online" : "offline";
+      r.set(o.username.toLowerCase(), {
+        status: n,
+        isOnline: n === "online" || n === "in_battle",
+        inBattle: n === "in_battle",
+        last_seen: o.last_seen
       });
     }
   } catch (t) {
@@ -1321,63 +3785,63 @@ async function Ht(e) {
   }
   return r;
 }
-async function J(e, r, t = {}) {
+async function se(e, r, t = {}) {
   await b(`battles?id=eq.${e}`, {
     method: "PATCH",
     body: JSON.stringify({ status: r, ...t })
   });
 }
-function Ft(e) {
-  const r = st(e);
+function Vt(e) {
+  const r = ft(e);
   if (!r.valid)
     throw new Error(r.error);
   return r.username;
 }
-function P(e, r) {
+function N(e, r) {
   const t = typeof e == "string" ? parseInt(e, 10) : e;
   if (isNaN(t) || t <= 0) return "";
   const s = r || (typeof Intl < "u" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC") || "UTC";
   try {
-    const a = new Date(t * 1e3);
+    const i = new Date(t * 1e3);
     return new Intl.DateTimeFormat("en-CA", {
       timeZone: s,
       year: "numeric",
       month: "2-digit",
       day: "2-digit"
-    }).format(a);
+    }).format(i);
   } catch {
     return new Date(t * 1e3).toISOString().split("T")[0];
   }
 }
-function We(e = [], r = null, t = null) {
+function et(e = [], r = null, t = null) {
   const s = /* @__PURE__ */ new Set();
   if (Array.isArray(e)) {
-    for (const a of e)
-      if (a && a.timestamp) {
-        const o = P(a.timestamp, t);
-        o && s.add(o);
+    for (const i of e)
+      if (i && i.timestamp) {
+        const a = N(i.timestamp, t);
+        a && s.add(a);
       }
   }
   if (r)
     try {
-      const a = typeof r == "string" ? JSON.parse(r) : r;
-      if (a && typeof a == "object") {
-        for (const [o, n] of Object.entries(a))
-          if (parseInt(n, 10) > 0) {
-            const i = P(o, t);
-            i && s.add(i);
+      const i = typeof r == "string" ? JSON.parse(r) : r;
+      if (i && typeof i == "object") {
+        for (const [a, o] of Object.entries(i))
+          if (parseInt(o, 10) > 0) {
+            const c = N(a, t);
+            c && s.add(c);
           }
       }
-    } catch (a) {
-      console.warn("[StreakCalculator] Error parsing submissionCalendar:", a);
+    } catch (i) {
+      console.warn("[StreakCalculator] Error parsing submissionCalendar:", i);
     }
   return Array.from(s).sort();
 }
-function xt(e, r = null, t = null) {
-  let s = [], a = null;
-  Array.isArray(e) ? (s = e, a = r) : e && typeof e == "object" && (a = e, typeof r == "string" && (t = r));
-  const o = We(s, a, t);
-  if (o.length === 0)
+function Qt(e, r = null, t = null) {
+  let s = [], i = null;
+  Array.isArray(e) ? (s = e, i = r) : e && typeof e == "object" && (i = e, typeof r == "string" && (t = r));
+  const a = et(s, i, t);
+  if (a.length === 0)
     return {
       currentStreak: 0,
       longestStreak: 0,
@@ -1385,47 +3849,47 @@ function xt(e, r = null, t = null) {
       solvedToday: !1,
       solveDates: []
     };
-  function n(S, v) {
-    const tt = /* @__PURE__ */ new Date(S + "T00:00:00Z"), rt = /* @__PURE__ */ new Date(v + "T00:00:00Z");
-    return Math.round((rt - tt) / 864e5);
+  function o(k, M) {
+    const p = /* @__PURE__ */ new Date(k + "T00:00:00Z"), be = /* @__PURE__ */ new Date(M + "T00:00:00Z");
+    return Math.round((be - p) / 864e5);
   }
-  let i = 1, c = 1;
-  for (let S = 1; S < o.length; S++) {
-    const v = n(o[S - 1], o[S]);
-    v === 1 ? (c++, c > i && (i = c)) : v > 1 && (c = 1);
+  let c = 1, n = 1;
+  for (let k = 1; k < a.length; k++) {
+    const M = o(a[k - 1], a[k]);
+    M === 1 ? (n++, n > c && (c = n)) : M > 1 && (n = 1);
   }
-  const l = Math.floor(Date.now() / 1e3), u = P(l, t), _ = Math.floor((Date.now() - 864e5) / 1e3), p = P(_, t), g = o.includes(u), C = o[o.length - 1];
-  if (C !== u && C !== p)
+  const l = Math.floor(Date.now() / 1e3), u = N(l, t), d = Math.floor((Date.now() - 864e5) / 1e3), m = N(d, t), S = a.includes(u), y = a[a.length - 1];
+  if (y !== u && y !== m)
     return {
       currentStreak: 0,
-      longestStreak: i,
+      longestStreak: c,
       isAtRisk: !1,
       solvedToday: !1,
-      solveDates: o
+      solveDates: a
     };
-  let d = 0, m = /* @__PURE__ */ new Date(C + "T00:00:00Z");
-  for (let S = o.length - 1; S >= 0; S--) {
-    const v = m.toISOString().split("T")[0];
-    if (o[S] === v)
-      d++, m.setUTCDate(m.getUTCDate() - 1);
-    else if (o[S] < v)
+  let g = 0, U = /* @__PURE__ */ new Date(y + "T00:00:00Z");
+  for (let k = a.length - 1; k >= 0; k--) {
+    const M = U.toISOString().split("T")[0];
+    if (a[k] === M)
+      g++, U.setUTCDate(U.getUTCDate() - 1);
+    else if (a[k] < M)
       break;
   }
-  d > i && (i = d);
-  const k = d > 0 && !g;
+  g > c && (c = g);
+  const B = g > 0 && !S;
   return {
-    currentStreak: d,
-    longestStreak: i,
-    isAtRisk: k,
-    solvedToday: g,
-    solveDates: o
+    currentStreak: g,
+    longestStreak: c,
+    isAtRisk: B,
+    solvedToday: S,
+    solveDates: a
   };
 }
-function Ye(e, r = null, t = null) {
-  const s = We(e, r, t), a = Math.floor(Date.now() / 1e3), o = P(a, t);
-  return s.includes(o);
+function tt(e, r = null, t = null) {
+  const s = et(e, r, t), i = Math.floor(Date.now() / 1e3), a = N(i, t);
+  return s.includes(a);
 }
-function qt(e) {
+function Kt(e) {
   const r = { easy: 0, medium: 0, hard: 0, total: 0 };
   if (!Array.isArray(e)) return r;
   for (const t of e) {
@@ -1447,10 +3911,10 @@ function qt(e) {
   }
   return r.total === 0 && (r.easy > 0 || r.medium > 0 || r.hard > 0) && (r.total = r.easy + r.medium + r.hard), r;
 }
-function ne(e) {
+function le(e) {
   return e ? Date.now() - e > 900 * 1e3 : !0;
 }
-const j = "leetfriends_notifications", Ae = {
+const j = "leetfriends_notifications", ve = {
   QUEUED: "QUEUED",
   DISPLAY_REQUESTED: "DISPLAY_REQUESTED",
   FAILED: "FAILED",
@@ -1458,7 +3922,7 @@ const j = "leetfriends_notifications", Ae = {
   DISMISSED: "DISMISSED",
   CLICKED: "CLICKED"
 };
-async function Je() {
+async function rt() {
   try {
     return (await chrome.storage.local.get(j))[j] || {
       mutedUntilUTC: null,
@@ -1477,7 +3941,7 @@ async function Je() {
     };
   }
 }
-async function je() {
+async function st() {
   try {
     const e = await chrome.storage.local.get([
       "notifications_enabled",
@@ -1495,11 +3959,11 @@ async function je() {
       if (r.mutedUntilUTC >= s) return !0;
     }
     if (r.quietHours && r.quietHours.enabled) {
-      const s = (/* @__PURE__ */ new Date()).getHours() * 60 + (/* @__PURE__ */ new Date()).getMinutes(), [a, o] = (r.quietHours.start || "22:00").split(":").map(Number), [n, i] = (r.quietHours.end || "08:00").split(":").map(Number), c = a * 60 + o, l = n * 60 + i;
-      if (c > l) {
-        if (s >= c || s < l)
+      const s = (/* @__PURE__ */ new Date()).getHours() * 60 + (/* @__PURE__ */ new Date()).getMinutes(), [i, a] = (r.quietHours.start || "22:00").split(":").map(Number), [o, c] = (r.quietHours.end || "08:00").split(":").map(Number), n = i * 60 + a, l = o * 60 + c;
+      if (n > l) {
+        if (s >= n || s < l)
           return !0;
-      } else if (s >= c && s < l)
+      } else if (s >= n && s < l)
         return !0;
     }
     return !1;
@@ -1507,35 +3971,35 @@ async function je() {
     return console.warn("[NotificationManager] isNotificationMuted error:", e), !1;
   }
 }
-async function Wt(e) {
-  const r = await Je();
+async function Zt(e) {
+  const r = await rt();
   r.mutedUntilUTC = e, await chrome.storage.local.set({ [j]: r });
 }
-async function Ge(e) {
+async function it(e) {
   if (!(!Array.isArray(e) || e.length === 0))
     try {
-      const r = await je(), t = Date.now(), a = (await chrome.storage.local.get("unread_notifications")).unread_notifications || [], o = e.map((c, l) => ({
-        ...c,
+      const r = await st(), t = Date.now(), i = (await chrome.storage.local.get("unread_notifications")).unread_notifications || [], a = e.map((n, l) => ({
+        ...n,
         id: `${t}-${l}`,
         timestamp: t,
-        deliveryState: r ? Ae.IN_APP_ONLY : Ae.DISPLAY_REQUESTED
-      })), n = t - 1440 * 60 * 1e3, i = [...a, ...o].filter((c) => c.timestamp > n).slice(-30);
-      if (await chrome.storage.local.set({ unread_notifications: i }), r) {
+        deliveryState: r ? ve.IN_APP_ONLY : ve.DISPLAY_REQUESTED
+      })), o = t - 1440 * 60 * 1e3, c = [...i, ...a].filter((n) => n.timestamp > o).slice(-30);
+      if (await chrome.storage.local.set({ unread_notifications: c }), r) {
         console.log("[NotificationManager] Notifications muted; recorded for in-app display only.");
         return;
       }
-      for (const c of e)
+      for (const n of e)
         try {
           let l = "LeetStreak";
-          c.type === "new_submission" ? l = "🎯 Friend Solved a Problem!" : c.type === "milestone" ? l = "🔥 Streak Milestone Reached!" : c.type === "streak_at_risk" ? l = "⚠️ Streak At Risk!" : c.type === "battle_invite" ? l = "⚔️ 1v1 Battle Challenge!" : c.type === "battle_opponent_solved" ? l = "⚔️ Opponent Solved a Problem!" : c.type === "roast" && (l = "🔥 Motivation Roast Received!");
-          const u = `leetstreak-${c.type}-${t}-${Math.floor(Math.random() * 1e3)}`;
+          n.type === "new_submission" ? l = "🎯 Friend Solved a Problem!" : n.type === "milestone" ? l = "🔥 Streak Milestone Reached!" : n.type === "streak_at_risk" ? l = "⚠️ Streak At Risk!" : n.type === "battle_invite" ? l = "⚔️ 1v1 Battle Challenge!" : n.type === "battle_opponent_solved" ? l = "⚔️ Opponent Solved a Problem!" : n.type === "roast" && (l = "🔥 Motivation Roast Received!");
+          const u = `leetstreak-${n.type}-${t}-${Math.floor(Math.random() * 1e3)}`;
           await chrome.notifications.create(u, {
             type: "basic",
             iconUrl: chrome.runtime.getURL("icons/icon128.png"),
             title: l,
-            message: c.message || "",
-            priority: c.priority || 2,
-            requireInteraction: c.type === "streak_at_risk" || c.type === "battle_invite"
+            message: n.message || "",
+            priority: n.priority || 2,
+            requireInteraction: n.type === "streak_at_risk" || n.type === "battle_invite"
           });
         } catch (l) {
           console.warn("[NotificationManager] chrome.notifications.create failed:", l);
@@ -1544,24 +4008,24 @@ async function Ge(e) {
       console.error("[NotificationManager] Error in batchNotify:", r);
     }
 }
-const Yt = () => (/* @__PURE__ */ new Date()).toISOString().split("T")[0], Jt = () => {
+const Xt = () => (/* @__PURE__ */ new Date()).toISOString().split("T")[0], er = () => {
   const e = /* @__PURE__ */ new Date();
   return e.setUTCDate(e.getUTCDate() - 1), e.toISOString().split("T")[0];
 };
-function jt(e) {
+function tr(e) {
   return [7, 30, 100].includes(e);
 }
-function Gt(e, r) {
+function rr(e, r) {
   if (r === 0) return !1;
-  const t = Jt(), s = Yt();
-  return !(Array.isArray(e) ? e : []).some((n) => {
-    const i = parseInt(n.timestamp, 10);
-    if (isNaN(i) || i <= 0) return !1;
-    const c = new Date(i * 1e3).toISOString().split("T")[0];
-    return c === s || c === t;
+  const t = er(), s = Xt();
+  return !(Array.isArray(e) ? e : []).some((o) => {
+    const c = parseInt(o.timestamp, 10);
+    if (isNaN(c) || c <= 0) return !1;
+    const n = new Date(c * 1e3).toISOString().split("T")[0];
+    return n === s || n === t;
   });
 }
-function zt(e, r, t) {
+function sr(e, r, t) {
   switch (r) {
     case "solved_today":
       return `${e} solved today! 🎯`;
@@ -1573,56 +4037,56 @@ function zt(e, r, t) {
       return `${e} updated their progress`;
   }
 }
-const ke = 1.7, Ce = 30, Re = 19, ve = 4, De = "schedule_preferences";
-async function re() {
+const Re = 1.7, Le = 30, Pe = 19, De = 4, Ie = "schedule_preferences";
+async function ie() {
   try {
-    return (await chrome.storage.local.get(De))[De] || {
-      activeInterval: ke,
-      quietInterval: Ce,
-      activeStartHour: Re,
-      activeEndHour: ve
+    return (await chrome.storage.local.get(Ie))[Ie] || {
+      activeInterval: Re,
+      quietInterval: Le,
+      activeStartHour: Pe,
+      activeEndHour: De
     };
   } catch (e) {
     return console.error("Error loading schedule preferences:", e), {
-      activeInterval: ke,
-      quietInterval: Ce,
-      activeStartHour: Re,
-      activeEndHour: ve
+      activeInterval: Re,
+      quietInterval: Le,
+      activeStartHour: Pe,
+      activeEndHour: De
     };
   }
 }
-async function _e(e = null) {
-  e || (e = await re());
-  const t = (/* @__PURE__ */ new Date()).getHours(), { activeStartHour: s, activeEndHour: a } = e;
-  return s > a ? t >= s || t < a : t >= s && t < a;
+async function pe(e = null) {
+  e || (e = await ie());
+  const t = (/* @__PURE__ */ new Date()).getHours(), { activeStartHour: s, activeEndHour: i } = e;
+  return s > i ? t >= s || t < i : t >= s && t < i;
+}
+async function _e() {
+  const e = await ie();
+  return await pe(e) ? e.activeInterval : e.quietInterval;
+}
+async function ir() {
+  const e = await ie(), r = /* @__PURE__ */ new Date(), t = r.getHours(), s = r.getMinutes();
+  let i;
+  await pe(e) ? i = e.activeEndHour : i = e.activeStartHour;
+  let a = i - t;
+  return a < 0 && (a += 24), a === 0 && s > 0 && (a = 24), a * 60 - s;
 }
 async function we() {
-  const e = await re();
-  return await _e(e) ? e.activeInterval : e.quietInterval;
+  const e = await ie(), r = await _e(), t = await pe(e), s = Ne(e.activeStartHour), i = Ne(e.activeEndHour);
+  return t ? `Active Mode: Checking every ${r} minutes (${s} - ${i})` : `Quiet Mode: Checking every ${r} minutes`;
 }
-async function Qt() {
-  const e = await re(), r = /* @__PURE__ */ new Date(), t = r.getHours(), s = r.getMinutes();
-  let a;
-  await _e(e) ? a = e.activeEndHour : a = e.activeStartHour;
-  let o = a - t;
-  return o < 0 && (o += 24), o === 0 && s > 0 && (o = 24), o * 60 - s;
-}
-async function ge() {
-  const e = await re(), r = await we(), t = await _e(e), s = Le(e.activeStartHour), a = Le(e.activeEndHour);
-  return t ? `Active Mode: Checking every ${r} minutes (${s} - ${a})` : `Quiet Mode: Checking every ${r} minutes`;
-}
-async function Vt() {
-  const e = await we(), r = await Qt(), t = Math.min(e, r);
+async function ar() {
+  const e = await _e(), r = await ir(), t = Math.min(e, r);
   return {
     intervalMinutes: t,
-    description: await ge(),
+    description: await we(),
     isTransitionCheck: t === r && t < e
   };
 }
-function Le(e) {
+function Ne(e) {
   return e === 0 ? "12:00 AM" : e < 12 ? `${e}:00 AM` : e === 12 ? "12:00 PM" : `${e - 12}:00 PM`;
 }
-const ze = [
+const at = [
   // Messaging & Chat Distractions
   "whatsapp.com",
   "web.whatsapp.com",
@@ -1659,7 +4123,7 @@ const ze = [
   "geoguessr.com",
   "store.steampowered.com",
   "roblox.com"
-], Qe = [
+], ot = [
   {
     domain: "youtube.com",
     paths: ["/shorts", "/feed/explore"],
@@ -1685,7 +4149,7 @@ const ze = [
     paths: ["/feed"],
     label: "LinkedIn Feed"
   }
-], Ve = [
+], nt = [
   {
     domain: "youtube.com",
     allowedPrefixes: ["/watch", "/playlist", "/@", "/channel", "/c"]
@@ -1699,62 +4163,62 @@ const ze = [
     allowedPrefixes: ["/jobs", "/messaging", "/in"]
   }
 ];
-function B(e) {
+function H(e) {
   return e ? e.toLowerCase().replace(/^(www\.|m\.)/, "") : "";
 }
-function U(e, r = {}) {
+function I(e, r = {}) {
   const { customBlocked: t = [], allowlist: s = [] } = r;
   if (!e || typeof e != "string")
     return { isDistraction: !1, reason: "INVALID_URL", label: "" };
   if (e.includes("blocked.html") || e.startsWith("chrome-extension:") || e.startsWith("chrome:"))
     return { isDistraction: !1, reason: "SYSTEM_INTERNAL_PAGE", label: "" };
-  let a;
+  let i;
   try {
-    a = new URL(e);
+    i = new URL(e);
   } catch {
     return { isDistraction: !1, reason: "PARSE_ERROR", label: "" };
   }
-  if (a.protocol !== "http:" && a.protocol !== "https:")
+  if (i.protocol !== "http:" && i.protocol !== "https:")
     return { isDistraction: !1, reason: "NON_HTTP_PROTOCOL", label: "" };
-  const o = a.hostname.toLowerCase(), n = B(o);
-  if (n.includes("leetcode.com"))
+  const a = i.hostname.toLowerCase(), o = H(a);
+  if (o.includes("leetcode.com"))
     return { isDistraction: !1, reason: "SYSTEM_ALLOW_LEETCODE", label: "LeetCode" };
-  for (const i of s) {
-    if (!i) continue;
-    const c = i.trim().toLowerCase();
-    if (e.toLowerCase().includes(c) || n === B(c))
-      return { isDistraction: !1, reason: "USER_ALLOWLIST", label: i };
+  for (const c of s) {
+    if (!c) continue;
+    const n = c.trim().toLowerCase();
+    if (e.toLowerCase().includes(n) || o === H(n))
+      return { isDistraction: !1, reason: "USER_ALLOWLIST", label: c };
   }
-  for (const i of Ve)
-    if (n === B(i.domain)) {
-      for (const c of i.allowedPrefixes)
-        if (a.pathname.startsWith(c))
-          return { isDistraction: !1, reason: "EDUCATIONAL_EXCEPTION", label: `${i.domain}${c}` };
+  for (const c of nt)
+    if (o === H(c.domain)) {
+      for (const n of c.allowedPrefixes)
+        if (i.pathname.startsWith(n))
+          return { isDistraction: !1, reason: "EDUCATIONAL_EXCEPTION", label: `${c.domain}${n}` };
     }
-  for (const i of Qe)
-    if (n === B(i.domain)) {
-      for (const c of i.paths)
-        if (a.pathname.startsWith(c))
-          return { isDistraction: !0, reason: "PATH_DISTRACTION", label: i.label };
+  for (const c of ot)
+    if (o === H(c.domain)) {
+      for (const n of c.paths)
+        if (i.pathname.startsWith(n))
+          return { isDistraction: !0, reason: "PATH_DISTRACTION", label: c.label };
     }
-  for (const i of t) {
-    if (!i) continue;
-    const c = B(i.trim().toLowerCase());
-    if (n === c || n.endsWith("." + c))
-      return { isDistraction: !0, reason: "CUSTOM_BLOCKED_DOMAIN", label: c };
+  for (const c of t) {
+    if (!c) continue;
+    const n = H(c.trim().toLowerCase());
+    if (o === n || o.endsWith("." + n))
+      return { isDistraction: !0, reason: "CUSTOM_BLOCKED_DOMAIN", label: n };
   }
-  for (const i of ze) {
-    const c = B(i);
-    if (n === c || n.endsWith("." + c))
-      return { isDistraction: !0, reason: "DEFAULT_BLOCKED_DOMAIN", label: c };
+  for (const c of at) {
+    const n = H(c);
+    if (o === n || o.endsWith("." + n))
+      return { isDistraction: !0, reason: "DEFAULT_BLOCKED_DOMAIN", label: n };
   }
   return { isDistraction: !1, reason: "UNRESTRICTED", label: "" };
 }
-function Kt(e = {}) {
+function or(e = {}) {
   const { customBlocked: r = [], allowlist: t = [] } = e, s = [];
-  let a = 1e3;
+  let i = 1e3;
   s.push({
-    id: a++,
+    id: i++,
     priority: 10,
     action: { type: "allow" },
     condition: {
@@ -1762,66 +4226,66 @@ function Kt(e = {}) {
       resourceTypes: ["main_frame"]
     }
   });
-  for (const n of t) {
-    if (!n || !n.trim()) continue;
-    const i = n.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  for (const o of t) {
+    if (!o || !o.trim()) continue;
+    const c = o.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     s.push({
-      id: a++,
+      id: i++,
       priority: 5,
       action: { type: "allow" },
       condition: {
-        requestDomains: [i],
+        requestDomains: [c],
         resourceTypes: ["main_frame"]
       }
     });
   }
-  for (const n of Ve)
-    for (const i of n.allowedPrefixes)
+  for (const o of nt)
+    for (const c of o.allowedPrefixes)
       s.push({
-        id: a++,
+        id: i++,
         priority: 3,
         action: { type: "allow" },
         condition: {
-          requestDomains: [n.domain],
-          urlFilter: `*${i}*`,
+          requestDomains: [o.domain],
+          urlFilter: `*${c}*`,
           resourceTypes: ["main_frame"]
         }
       });
-  for (const n of Qe)
-    for (const i of n.paths)
+  for (const o of ot)
+    for (const c of o.paths)
       s.push({
-        id: a++,
+        id: i++,
         priority: 2,
         action: {
           type: "redirect",
           redirect: { extensionPath: "/blocked.html" }
         },
         condition: {
-          requestDomains: [n.domain],
-          urlFilter: `*${i}*`,
+          requestDomains: [o.domain],
+          urlFilter: `*${c}*`,
           resourceTypes: ["main_frame"]
         }
       });
-  const o = Array.from(/* @__PURE__ */ new Set([...ze, ...r]));
-  for (const n of o) {
-    if (!n || !n.trim()) continue;
-    const i = B(n.trim());
+  const a = Array.from(/* @__PURE__ */ new Set([...at, ...r]));
+  for (const o of a) {
+    if (!o || !o.trim()) continue;
+    const c = H(o.trim());
     s.push({
-      id: a++,
+      id: i++,
       priority: 1,
       action: {
         type: "redirect",
         redirect: { extensionPath: "/blocked.html" }
       },
       condition: {
-        requestDomains: [i],
+        requestDomains: [c],
         resourceTypes: ["main_frame"]
       }
     });
   }
   return s;
 }
-async function D() {
+async function R() {
   if (typeof chrome > "u" || !chrome.storage || !chrome.storage.local)
     return { active: !1, reason: "CHROME_STORAGE_UNAVAILABLE", todayStr: "", streak: 0 };
   try {
@@ -1831,36 +4295,36 @@ async function D() {
       "last_solve_date",
       "user_timezone",
       "own_profile"
-    ]), r = e.user_timezone, t = Math.floor(Date.now() / 1e3), s = P(t, r);
+    ]), r = e.user_timezone, t = Math.floor(Date.now() / 1e3), s = N(t, r);
     if (!e.hardcore_mode_enabled)
       return { active: !1, reason: "HARDCORE_DISABLED", todayStr: s, streak: 0 };
-    const a = e.my_leetcode_username;
-    let o = e.own_profile;
-    if (!o && a)
+    const i = e.my_leetcode_username;
+    let a = e.own_profile;
+    if (!a && i)
       try {
-        const n = await chrome.storage.local.get(["friends_cache"]);
-        if (n.friends_cache) {
-          const i = Object.keys(n.friends_cache).find((c) => c.toLowerCase() === a.toLowerCase());
-          i && (o = n.friends_cache[i]);
+        const o = await chrome.storage.local.get(["friends_cache"]);
+        if (o.friends_cache) {
+          const c = Object.keys(o.friends_cache).find((n) => n.toLowerCase() === i.toLowerCase());
+          c && (a = o.friends_cache[c]);
         }
-        o || (o = await de(a));
-      } catch (n) {
-        console.warn("[BlockerManager] Error fetching cached friend data:", n);
+        a || (a = await ge(i));
+      } catch (o) {
+        console.warn("[BlockerManager] Error fetching cached friend data:", o);
       }
-    if (o) {
-      const n = o.stats?.streak || 0;
-      return Ye(o.allAcceptedSubmissions, o.submissionCalendar, r) ? (await chrome.storage.local.set({ last_solve_date: s }), { active: !1, reason: "SOLVED_TODAY_CANONICAL", todayStr: s, streak: n }) : (e.last_solve_date === s && await chrome.storage.local.remove("last_solve_date"), { active: !0, reason: "UNSOLVED_TODAY", todayStr: s, streak: n });
+    if (a) {
+      const o = a.stats?.streak || 0;
+      return tt(a.allAcceptedSubmissions, a.submissionCalendar, r) ? (await chrome.storage.local.set({ last_solve_date: s }), { active: !1, reason: "SOLVED_TODAY_CANONICAL", todayStr: s, streak: o }) : (e.last_solve_date === s && await chrome.storage.local.remove("last_solve_date"), { active: !0, reason: "UNSOLVED_TODAY", todayStr: s, streak: o });
     }
     return e.last_solve_date === s ? { active: !1, reason: "SOLVED_TODAY_CACHE", todayStr: s, streak: 0 } : { active: !0, reason: "NO_PROFILE_UNSOLVED", todayStr: s, streak: 0 };
   } catch (e) {
     return console.error("[BlockerManager] isBlockerActive check error:", e), { active: !1, reason: `ERROR: ${e.message}`, todayStr: "", streak: 0 };
   }
 }
-async function $() {
+async function O() {
   if (typeof chrome > "u" || !chrome.declarativeNetRequest)
     return console.warn("[BlockerManager] chrome.declarativeNetRequest API not available"), { success: !1, locked: !1, ruleCount: 0, reason: "DNR_NOT_AVAILABLE" };
   try {
-    const e = await D(), t = (await chrome.declarativeNetRequest.getDynamicRules()).map((o) => o.id);
+    const e = await R(), t = (await chrome.declarativeNetRequest.getDynamicRules()).map((a) => a.id);
     if (!e.active)
       return t.length > 0 && await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: t,
@@ -1875,23 +4339,23 @@ async function $() {
           lastSynced: Date.now()
         }
       }), { success: !0, locked: !1, ruleCount: 0, reason: e.reason };
-    const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), a = Kt({
+    const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), i = or({
       customBlocked: s.custom_blocked_domains || [],
       allowlist: s.allowlist || []
     });
     return await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: t,
-      addRules: a
+      addRules: i
     }), await chrome.storage.local.set({
       hardcore_blocker_state: {
         locked: !0,
-        ruleCount: a.length,
+        ruleCount: i.length,
         reason: e.reason,
         todayStr: e.todayStr,
         streak: e.streak,
         lastSynced: Date.now()
       }
-    }), await Xt(), { success: !0, locked: !0, ruleCount: a.length, reason: e.reason };
+    }), await nr(), { success: !0, locked: !0, ruleCount: i.length, reason: e.reason };
   } catch (e) {
     console.error("[BlockerManager] syncBlockerRules error:", e);
     try {
@@ -1908,7 +4372,7 @@ async function $() {
   }
 }
 let Oe = !1;
-function M(e, r, t = "") {
+function $(e, r, t = "") {
   if (!(typeof chrome > "u" || !chrome.tabs || !chrome.tabs.update))
     try {
       const s = chrome.runtime.getURL(`blocked.html?blocked=${encodeURIComponent(r)}&label=${encodeURIComponent(t)}`);
@@ -1919,30 +4383,30 @@ function M(e, r, t = "") {
       console.warn("[BlockerManager] redirectTabToBlocked error:", s);
     }
 }
-async function Xt() {
+async function nr() {
   if (typeof chrome > "u" || !chrome.tabs || !chrome.tabs.query)
     return { sweptCount: 0, redirectedTabs: [] };
   try {
-    if (!(await D()).active)
+    if (!(await R()).active)
       return { sweptCount: 0, redirectedTabs: [] };
-    const r = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), t = r.custom_blocked_domains || [], s = r.allowlist || [], a = await chrome.tabs.query({}), o = [];
-    for (const n of a) {
-      if (!n.id || !n.url || n.url.includes("blocked.html") || n.url.startsWith("chrome") || n.url.startsWith("about:") || n.url.startsWith("edge:") || n.url.includes("leetcode.com"))
+    const r = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), t = r.custom_blocked_domains || [], s = r.allowlist || [], i = await chrome.tabs.query({}), a = [];
+    for (const o of i) {
+      if (!o.id || !o.url || o.url.includes("blocked.html") || o.url.startsWith("chrome") || o.url.startsWith("about:") || o.url.startsWith("edge:") || o.url.includes("leetcode.com"))
         continue;
-      const i = U(n.url, { customBlocked: t, allowlist: s });
-      i.isDistraction && (console.log(`[BlockerManager] Sweeping open distracting tab #${n.id}: ${n.url} (${i.label || i.reason})`), M(n.id, n.url, i.label), o.push({ id: n.id, url: n.url }));
+      const c = I(o.url, { customBlocked: t, allowlist: s });
+      c.isDistraction && (console.log(`[BlockerManager] Sweeping open distracting tab #${o.id}: ${o.url} (${c.label || c.reason})`), $(o.id, o.url, c.label), a.push({ id: o.id, url: o.url }));
     }
-    return { sweptCount: o.length, redirectedTabs: o };
+    return { sweptCount: a.length, redirectedTabs: a };
   } catch (e) {
     return console.warn("[BlockerManager] sweepOpenTabs error:", e), { sweptCount: 0, redirectedTabs: [], error: e.message };
   }
 }
-function Zt() {
-  Oe || typeof chrome > "u" || (Oe = !0, $().catch((e) => console.error("[BlockerManager] Startup sync failed:", e)), chrome.webNavigation && chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener(async (e) => {
+function cr() {
+  Oe || typeof chrome > "u" || (Oe = !0, O().catch((e) => console.error("[BlockerManager] Startup sync failed:", e)), chrome.webNavigation && chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener(async (e) => {
     if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
       try {
-        if (!(await D()).active) return;
-        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = U(e.url, {
+        if (!(await R()).active) return;
+        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = I(e.url, {
           customBlocked: t.custom_blocked_domains || [],
           allowlist: t.allowlist || []
         });
@@ -1952,26 +4416,26 @@ function Zt() {
             label: s.label,
             timestamp: Date.now()
           }
-        }), M(e.tabId, e.url, s.label));
+        }), $(e.tabId, e.url, s.label));
       } catch (r) {
         console.warn("[BlockerManager] onBeforeNavigate error:", r);
       }
   }), chrome.webNavigation && chrome.webNavigation.onCommitted && chrome.webNavigation.onCommitted.addListener(async (e) => {
     if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
       try {
-        if (!(await D()).active) return;
-        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = U(e.url, {
+        if (!(await R()).active) return;
+        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = I(e.url, {
           customBlocked: t.custom_blocked_domains || [],
           allowlist: t.allowlist || []
         });
-        s.isDistraction && M(e.tabId, e.url, s.label);
+        s.isDistraction && $(e.tabId, e.url, s.label);
       } catch {
       }
   }), chrome.webNavigation && chrome.webNavigation.onHistoryStateUpdated && chrome.webNavigation.onHistoryStateUpdated.addListener(async (e) => {
     if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
       try {
-        if (!(await D()).active) return;
-        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = U(e.url, {
+        if (!(await R()).active) return;
+        const t = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), s = I(e.url, {
           customBlocked: t.custom_blocked_domains || [],
           allowlist: t.allowlist || []
         });
@@ -1981,7 +4445,7 @@ function Zt() {
             label: s.label,
             timestamp: Date.now()
           }
-        }), M(e.tabId, e.url, s.label));
+        }), $(e.tabId, e.url, s.label));
       } catch (r) {
         console.warn("[BlockerManager] onHistoryStateUpdated error:", r);
       }
@@ -1989,37 +4453,37 @@ function Zt() {
     const s = r.url || t?.url;
     if (!(!s || s.includes("blocked.html") || s.startsWith("chrome") || s.startsWith("about:") || s.includes("leetcode.com")))
       try {
-        if (!(await D()).active) return;
-        const o = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), n = U(s, {
-          customBlocked: o.custom_blocked_domains || [],
-          allowlist: o.allowlist || []
+        if (!(await R()).active) return;
+        const a = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), o = I(s, {
+          customBlocked: a.custom_blocked_domains || [],
+          allowlist: a.allowlist || []
         });
-        n.isDistraction && M(e, s, n.label);
+        o.isDistraction && $(e, s, o.label);
       } catch {
       }
   }), chrome.tabs && chrome.tabs.onActivated && chrome.tabs.onActivated.addListener(async (e) => {
     try {
-      if (!(await D()).active) return;
+      if (!(await R()).active) return;
       const t = await chrome.tabs.get(e.tabId);
       if (!t || !t.url || t.url.includes("blocked.html") || t.url.startsWith("chrome") || t.url.startsWith("about:") || t.url.startsWith("edge:") || t.url.includes("leetcode.com")) return;
-      const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), a = U(t.url, {
+      const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), i = I(t.url, {
         customBlocked: s.custom_blocked_domains || [],
         allowlist: s.allowlist || []
       });
-      a.isDistraction && (console.log(`[BlockerManager] onActivated blocking active tab #${e.tabId} (${t.url})`), M(e.tabId, t.url, a.label));
+      i.isDistraction && (console.log(`[BlockerManager] onActivated blocking active tab #${e.tabId} (${t.url})`), $(e.tabId, t.url, i.label));
     } catch {
     }
   }), chrome.windows && chrome.windows.onFocusChanged && chrome.windows.onFocusChanged.addListener(async (e) => {
     if (!(typeof chrome.windows.WINDOW_ID_NONE < "u" && e === chrome.windows.WINDOW_ID_NONE))
       try {
-        if (!(await D()).active) return;
+        if (!(await R()).active) return;
         const [t] = await chrome.tabs.query({ active: !0, windowId: e });
         if (!t || !t.id || !t.url || t.url.includes("blocked.html") || t.url.startsWith("chrome") || t.url.startsWith("about:") || t.url.startsWith("edge:") || t.url.includes("leetcode.com")) return;
-        const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), a = U(t.url, {
+        const s = await chrome.storage.local.get(["custom_blocked_domains", "allowlist"]), i = I(t.url, {
           customBlocked: s.custom_blocked_domains || [],
           allowlist: s.allowlist || []
         });
-        a.isDistraction && (console.log(`[BlockerManager] onFocusChanged blocking window tab #${t.id} (${t.url})`), M(t.id, t.url, a.label));
+        i.isDistraction && (console.log(`[BlockerManager] onFocusChanged blocking window tab #${t.id} (${t.url})`), $(t.id, t.url, i.label));
       } catch {
       }
   }), chrome.storage && chrome.storage.onChanged && chrome.storage.onChanged.addListener((e, r) => {
@@ -2032,44 +4496,44 @@ function Zt() {
       "own_profile",
       "custom_blocked_domains",
       "allowlist"
-    ].some((a) => e[a]) && $().catch((a) => {
-      console.error("[BlockerManager] Storage change sync error:", a);
+    ].some((i) => e[i]) && O().catch((i) => {
+      console.error("[BlockerManager] Storage change sync error:", i);
     });
   }), console.log("🛡️ [BlockerManager] Multi-layer network blocker initialized"));
 }
-function er() {
-  if (Zt(), typeof chrome > "u" || !chrome.tabs) {
+function lr() {
+  if (cr(), typeof chrome > "u" || !chrome.tabs) {
     console.warn("[TabMonitor] chrome.tabs API not available");
     return;
   }
   chrome.tabs.onUpdated.addListener(async (e, r, t) => {
     if (r.status === "complete" && t?.url)
       try {
-        if (!(await D()).active) return;
-        const a = U(t.url);
-        if (a.isDistraction && !t.url.includes("blocked.html")) {
-          const o = chrome.runtime.getURL(`blocked.html?blocked=${encodeURIComponent(t.url)}&label=${encodeURIComponent(a.label)}`);
-          chrome.tabs.update(e, { url: o });
+        if (!(await R()).active) return;
+        const i = I(t.url);
+        if (i.isDistraction && !t.url.includes("blocked.html")) {
+          const a = chrome.runtime.getURL(`blocked.html?blocked=${encodeURIComponent(t.url)}&label=${encodeURIComponent(i.label)}`);
+          chrome.tabs.update(e, { url: a });
         }
       } catch {
       }
   }), console.log("✅ [TabMonitor] Hardcore Mode Tab Monitor and Blocker initialized");
 }
-const ce = "leetfriends_sync", tr = "schedule_transition_check", G = "presence_heartbeat_alarm", Ke = 500;
+const ue = "leetfriends_sync", ur = "schedule_transition_check", J = "presence_heartbeat_alarm", ct = 500;
 self.addEventListener("error", (e) => {
   console.error("[ServiceWorker] Uncaught error:", e.error);
 });
 self.addEventListener("unhandledrejection", (e) => {
   console.error("[ServiceWorker] Uncaught promise rejection:", e.reason);
 });
-er();
-_t().catch((e) => {
+lr();
+At().catch((e) => {
   console.warn("[ServiceWorker] Session restoration (non-blocking):", e.message);
 });
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log("[ServiceWorker] Installed - setting up sync alarm and cleaning legacy keys"), ye(), rr(), await $();
+  console.log("[ServiceWorker] Installed - setting up sync alarm and cleaning legacy keys"), Se(), dr(), await O();
   try {
-    await chrome.alarms.clear(G), chrome.alarms.create(G, {
+    await chrome.alarms.clear(J), chrome.alarms.create(J, {
       delayInMinutes: 0.1,
       periodInMinutes: 1
     });
@@ -2077,16 +4541,16 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 chrome.runtime.onStartup.addListener(async () => {
-  console.log("[ServiceWorker] Browser startup - reconciling blocker rules & presence"), await $();
+  console.log("[ServiceWorker] Browser startup - reconciling blocker rules & presence"), await O();
   try {
-    await chrome.alarms.clear(G), chrome.alarms.create(G, {
+    await chrome.alarms.clear(J), chrome.alarms.create(J, {
       delayInMinutes: 0.1,
       periodInMinutes: 1
-    }), await Ze();
+    }), await ut();
   } catch {
   }
 });
-async function rr() {
+async function dr() {
   try {
     const e = [
       "github_token",
@@ -2102,10 +4566,10 @@ async function rr() {
     console.warn("[ServiceWorker] Error cleaning legacy storage:", e);
   }
 }
-async function ye() {
-  const e = Vt(), r = e?.intervalMinutes || 30;
+async function Se() {
+  const e = ar(), r = e?.intervalMinutes || 30;
   try {
-    await chrome.alarms.clear(ce), await chrome.alarms.clear(tr), chrome.alarms.create(ce, {
+    await chrome.alarms.clear(ue), await chrome.alarms.clear(ur), chrome.alarms.create(ue, {
       delayInMinutes: r,
       periodInMinutes: r
     }), await chrome.storage.local.set({
@@ -2119,16 +4583,16 @@ async function ye() {
     console.warn("[ServiceWorker] setupDynamicAlarm error:", t);
   }
 }
-async function sr() {
+async function fr() {
   try {
-    const r = (await chrome.storage.local.get("current_schedule")).current_schedule, t = we();
-    (!r || Math.abs(r.interval - t) > 0.1) && (console.log(`[ServiceWorker] Transitioning schedule: ${ge()}`), await ye());
+    const r = (await chrome.storage.local.get("current_schedule")).current_schedule, t = _e();
+    (!r || Math.abs(r.interval - t) > 0.1) && (console.log(`[ServiceWorker] Transitioning schedule: ${we()}`), await Se());
   } catch (e) {
     console.warn("[ServiceWorker] checkScheduleTransition error:", e);
   }
 }
 chrome.alarms.onAlarm.addListener(async (e) => {
-  e.name === ce ? (console.log(`[ServiceWorker] Background sync triggered - ${ge()}`), await sr(), await Xe(), await $()) : e.name === G && await Ze();
+  e.name === ue ? (console.log(`[ServiceWorker] Background sync triggered - ${we()}`), await fr(), await lt(), await O()) : e.name === J && await ut();
 });
 chrome.runtime.onMessage.addListener((e, r, t) => {
   if (e.type === "PING") {
@@ -2137,27 +4601,27 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
   }
   switch (e.type) {
     case "FETCH_STATS":
-      return ar(e.forceRefresh).then(t), !0;
+      return mr(e.forceRefresh).then(t), !0;
     case "ADD_FRIEND":
-      return nr(e.username).then(t), !0;
+      return yr(e.username).then(t), !0;
     case "REMOVE_FRIEND":
-      return cr(e.username).then(t), !0;
+      return hr(e.username).then(t), !0;
     case "GET_FRIENDS":
-      return ir().then(t), !0;
+      return pr().then(t), !0;
     case "MUTE_NOTIFICATIONS":
-      return Wt(e.untilUTC).then(() => t({ success: !0 })), !0;
+      return Zt(e.untilUTC).then(() => t({ success: !0 })), !0;
     case "GET_NOTIFICATION_STATE":
-      return Je().then((s) => t({ success: !0, state: s })), !0;
+      return rt().then((s) => t({ success: !0, state: s })), !0;
     case "ADD_TO_QUEUE":
-      return lr(e.problemData).then(t), !0;
+      return _r(e.problemData).then(t), !0;
     case "SUBMISSION_ACCEPTED":
-      return ur(e.problemSlug, e.title).then(t), !0;
+      return wr(e.problemSlug, e.title).then(t), !0;
     case "SYNC_BLOCKER_RULES":
-      return $().then(t), !0;
+      return O().then(t), !0;
     case "GET_BLOCKER_STATUS":
-      return D().then(t), !0;
+      return R().then(t), !0;
     case "SHOW_NOTIFICATION":
-      return Ge([{
+      return it([{
         type: "custom",
         message: e.message || "",
         title: e.title || "LeetStreak",
@@ -2168,96 +4632,108 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
         t({ bytesInUse: s || 0, quota: 5242880 });
       }), !0;
     case "RESCHEDULE_ALARMS":
-      return ye().then(() => t({ success: !0 })), !0;
+      return Se().then(() => t({ success: !0 })), !0;
     // ===== 1v1 Battle System =====
     case "BATTLE_GET_STATUS":
-      return mr(e.username).then(t), !0;
-    case "BATTLE_CHALLENGE":
-      return hr(e.challenger, e.challenged, e.language).then(t), !0;
-    case "BATTLE_RESPOND":
-      return _r(e.battleId, e.username, e.accept).then(t), !0;
-    case "BATTLE_PICK_PROBLEM":
-      return wr(e.battleId, e.username, e.slug, e.title).then(t), !0;
-    case "BATTLE_READY":
-      return gr(e.battleId, e.username).then(t), !0;
-    case "BATTLE_SUBMISSION":
-      return yr(e).then(t), !0;
-    case "BATTLE_FORFEIT":
-      return pr(e.battleId, e.username).then(t), !0;
-    case "BATTLE_CANCEL":
-      return Sr(e.battleId, e.username).then(t), !0;
-    case "BATTLE_VALIDATE_PROBLEM":
-      return qe(e.slugOrUrl).then(t), !0;
-    case "BATTLE_PING_PRESENCE":
       return Er(e.username).then(t), !0;
+    case "BATTLE_CHALLENGE_V2":
+      return Tr(e).then(t), !0;
+    case "BATTLE_ACCEPT_V2":
+      return Ar(e.battleId).then(t), !0;
+    case "BATTLE_READY_V2":
+      return kr(e.battleId, e.username).then(t), !0;
+    case "BATTLE_SOLVED_V2":
+      return Mr(e).then(t), !0;
+    case "BATTLE_GET_STATE_V2":
+      return Cr(e.battleId).then(t), !0;
+    case "BATTLE_FORFEIT_V2":
+      return vr(e.battleId, e.username).then(t), !0;
+    case "BATTLE_CHALLENGE":
+      return Lr(e.challenger, e.challenged, e.language).then(t), !0;
+    case "BATTLE_RESPOND":
+      return Pr(e.battleId, e.username, e.accept).then(t), !0;
+    case "BATTLE_PICK_PROBLEM":
+      return Dr(e.battleId, e.username, e.slug, e.title).then(t), !0;
+    case "BATTLE_READY":
+      return Ir(e.battleId, e.username).then(t), !0;
+    case "BATTLE_SUBMISSION":
+      return Nr(e).then(t), !0;
+    case "BATTLE_FORFEIT":
+      return Or(e.battleId, e.username).then(t), !0;
+    case "BATTLE_CANCEL":
+      return Ur(e.battleId, e.username).then(t), !0;
+    case "BATTLE_VALIDATE_PROBLEM":
+      return Xe(e.slugOrUrl).then(t), !0;
+    case "BATTLE_PING_PRESENCE":
+      return Br(e.username).then(t), !0;
     case "BATTLE_GET_PRESENCE":
-      return br(e.usernames).then(t), !0;
+      return Hr(e.usernames).then(t), !0;
     case "BATTLE_GET_ONLINE_FRIENDS":
-      return Et().then((s) => t({ success: !0, friends: s })).catch((s) => t({ success: !1, error: s.message, friends: [] })), !0;
+      return Lt().then((s) => t({ success: !0, friends: s })).catch((s) => t({ success: !1, error: s.message, friends: [] })), !0;
     case "SYNC_FRIENDSHIPS":
       return (async () => {
         if (!Array.isArray(e.usernames))
           return t({ success: !0, count: 0 });
         const s = await Promise.all(
-          e.usernames.map((a) => ue(a).catch(() => ({ success: !1 })))
+          e.usernames.map((i) => me(i).catch(() => ({ success: !1 })))
         );
-        t({ success: !0, count: s.filter((a) => a?.success).length });
+        t({ success: !0, count: s.filter((i) => i?.success).length });
       })().catch((s) => t({ success: !1, error: s.message })), !0;
     case "GET_LOGGED_IN_USER":
-      return dr().then(t), !0;
+      return Sr().then(t), !0;
     case "FETCH_OWN_PROFILE":
-      return or(e.forceRefresh).then(t), !0;
+      return gr(e.forceRefresh).then(t), !0;
     // ===== Cloud Authentication & Account =====
     case "GET_AUTH_STATE":
       return (async () => {
         const s = await A();
         t({
           success: !0,
-          state: O(),
+          state: D(),
           session: s ? { user_id: s.user_id, email: s.email, expires_at: s.expires_at } : null,
-          isRateLimited: H(),
-          cooldownSeconds: ie()
+          isRateLimited: x(),
+          cooldownSeconds: de()
         });
       })().catch((s) => t({ success: !1, error: s.message })), !0;
     case "SIGN_IN_EMAIL":
-      return gt(e.email, e.password).then(async (s) => {
+      return Mt(e.email, e.password).then(async (s) => {
         try {
-          await oe(), e.username && await chrome.storage.local.set({ my_leetcode_username: e.username });
-          const a = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), o = e.username || a.my_leetcode_username;
-          o && (await N(o, a.own_profile || { profile: { realName: o } }), await Z(o, "online"));
-        } catch (a) {
-          console.warn("[ServiceWorker] Social account restore error:", a);
+          await ce(), e.username && await chrome.storage.local.set({ my_leetcode_username: e.username });
+          const i = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), a = e.username || i.my_leetcode_username;
+          a && (await P(a, i.own_profile || { profile: { realName: a } }), await X(a, "online"));
+        } catch (i) {
+          console.warn("[ServiceWorker] Social account restore error:", i);
         }
         t({ success: !0, session: { user_id: s.user_id, email: s.email } });
-      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: H() })), !0;
+      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: x() })), !0;
     case "RESTORE_ACCOUNT_DATA":
-      return oe().then((s) => t(s)).catch((s) => t({ success: !1, error: s.message })), !0;
+      return ce().then((s) => t(s)).catch((s) => t({ success: !1, error: s.message })), !0;
     case "SIGN_UP_EMAIL":
-      return yt(e.email, e.password).then(async (s) => {
+      return Ct(e.email, e.password).then(async (s) => {
         if (e.username && await chrome.storage.local.set({ my_leetcode_username: e.username }), s?.session && s.session.user_id)
           try {
-            const a = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), o = e.username || a.my_leetcode_username;
-            o && (await N(o, a.own_profile || { profile: { realName: o } }), await Z(o, "online"));
-          } catch (a) {
-            console.warn("[ServiceWorker] Sign up profile sync error:", a);
+            const i = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), a = e.username || i.my_leetcode_username;
+            a && (await P(a, i.own_profile || { profile: { realName: a } }), await X(a, "online"));
+          } catch (i) {
+            console.warn("[ServiceWorker] Sign up profile sync error:", i);
           }
         t(s);
-      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: H() })), !0;
+      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: x() })), !0;
     case "SIGN_OUT":
-      return pt().then(async (s) => {
+      return vt().then(async (s) => {
         try {
-          await St();
+          await Rt();
         } catch {
         }
         t(s);
       }).catch((s) => t({ success: !1, error: s.message })), !0;
     // ===== Roasts =====
     case "SEND_ROAST":
-      return Tr(e.targetUsername, e.fromUsername, e.message).then(t), !0;
+      return $r(e.targetUsername, e.fromUsername, e.message).then(t), !0;
     case "CLEAR_ROASTS":
       return (async () => {
         const s = await chrome.storage.local.get("my_leetcode_username");
-        return s.my_leetcode_username && await He(s.my_leetcode_username), { success: await xe() };
+        return s.my_leetcode_username && await Ge(s.my_leetcode_username), { success: await Ye() };
       })().then(t), !0;
     default:
       t({ success: !1, error: `Unknown message type: ${e.type}` });
@@ -2266,17 +4742,17 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
 chrome.notifications.onClicked.addListener((e) => {
   (e.includes("streak") || e.includes("roast") || e.includes("solve")) && (chrome.tabs.create({ url: "https://leetcode.com/problemset/" }), chrome.notifications.clear(e));
 });
-async function ar(e = !1) {
+async function mr(e = !1) {
   try {
     const r = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), t = r.my_leetcode_username;
     if (!t)
       return { success: !1, error: "No LeetCode username configured. Please enter your username." };
-    let s = await Y(), a = !1;
-    if (e || !s || ne(s.lastUpdated)) {
+    let s = await Y(), i = !1;
+    if (e || !s || le(s.lastUpdated)) {
       console.log(`[ServiceWorker] Fetching own LeetCode data for: ${t}`);
       try {
-        const u = await q(t);
-        s = await z(u, r.user_timezone), await te(s), a = !0;
+        const u = await G(t);
+        s = await z(u, r.user_timezone), await te(s), i = !0;
       } catch (u) {
         if (console.error(`[ServiceWorker] Error fetching own LeetCode profile for ${t}:`, u), !s)
           return {
@@ -2286,120 +4762,120 @@ async function ar(e = !1) {
           };
       }
     }
-    let n = await K();
-    const i = await Fe();
-    let c = e;
-    if (!c && i.length > 0) {
-      for (const u of i)
-        if (!n[u] || ne(n[u]?.lastUpdated)) {
-          c = !0;
+    let o = await K();
+    const c = await We();
+    let n = e;
+    if (!n && c.length > 0) {
+      for (const u of c)
+        if (!o[u] || le(o[u]?.lastUpdated)) {
+          n = !0;
           break;
         }
     }
-    if (c && i.length > 0) {
+    if (n && c.length > 0) {
       console.log("[ServiceWorker] Syncing friends data...");
-      for (const u of i)
+      for (const u of c)
         if (u.toLowerCase() !== t.toLowerCase())
           try {
-            const _ = await q(u), p = await z(_, r.user_timezone);
-            await fe(u, p), await et(Ke);
-          } catch (_) {
-            console.warn(`[ServiceWorker] Error updating friend ${u}:`, _.message);
+            const d = await G(u), m = await z(d, r.user_timezone);
+            await ye(u, m), await dt(ct);
+          } catch (d) {
+            console.warn(`[ServiceWorker] Error updating friend ${u}:`, d.message);
           }
-      n = await K();
+      o = await K();
     }
-    const l = { ...n };
+    const l = { ...o };
     return s && (l[t] = s), {
       success: !0,
       ownProfile: s,
       friends: l,
-      refreshed: a || c
+      refreshed: i || n
     };
   } catch (r) {
     return console.error("[ServiceWorker] handleFetchStats error:", r), { success: !1, error: r.message };
   }
 }
-async function or(e = !1) {
+async function gr(e = !1) {
   try {
     const r = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), t = r.my_leetcode_username;
     if (!t)
       return { success: !1, error: "No LeetCode username configured" };
     let s = await Y();
-    if (e || !s || ne(s.lastUpdated)) {
-      const o = await q(t);
-      s = await z(o, r.user_timezone), await te(s);
+    if (e || !s || le(s.lastUpdated)) {
+      const a = await G(t);
+      s = await z(a, r.user_timezone), await te(s);
     }
     return { success: !0, ownProfile: s };
   } catch (r) {
     return console.error("[ServiceWorker] handleFetchOwnProfile error:", r), { success: !1, error: r.message };
   }
 }
-async function nr(e) {
+async function yr(e) {
   try {
     const r = e;
     let t;
     try {
-      t = Ft(e);
-    } catch (n) {
-      return { success: !1, error: n.message };
+      t = Vt(e);
+    } catch (o) {
+      return { success: !1, error: o.message };
     }
-    if (await de(t))
+    if (await ge(t))
       return { success: !1, error: `${r} is already in your friends list` };
-    const a = await q(r), o = await z(a);
-    return await fe(t, o), O() === f.AUTHENTICATED && ue(t).catch((n) => {
-      console.warn("[ServiceWorker] Cloud syncFriendship failed:", n);
-    }), { success: !0, message: `${r} added successfully`, data: o };
+    const i = await G(r), a = await z(i);
+    return await ye(t, a), D() === f.AUTHENTICATED && me(t).catch((o) => {
+      console.warn("[ServiceWorker] Cloud syncFriendship failed:", o);
+    }), { success: !0, message: `${r} added successfully`, data: a };
   } catch (r) {
     return console.error("[ServiceWorker] handleAddFriend error:", r), { success: !1, error: r.message || "User not found or profile is private" };
   }
 }
-async function cr(e) {
+async function hr(e) {
   try {
-    return await kt(e), O() === f.AUTHENTICATED && Pe(e).catch((r) => {
+    return await Nt(e), D() === f.AUTHENTICATED && $e(e).catch((r) => {
       console.warn("[ServiceWorker] Cloud removeFriendship failed:", r);
     }), { success: !0, message: `${e} removed` };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function ir() {
+async function pr() {
   try {
     let e = await K();
-    return O() === f.AUTHENTICATED && (!e || Object.keys(e).length === 0) && (await oe(), e = await K()), { success: !0, friends: e };
+    return D() === f.AUTHENTICATED && (!e || Object.keys(e).length === 0) && (await ce(), e = await K()), { success: !0, friends: e };
   } catch (e) {
     return { success: !1, error: e.message };
   }
 }
-async function lr(e) {
+async function _r(e) {
   try {
     if (!e) return { success: !1, error: "Problem data required" };
     const t = (await chrome.storage.local.get("problem_queue")).problem_queue || [];
-    if (t.some((o) => o.slug === e.slug || o.id === e.slug))
+    if (t.some((a) => a.slug === e.slug || a.id === e.slug))
       return { success: !1, error: "Problem already in queue", alreadyExists: !0 };
-    const a = {
+    const i = {
       ...e,
       id: e.slug || `problem-${Date.now()}`,
       addedAt: Date.now(),
       status: e.status || "pending"
     };
-    return t.push(a), await chrome.storage.local.set({ problem_queue: t }), { success: !0, message: "Added to problem queue" };
+    return t.push(i), await chrome.storage.local.set({ problem_queue: t }), { success: !0, message: "Added to problem queue" };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function ur(e, r) {
+async function wr(e, r) {
   try {
-    const t = await chrome.storage.local.get(["my_leetcode_username", "user_timezone", "problem_queue"]), s = P(Math.floor(Date.now() / 1e3), t.user_timezone);
-    if (await chrome.storage.local.set({ last_solve_date: s }), console.log(`[ServiceWorker] Solve recorded today (${s}) — Hardcore Mode unlocked!`), await $(), t.problem_queue && Array.isArray(t.problem_queue)) {
-      const a = t.problem_queue.map((o) => o.slug === e || o.id === e || r && o.title === r ? { ...o, status: "completed" } : o);
-      await chrome.storage.local.set({ problem_queue: a });
+    const t = await chrome.storage.local.get(["my_leetcode_username", "user_timezone", "problem_queue"]), s = N(Math.floor(Date.now() / 1e3), t.user_timezone);
+    if (await chrome.storage.local.set({ last_solve_date: s }), console.log(`[ServiceWorker] Solve recorded today (${s}) — Hardcore Mode unlocked!`), await O(), t.problem_queue && Array.isArray(t.problem_queue)) {
+      const i = t.problem_queue.map((a) => a.slug === e || a.id === e || r && a.title === r ? { ...a, status: "completed" } : a);
+      await chrome.storage.local.set({ problem_queue: i });
     }
-    return Xe().catch(console.error), { success: !0 };
+    return lt().catch(console.error), { success: !0 };
   } catch (t) {
     return console.error("[ServiceWorker] handleSubmissionAccepted error:", t), { success: !1, error: t.message };
   }
 }
-async function dr() {
+async function Sr() {
   try {
     const e = await fetch("https://leetcode.com/graphql", {
       method: "POST",
@@ -2413,101 +4889,101 @@ async function dr() {
     return { success: !1, error: e.message };
   }
 }
-async function Xe() {
+async function lt() {
   try {
-    const e = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), r = e.my_leetcode_username, t = e.user_timezone, s = await Fe(), a = r ? [.../* @__PURE__ */ new Set([r, ...s])] : s;
-    console.log(`[ServiceWorker] Syncing ${a.length} profile(s): ${a.join(", ")}`);
-    const o = [];
+    const e = await chrome.storage.local.get(["my_leetcode_username", "user_timezone"]), r = e.my_leetcode_username, t = e.user_timezone, s = await We(), i = r ? [.../* @__PURE__ */ new Set([r, ...s])] : s;
+    console.log(`[ServiceWorker] Syncing ${i.length} profile(s): ${i.join(", ")}`);
+    const a = [];
     if (r)
       try {
-        const n = await Me(r);
-        if (n && n.length > 0) {
-          const c = [];
-          for (const l of n)
-            o.push({
+        const o = await qe(r);
+        if (o && o.length > 0) {
+          const n = [];
+          for (const l of o)
+            a.push({
               type: "roast",
               username: l.sender_username,
               message: `${l.sender_username} roasted you: "${l.content}" 🔥`,
               priority: 2
-            }), l.status === "sent" && c.push(l.id);
-          c.length > 0 && await Tt(c);
+            }), l.status === "sent" && n.push(l.id);
+          n.length > 0 && await Dt(n);
         }
-        const i = await ee(r);
-        if (i?.pending_roasts && i.pending_roasts.length > 0) {
-          for (const c of i.pending_roasts)
-            o.push({
+        const c = await ee(r);
+        if (c?.pending_roasts && c.pending_roasts.length > 0) {
+          for (const n of c.pending_roasts)
+            a.push({
               type: "roast",
-              username: c.from,
-              message: `${c.from} roasted you: "${c.message}" 🔥`,
+              username: n.from,
+              message: `${n.from} roasted you: "${n.message}" 🔥`,
               priority: 2
             });
-          await xe();
+          await Ye();
         }
-      } catch (n) {
-        console.warn("[ServiceWorker] Error checking pending roasts:", n);
+      } catch (o) {
+        console.warn("[ServiceWorker] Error checking pending roasts:", o);
       }
-    for (const n of a)
+    for (const o of i)
       try {
-        const i = await de(n), c = await q(n), l = await z(c, t);
-        if (await fe(n, l), r && n.toLowerCase() === r.toLowerCase()) {
-          if (await te(l), Ye(l.allAcceptedSubmissions, l.submissionCalendar, t)) {
-            const u = P(Math.floor(Date.now() / 1e3), t);
+        const c = await ge(o), n = await G(o), l = await z(n, t);
+        if (await ye(o, l), r && o.toLowerCase() === r.toLowerCase()) {
+          if (await te(l), tt(l.allAcceptedSubmissions, l.submissionCalendar, t)) {
+            const u = N(Math.floor(Date.now() / 1e3), t);
             await chrome.storage.local.set({ last_solve_date: u });
           }
-          await $();
+          await O();
         }
-        if (!await je()) {
-          const u = await fr(n, i, l, r);
-          o.push(...u), r && n.toLowerCase() === r.toLowerCase() && Gt(l.allAcceptedSubmissions, l.stats.streak) && o.push({
+        if (!await st()) {
+          const u = await br(o, c, l, r);
+          a.push(...u), r && o.toLowerCase() === r.toLowerCase() && rr(l.allAcceptedSubmissions, l.stats.streak) && a.push({
             username: "You",
             type: "streak_at_risk",
-            message: zt("You", "streak_at_risk", { streak: l.stats.streak }),
+            message: sr("You", "streak_at_risk", { streak: l.stats.streak }),
             priority: 3
           });
         }
-        await et(Ke);
-      } catch (i) {
-        console.warn(`[ServiceWorker] Error syncing ${n}:`, i);
+        await dt(ct);
+      } catch (c) {
+        console.warn(`[ServiceWorker] Error syncing ${o}:`, c);
       }
-    o.length > 0 && await Ge(o);
+    a.length > 0 && await it(a);
   } catch (e) {
     console.error("[ServiceWorker] syncAllFriends error:", e);
   }
 }
-async function fr(e, r, t, s) {
-  const a = [];
+async function br(e, r, t, s) {
+  const i = [];
   if (s && e.toLowerCase() === s.toLowerCase())
-    return a;
+    return i;
   if (r?.stats && t?.stats) {
-    const o = r.stats.total || 0, n = t.stats.total || 0;
-    if (n > o) {
-      const i = n - o;
-      let c = "a problem";
-      t.recentSubmissions && t.recentSubmissions.length > 0 && (c = t.recentSubmissions[0].title || c), a.push({
+    const a = r.stats.total || 0, o = t.stats.total || 0;
+    if (o > a) {
+      const c = o - a;
+      let n = "a problem";
+      t.recentSubmissions && t.recentSubmissions.length > 0 && (n = t.recentSubmissions[0].title || n), i.push({
         username: e,
         type: "new_submission",
-        message: `${e} just solved ${i === 1 ? `"${c}"` : `${i} problems`}! 🎯`,
+        message: `${e} just solved ${c === 1 ? `"${n}"` : `${c} problems`}! 🎯`,
         priority: 1
       });
     }
   }
-  if (t.stats?.streak && jt(t.stats.streak)) {
-    const o = r?.stats?.streak || 0;
-    t.stats.streak > o && a.push({
+  if (t.stats?.streak && tr(t.stats.streak)) {
+    const a = r?.stats?.streak || 0;
+    t.stats.streak > a && i.push({
       username: e,
       type: "milestone",
       message: `${e} reached a ${t.stats.streak}-day streak! 🔥`,
       priority: 2
     });
   }
-  return a;
+  return i;
 }
 async function z(e, r = null) {
-  const { profile: t, contestRanking: s, submissionCalendar: a, allAcceptedSubmissions: o } = e, { currentStreak: n, longestStreak: i } = xt(
-    o || [],
-    a || {},
+  const { profile: t, contestRanking: s, submissionCalendar: i, allAcceptedSubmissions: a } = e, { currentStreak: o, longestStreak: c } = Qt(
+    a || [],
+    i || {},
     r
-  ), c = qt(t.submitStats?.acSubmissionNum);
+  ), n = Kt(t.submitStats?.acSubmissionNum);
   return {
     profile: {
       username: t.username,
@@ -2516,9 +4992,9 @@ async function z(e, r = null) {
       ranking: t.profile?.ranking || 0
     },
     stats: {
-      ...c,
-      streak: n,
-      longestStreak: i
+      ...n,
+      streak: o,
+      longestStreak: c
     },
     contest: {
       rating: Math.round(s?.rating || 0),
@@ -2527,65 +5003,144 @@ async function z(e, r = null) {
     },
     badges: t.badges || [],
     recentSubmissions: t.recentSubmissions || [],
-    allAcceptedSubmissions: o || [],
-    submissionCalendar: a || {},
+    allAcceptedSubmissions: a || [],
+    submissionCalendar: i || {},
     lastUpdated: Date.now()
   };
 }
-async function mr(e) {
+async function Er(e) {
   try {
     const r = await chrome.storage.local.get("my_leetcode_username"), t = e || r.my_leetcode_username;
     if (!t) return { success: !1, error: "No username configured" };
-    const [s, a] = await Promise.all([
-      X(t),
-      Mt(t, 10)
+    const [s, i] = await Promise.all([
+      Z(t),
+      Jt(t, 10)
     ]);
-    if (!s) return { success: !0, battle: null, history: a };
-    const o = await he(s.id);
-    return { success: !0, battle: s, results: o, history: a };
+    if (!s) return { success: !0, battle: null, history: i };
+    const a = await re(s.id);
+    return { success: !0, battle: s, results: a, history: i };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function hr(e, r, t) {
+async function Tr(e) {
   try {
-    const s = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), a = e || s.my_leetcode_username;
-    return a && s.own_profile && N(a, s.own_profile).catch(() => {
-    }), await Lt(a, r, t);
-  } catch (s) {
-    return { success: !1, error: s.message };
+    const r = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), t = e.challenger || r.my_leetcode_username;
+    return t && r.own_profile && P(t, r.own_profile).catch(() => {
+    }), await je(t, e.challenged, {
+      topics: e.topics,
+      difficulty: e.difficulty,
+      durationMinutes: e.durationMinutes,
+      problemCount: e.problemCount,
+      language: e.language || "javascript"
+    });
+  } catch (r) {
+    return { success: !1, error: r.message };
   }
 }
-async function _r(e, r, t) {
+async function Ar(e) {
   try {
-    const s = await chrome.storage.local.get("my_leetcode_username"), a = r || s.my_leetcode_username;
-    return await Ot(e, a, t);
-  } catch (s) {
-    return { success: !1, error: s.message };
+    return await Je(e);
+  } catch (r) {
+    return { success: !1, error: r.message };
   }
 }
-async function wr(e, r, t, s) {
+async function kr(e, r) {
   try {
-    const a = await chrome.storage.local.get("my_leetcode_username"), o = r || a.my_leetcode_username;
-    return await Ut(e, o, t, s);
-  } catch (a) {
-    return { success: !1, error: a.message };
-  }
-}
-async function gr(e, r) {
-  try {
-    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
-    return await Nt(e, s);
+    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username, i = await xt(e, s);
+    return i?.bothReady && Rr(e), i;
   } catch (t) {
     return { success: !1, error: t.message };
   }
 }
-async function yr(e) {
+async function Mr(e) {
+  try {
+    const t = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
+    return await Ft(e.battleId, e.problemSlug, {
+      submissionId: e.submissionId,
+      timeTakenMs: e.timeTakenMs,
+      runtimeMs: e.runtimeMs,
+      memoryMb: e.memoryMb,
+      language: e.language,
+      username: t
+    });
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function Cr(e) {
+  try {
+    const r = await ze(e);
+    return { success: !!r, state: r };
+  } catch (r) {
+    return { success: !1, error: r.message };
+  }
+}
+async function vr(e, r) {
+  try {
+    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
+    return await qt(e, s);
+  } catch (t) {
+    return { success: !1, error: t.message };
+  }
+}
+function Rr(e) {
+  setTimeout(async () => {
+    try {
+      const r = await ze(e);
+      if (!r?.problems?.length) return;
+      const t = r.problems[0], s = t.problem_url || `https://leetcode.com/problems/${t.problem_slug}/`, i = await chrome.tabs.query({ url: "*://leetcode.com/*" });
+      i.length > 0 ? (await chrome.tabs.update(i[0].id, { url: s, active: !0 }), i[0].windowId && await chrome.windows.update(i[0].windowId, { focused: !0 })) : await chrome.tabs.create({ url: s, active: !0 }), chrome.notifications && chrome.notifications.create(`battle_start_${e}`, {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "⚔️ Battle Started!",
+        message: `Duel is live! First problem: ${t.problem_title}`,
+        priority: 2
+      });
+    } catch (r) {
+      console.warn("[ServiceWorker] scheduleBattleStart error:", r);
+    }
+  }, 1e4);
+}
+async function Lr(e, r, t) {
+  try {
+    const s = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), i = e || s.my_leetcode_username;
+    return i && s.own_profile && P(i, s.own_profile).catch(() => {
+    }), await Gt(i, r, t);
+  } catch (s) {
+    return { success: !1, error: s.message };
+  }
+}
+async function Pr(e, r, t) {
+  try {
+    const s = await chrome.storage.local.get("my_leetcode_username"), i = r || s.my_leetcode_username;
+    return await Wt(e, i, t);
+  } catch (s) {
+    return { success: !1, error: s.message };
+  }
+}
+async function Dr(e, r, t, s) {
+  try {
+    const i = await chrome.storage.local.get("my_leetcode_username"), a = r || i.my_leetcode_username;
+    return await Yt(e, a, t, s);
+  } catch (i) {
+    return { success: !1, error: i.message };
+  }
+}
+async function Ir(e, r) {
+  try {
+    const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
+    return await Ve(e, s);
+  } catch (t) {
+    return { success: !1, error: t.message };
+  }
+}
+async function Nr(e) {
   try {
     const t = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
     if (!t) return { success: !1, error: "No username configured" };
-    const s = await X(t);
-    return s ? await It(s.id, t, {
+    const s = await Z(t);
+    return s ? await Qe(s.id, t, {
       submissionId: e.submissionId,
       accepted: e.accepted,
       runtime_ms: e.runtime_ms,
@@ -2598,56 +5153,56 @@ async function yr(e) {
     return { success: !1, error: r.message };
   }
 }
-async function pr(e, r) {
+async function Or(e, r) {
   try {
     const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
-    return await $t(e, s);
+    return await Ze(e, s);
   } catch (t) {
     return { success: !1, error: t.message };
   }
 }
-async function Sr(e, r) {
+async function Ur(e, r) {
   try {
     const t = await chrome.storage.local.get("my_leetcode_username"), s = r || t.my_leetcode_username;
-    return await Bt(e, s);
+    return await jt(e, s);
   } catch (t) {
     return { success: !1, error: t.message };
   }
 }
-async function Ze() {
+async function ut() {
   try {
     if (!(await A())?.user_id) return;
     const t = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
-    t && await Z(t, "online");
+    t && await X(t, "online");
   } catch (e) {
     console.warn("[ServiceWorker] handlePresenceHeartbeat error:", e);
   }
 }
-async function Er(e) {
+async function Br(e) {
   try {
     const r = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), t = e || r.my_leetcode_username;
-    return t && (N(t, r.own_profile || { profile: { realName: t } }).catch(() => {
-    }), await Z(t)), { success: !0 };
+    return t && (P(t, r.own_profile || { profile: { realName: t } }).catch(() => {
+    }), await X(t)), { success: !0 };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function br(e) {
+async function Hr(e) {
   try {
     if (!e?.length) return { success: !0, presenceMap: {} };
-    const r = await Ht(e);
+    const r = await zt(e);
     return { success: !0, presenceMap: Object.fromEntries(r) };
   } catch (r) {
     return { success: !1, error: r.message };
   }
 }
-async function Tr(e, r, t) {
+async function $r(e, r, t) {
   try {
-    return await Be(e, r, t) ? { success: !0 } : { success: await Ct(e, r, t) };
+    return await Fe(e, r, t) ? { success: !0 } : { success: await Ot(e, r, t) };
   } catch (s) {
     return { success: !1, error: s.message };
   }
 }
-function et(e) {
+function dt(e) {
   return new Promise((r) => setTimeout(r, e));
 }
