@@ -424,6 +424,7 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
     try {
       const resp = await chrome.runtime.sendMessage({
         type: 'BATTLE_CHALLENGE',
+        challenger: myUsername,
         challenged: selectedFriend,
         language: selectedLanguage
       });

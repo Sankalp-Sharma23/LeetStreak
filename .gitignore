@@ -46,6 +46,7 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+supabase/.temp/
 
 # Optional REPL history
 .node_repl_history

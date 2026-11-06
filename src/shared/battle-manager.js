@@ -13,7 +13,8 @@
  * (Terminal: COMPLETED, DECLINED, EXPIRED, CANCELLED, FORFEITED)
  */
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY, getAuthHeaders, getAuthSession, callRpc, getOnlineFriends as clientGetOnlineFriends } from './supabase-client.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, getAuthHeaders, getAuthSession, callRpc, upsertProfile, getOnlineFriends as clientGetOnlineFriends } from './supabase-client.js';
+import { getOwnProfile } from './storage.js';
 
 const BASE_URL = SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
 
@@ -85,16 +86,25 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     return { success: false, error: 'Cannot challenge yourself' };
   }
 
+  // Proactively ensure challenger's own profile is stored in Supabase profiles
+  try {
+    const ownData = await getOwnProfile();
+    if (challenger && ownData) {
+      await upsertProfile(challenger, ownData);
+    }
+  } catch {}
+
   // 1. Attempt atomic server-authoritative RPC
   try {
     const rpcRes = await callRpc('create_battle_challenge', {
       p_challenged_username: challenged.toLowerCase(),
-      p_language: language.toLowerCase()
+      p_language: language.toLowerCase(),
+      p_challenger_username: challenger.toLowerCase()
     });
     if (rpcRes && rpcRes.success && rpcRes.battle) {
       return { success: true, battle: rpcRes.battle };
     }
-    // Check if RPC function is missing from Supabase schema cache (PGRST202)
+    // Check if RPC function is missing (PGRST202) or challenger profile needs sync
     const isMissingFunction = rpcRes?.code === 'PGRST202' || (
       rpcRes?.error && typeof rpcRes.error === 'string' && (
         rpcRes.error.includes('PGRST202') ||
@@ -107,8 +117,12 @@ export async function createBattle(challenger, challenged, language = 'javascrip
         rpcRes.raw.includes('schema cache')
       )
     );
-    if (isMissingFunction) {
-      console.warn('[BattleManager] create_battle_challenge RPC not found in schema cache. Running REST fallback.');
+    const isProfileNotFound = rpcRes?.error && typeof rpcRes.error === 'string' && (
+      rpcRes.error.toLowerCase().includes('challenger profile not found')
+    );
+
+    if (isMissingFunction || isProfileNotFound) {
+      console.warn('[BattleManager] RPC fallback triggered (missing RPC or profile). Executing REST fallback.');
     } else if (rpcRes && rpcRes.error) {
       let cleanMsg = rpcRes.error;
       try {
@@ -136,8 +150,15 @@ export async function createBattle(challenger, challenged, language = 'javascrip
 
   const session = await getAuthSession();
   const profiles = await supabaseFetch(`profiles?leetcode_username=in.("${challenger.toLowerCase()}","${challenged.toLowerCase()}")&select=id,leetcode_username`);
-  const challengerProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenger.toLowerCase());
-  const challengedProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenged.toLowerCase());
+  let challengerProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenger.toLowerCase());
+  let challengedProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenged.toLowerCase());
+
+  // If challenger profile was missing, ensure it is created with session user_id
+  if (!challengerProfile && session?.user_id) {
+    const ownData = await getOwnProfile();
+    await upsertProfile(challenger, ownData || { profile: { realName: challenger } });
+    challengerProfile = { id: session.user_id, leetcode_username: challenger.toLowerCase() };
+  }
 
   const challengerId = session?.user_id || challengerProfile?.id;
   const challengedId = challengedProfile?.id;
@@ -681,8 +702,11 @@ export async function validateLeetCodeProblem(slugOrUrl) {
 export async function updatePresence(username, status = 'online') {
   if (!username || !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return;
   try {
-    // 1. Try atomic server-side heartbeat RPC
-    const rpcRes = await callRpc('heartbeat_presence', { p_status: status });
+    // 1. Try atomic server-side heartbeat RPC with username auto-provisioning
+    const rpcRes = await callRpc('heartbeat_presence', {
+      p_status: status,
+      p_username: username.toLowerCase()
+    });
     if (rpcRes && rpcRes.success) return;
 
     // 2. Direct upsert fallback with session user_id

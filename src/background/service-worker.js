@@ -40,7 +40,8 @@ import {
   syncFriendship,
   syncFriendships,
   removeFriendship,
-  restoreAccountSocialData
+  restoreAccountSocialData,
+  upsertProfile
 } from '../shared/supabase-client.js';
 import {
   createBattle,
@@ -919,8 +920,11 @@ async function handleBattleGetStatus(usernameOverride) {
 
 async function handleBattleChallenge(challengerOverride, challenged, language) {
   try {
-    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
     const challenger = challengerOverride || stored.my_leetcode_username;
+    if (challenger && stored.own_profile) {
+      upsertProfile(challenger, stored.own_profile).catch(() => {});
+    }
     return await createBattle(challenger, challenged, language);
   } catch (err) {
     return { success: false, error: err.message };

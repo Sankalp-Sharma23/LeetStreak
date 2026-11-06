@@ -354,7 +354,10 @@ END $$;
 -- ============================================================================
 
 -- 6.1 HEARTBEAT PRESENCE
-CREATE OR REPLACE FUNCTION public.heartbeat_presence(p_status TEXT DEFAULT 'online')
+CREATE OR REPLACE FUNCTION public.heartbeat_presence(
+    p_status TEXT DEFAULT 'online',
+    p_username TEXT DEFAULT NULL
+)
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -377,7 +380,17 @@ BEGIN
     WHERE id = v_user_id;
 
     IF v_username IS NULL THEN
-        RETURN jsonb_build_object('success', false, 'error', 'Profile not found');
+        IF p_username IS NOT NULL AND length(trim(p_username)) > 0 THEN
+            INSERT INTO public.profiles (
+                id, leetcode_username, display_name, created_at, last_synced_at
+            ) VALUES (
+                v_user_id, LOWER(trim(p_username)), p_username, now(), now()
+            )
+            ON CONFLICT (id) DO UPDATE SET leetcode_username = EXCLUDED.leetcode_username, last_synced_at = now();
+            v_username := LOWER(trim(p_username));
+        ELSE
+            RETURN jsonb_build_object('success', false, 'error', 'Profile not found');
+        END IF;
     END IF;
 
     SELECT id INTO v_active_battle_id
@@ -707,7 +720,8 @@ $$;
 -- 6.7 ATOMIC BATTLE CHALLENGE
 CREATE OR REPLACE FUNCTION public.create_battle_challenge(
     p_challenged_username TEXT, 
-    p_language TEXT DEFAULT 'javascript'
+    p_language TEXT DEFAULT 'javascript',
+    p_challenger_username TEXT DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -732,8 +746,19 @@ BEGIN
     FROM public.profiles
     WHERE id = v_challenger_id;
 
+    -- If challenger profile is not yet in public.profiles, auto-provision it
     IF v_challenger_username IS NULL THEN
-        RETURN jsonb_build_object('success', false, 'error', 'Challenger profile not found');
+        IF p_challenger_username IS NOT NULL AND length(trim(p_challenger_username)) > 0 THEN
+            INSERT INTO public.profiles (
+                id, leetcode_username, display_name, created_at, last_synced_at
+            ) VALUES (
+                v_challenger_id, LOWER(trim(p_challenger_username)), p_challenger_username, now(), now()
+            )
+            ON CONFLICT (id) DO UPDATE SET leetcode_username = EXCLUDED.leetcode_username, last_synced_at = now();
+            v_challenger_username := LOWER(trim(p_challenger_username));
+        ELSE
+            RETURN jsonb_build_object('success', false, 'error', 'Challenger profile not found');
+        END IF;
     END IF;
 
     SELECT id INTO v_challenged_id
