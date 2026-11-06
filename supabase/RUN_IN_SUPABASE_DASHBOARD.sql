@@ -1817,5 +1817,7 @@ ON CONFLICT (user_id) DO UPDATE SET
     status    = 'online',
     in_battle = false;
 
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated, anon;
+
 -- 7. NOTIFY POSTGREST TO RELOAD SCHEMA CACHE
 NOTIFY pgrst, 'reload schema';

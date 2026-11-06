@@ -294,6 +294,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'BATTLE_ACCEPT_V2':
+    case 'BATTLE_ACCEPT':
       handleBattleAcceptV2(message.battleId).then(sendResponse);
       return true;
 
@@ -1099,6 +1100,10 @@ async function handleBattleRespond(battleId, usernameOverride, accept) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
+    if (accept) {
+      const v2Res = await handleBattleAcceptV2(battleId);
+      if (v2Res && v2Res.success !== false) return v2Res;
+    }
     return await respondToBattle(battleId, username, accept);
   } catch (err) {
     return { success: false, error: err.message };
@@ -1119,6 +1124,8 @@ async function handleBattleReady(battleId, usernameOverride) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
+    const v2Res = await handleBattleReadyV2(battleId, username);
+    if (v2Res && v2Res.success !== false) return v2Res;
     return await confirmReady(battleId, username);
   } catch (err) {
     return { success: false, error: err.message };

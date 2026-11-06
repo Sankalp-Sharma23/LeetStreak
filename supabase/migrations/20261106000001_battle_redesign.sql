@@ -879,7 +879,140 @@ ON CONFLICT (user_id) DO UPDATE SET
     in_battle = false;
 
 -- ─────────────────────────────────────────────────────────────
--- 15. Reload PostgREST schema cache
+-- 15. Presence RPCs (Heartbeat & Multi-user status resolution)
+-- ─────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.heartbeat_presence(
+    p_status TEXT DEFAULT 'online',
+    p_username TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_user_id UUID := auth.uid();
+    v_username TEXT;
+    v_now TIMESTAMPTZ := now();
+    v_in_battle BOOLEAN := FALSE;
+    v_active_battle_id UUID := NULL;
+    v_effective_status TEXT := COALESCE(p_status, 'online');
+BEGIN
+    IF v_user_id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Authentication required');
+    END IF;
+
+    SELECT leetcode_username INTO v_username
+    FROM public.profiles
+    WHERE id = v_user_id;
+
+    IF v_username IS NULL THEN
+        IF p_username IS NOT NULL AND length(trim(p_username)) > 0 THEN
+            INSERT INTO public.profiles (
+                id, leetcode_username, display_name, created_at, last_synced_at
+            ) VALUES (
+                v_user_id, LOWER(trim(p_username)), p_username, now(), now()
+            )
+            ON CONFLICT (id) DO UPDATE SET leetcode_username = EXCLUDED.leetcode_username, last_synced_at = now();
+            v_username := LOWER(trim(p_username));
+        ELSE
+            RETURN jsonb_build_object('success', false, 'error', 'Profile not found');
+        END IF;
+    END IF;
+
+    SELECT id INTO v_active_battle_id
+    FROM public.battles
+    WHERE (challenger_id = v_user_id OR challenged_id = v_user_id)
+      AND status IN ('pending', 'accepted', 'selecting', 'ready_check', 'countdown', 'in_progress')
+    ORDER BY created_at DESC
+    LIMIT 1;
+
+    IF v_active_battle_id IS NOT NULL THEN
+        v_in_battle := TRUE;
+        v_effective_status := 'in_battle';
+    END IF;
+
+    INSERT INTO public.user_presence (
+        user_id, username, last_seen, status, in_battle, active_battle_id
+    ) VALUES (
+        v_user_id, LOWER(v_username), v_now, v_effective_status, v_in_battle, v_active_battle_id
+    )
+    ON CONFLICT (user_id)
+    DO UPDATE SET
+        username = EXCLUDED.username,
+        last_seen = v_now,
+        status = EXCLUDED.status,
+        in_battle = EXCLUDED.in_battle,
+        active_battle_id = EXCLUDED.active_battle_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'user_id', v_user_id,
+        'username', LOWER(v_username),
+        'status', v_effective_status,
+        'in_battle', v_in_battle,
+        'active_battle_id', v_active_battle_id,
+        'last_seen', v_now
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_friends_presence(p_usernames TEXT[] DEFAULT NULL)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_user_id UUID := auth.uid();
+    v_stale_threshold TIMESTAMPTZ := now() - interval '120 seconds';
+    v_result JSONB := '{}'::jsonb;
+    v_row RECORD;
+BEGIN
+    FOR v_row IN
+        SELECT 
+            p.leetcode_username,
+            p.id AS user_id,
+            up.last_seen,
+            CASE
+                WHEN up.last_seen IS NULL OR up.last_seen < v_stale_threshold THEN 'offline'
+                WHEN b.id IS NOT NULL THEN 'in_battle'
+                WHEN up.status = 'in_battle' THEN 'in_battle'
+                ELSE 'online'
+            END AS effective_status,
+            (b.id IS NOT NULL) AS is_in_battle
+        FROM public.profiles p
+        LEFT JOIN public.user_presence up ON up.user_id = p.id
+        LEFT JOIN public.battles b ON (
+            (b.challenger_id = p.id OR b.challenged_id = p.id)
+            AND b.status IN ('pending', 'accepted', 'selecting', 'ready_check', 'countdown', 'in_progress')
+        )
+        WHERE (p_usernames IS NULL OR LOWER(p.leetcode_username) = ANY(
+            SELECT LOWER(u) FROM unnest(p_usernames) AS u
+        ))
+    LOOP
+        v_result := jsonb_set(
+            v_result,
+            ARRAY[v_row.leetcode_username],
+            jsonb_build_object(
+                'status', v_row.effective_status,
+                'isOnline', v_row.effective_status != 'offline',
+                'inBattle', v_row.is_in_battle,
+                'last_seen', v_row.last_seen
+            )
+        );
+    END LOOP;
+
+    RETURN v_result;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.heartbeat_presence(TEXT, TEXT) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.get_friends_presence(TEXT[]) TO authenticated, anon;
+
+-- ─────────────────────────────────────────────────────────────
+-- 16. Reload PostgREST schema cache
 -- ─────────────────────────────────────────────────────────────
 
 NOTIFY pgrst, 'reload schema';
