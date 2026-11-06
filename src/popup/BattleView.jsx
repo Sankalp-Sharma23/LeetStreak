@@ -114,10 +114,17 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
   const [authMode, setAuthMode] = useState('signin'); // 'signin' | 'signup'
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authUsername, setAuthUsername] = useState(myUsername || '');
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState('');
   const [authSuccessMsg, setAuthSuccessMsg] = useState('');
   const [authCooldown, setAuthCooldown] = useState(0);
+
+  useEffect(() => {
+    if (!authUsername && myUsername) {
+      setAuthUsername(myUsername);
+    }
+  }, [myUsername]);
 
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -162,14 +169,25 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
       return;
     }
 
+    if (authMode === 'signup') {
+      const u = (authUsername || myUsername || '').trim();
+      if (!u) {
+        setAuthError('Please enter your LeetCode username.');
+        return;
+      }
+    }
+
     setAuthSubmitting(true);
+    const effectiveUsername = (authUsername || myUsername || '').trim();
+
     try {
       if (authMode === 'signin') {
         const res = await new Promise(resolve => {
           chrome.runtime.sendMessage({
             type: 'SIGN_IN_EMAIL',
             email: authEmail.trim(),
-            password: authPassword
+            password: authPassword,
+            username: effectiveUsername
           }, resolve);
         });
 
@@ -188,7 +206,8 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
           chrome.runtime.sendMessage({
             type: 'SIGN_UP_EMAIL',
             email: authEmail.trim(),
-            password: authPassword
+            password: authPassword,
+            username: effectiveUsername
           }, resolve);
         });
 
@@ -605,6 +624,21 @@ function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = 
 
         {/* Form */}
         <form onSubmit={handleAuthSubmit} className="w-full max-w-xs space-y-2.5 text-left">
+          {authMode === 'signup' && (
+            <div>
+              <label className="block text-[11px] font-semibold text-text-muted mb-1">LeetCode Username</label>
+              <input
+                type="text"
+                placeholder="e.g. tour_de_code"
+                value={authUsername}
+                onChange={(e) => setAuthUsername(e.target.value)}
+                disabled={authSubmitting}
+                required
+                className="w-full px-3 py-2 bg-surface/80 border border-surfaceHover/60 rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all"
+              />
+            </div>
+          )}
+
           <div>
             <label className="block text-[11px] font-semibold text-text-muted mb-1">Email Address</label>
             <input

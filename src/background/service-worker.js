@@ -371,9 +371,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Survives extension uninstall, browser change, or local cache clearing.
             await restoreAccountSocialData();
 
-            const stored = await chrome.storage.local.get(['my_leetcode_username']);
-            if (stored.my_leetcode_username) {
-              await updatePresence(stored.my_leetcode_username, 'online');
+            if (message.username) {
+              await chrome.storage.local.set({ my_leetcode_username: message.username });
+            }
+
+            const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
+            const effectiveUser = message.username || stored.my_leetcode_username;
+            if (effectiveUser) {
+              await upsertProfile(effectiveUser, stored.own_profile || { profile: { realName: effectiveUser } });
+              await updatePresence(effectiveUser, 'online');
             }
           } catch (restoreErr) {
             console.warn('[ServiceWorker] Social account restore error:', restoreErr);
@@ -391,7 +397,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'SIGN_UP_EMAIL':
       signUpWithEmail(message.email, message.password)
-        .then(result => sendResponse(result))
+        .then(async result => {
+          if (message.username) {
+            await chrome.storage.local.set({ my_leetcode_username: message.username });
+          }
+          if (result?.session && result.session.user_id) {
+            try {
+              const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
+              const effectiveUser = message.username || stored.my_leetcode_username;
+              if (effectiveUser) {
+                await upsertProfile(effectiveUser, stored.own_profile || { profile: { realName: effectiveUser } });
+                await updatePresence(effectiveUser, 'online');
+              }
+            } catch (syncErr) {
+              console.warn('[ServiceWorker] Sign up profile sync error:', syncErr);
+            }
+          }
+          sendResponse(result);
+        })
         .catch(err => sendResponse({ success: false, error: err.message, isRateLimited: isAuthRateLimited() }));
       return true;
 
@@ -1020,9 +1043,13 @@ async function handlePresenceHeartbeat() {
 
 async function handleBattlePingPresence(usernameOverride) {
   try {
-    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
     const username = usernameOverride || stored.my_leetcode_username;
-    if (username) await updatePresence(username);
+    if (username) {
+      // Proactively ensure profile is populated on Supabase whenever battle presence is pinged
+      upsertProfile(username, stored.own_profile || { profile: { realName: username } }).catch(() => {});
+      await updatePresence(username);
+    }
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };

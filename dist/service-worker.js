@@ -47,7 +47,7 @@ async function ct(e, r = {}) {
   const t = await fetch(e, r), s = nt(e, t);
   return s.valid || console.error(`[SecurityAuditor] Security policy failed: ${s.reason}`), t;
 }
-const V = "https://leetcode.com/graphql", it = 2, re = 6e3, pe = new at(30, 6e4);
+const V = "https://leetcode.com/graphql", it = 2, se = 6e3, pe = new at(30, 6e4);
 function Se(e) {
   return new Promise((r) => setTimeout(r, e));
 }
@@ -61,7 +61,7 @@ async function lt(e, r, t = it) {
     try {
       if (typeof navigator < "u" && !navigator.onLine)
         throw new Error("No internet connection. Please check your network.");
-      const o = new AbortController(), n = setTimeout(() => o.abort(), re), i = await ct(e, {
+      const o = new AbortController(), n = setTimeout(() => o.abort(), se), i = await ct(e, {
         ...r,
         signal: o.signal
       });
@@ -72,7 +72,7 @@ async function lt(e, r, t = it) {
       }
       return i;
     } catch (o) {
-      if (s = o, o.name === "AbortError" && (console.error(`[API] Request timeout (${re}ms)`), s = new Error(`Request timed out after ${re / 1e3} seconds`)), o.message.includes("No internet connection"))
+      if (s = o, o.name === "AbortError" && (console.error(`[API] Request timeout (${se}ms)`), s = new Error(`Request timed out after ${se / 1e3} seconds`)), o.message.includes("No internet connection"))
         throw o;
       if (a < t - 1) {
         const n = Math.pow(2, a) * 1e3;
@@ -136,7 +136,7 @@ const ut = `
     }
   }
 `;
-async function x(e) {
+async function q(e) {
   try {
     console.log(`[API] Fetching data for user: ${e}`);
     const r = await lt(V, {
@@ -224,35 +224,35 @@ async function x(e) {
     throw console.error("Error fetching LeetCode data:", r), r;
   }
 }
-const Ee = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Ue = typeof import.meta < "u" && Ee ? Ee : typeof process < "u" && process.env ? process.env : {}, h = Ue.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", H = Ue.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", E = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), f = {
+const Ee = { VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6c2xkY2pncGlvZHp1aXZyYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1NDYwODMsImV4cCI6MjEwMzEyMjA4M30.TuPkW7jnn9rScS2FhH1A8omsSIpABs6MEKfRbX1lzYU", VITE_SUPABASE_URL: "https://pzsldcjgpiodzuivrbwt.supabase.co" }, Ue = typeof import.meta < "u" && Ee ? Ee : typeof process < "u" && process.env ? process.env : {}, h = Ue.VITE_SUPABASE_URL || "YOUR_SUPABASE_PROJECT_URL_HERE", F = Ue.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY_HERE", E = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), f = {
   SESSION_LOADING: "SESSION_LOADING",
   AUTHENTICATED: "AUTHENTICATED",
   AUTH_REQUIRED: "AUTH_REQUIRED",
   SESSION_EXPIRED: "SESSION_EXPIRED",
   AUTH_ERROR: "AUTH_ERROR"
 };
-let L = null, se = f.SESSION_LOADING, be = null, q = 0;
+let L = null, ae = f.SESSION_LOADING, be = null, W = 0;
 const ht = /* @__PURE__ */ new Set();
 function w(e, r = null) {
-  se = e, be = r;
+  ae = e, be = r;
   for (const t of ht)
     try {
-      t(se, L, be);
+      t(ae, L, be);
     } catch (s) {
       console.warn("[SupabaseClient] Error in auth listener callback:", s);
     }
 }
 function O() {
-  return se;
+  return ae;
 }
-function M() {
-  return Date.now() < q;
+function H() {
+  return Date.now() < W;
 }
-function ce() {
-  return Math.max(0, Math.ceil((q - Date.now()) / 1e3));
+function ie() {
+  return Math.max(0, Math.ceil((W - Date.now()) / 1e3));
 }
-function ie(e = 60) {
-  q = Date.now() + e * 1e3, typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ supabase_auth_cooldown_until: q }).catch(() => {
+function le(e = 60) {
+  W = Date.now() + e * 1e3, typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ supabase_auth_cooldown_until: W }).catch(() => {
   });
 }
 async function b() {
@@ -267,7 +267,7 @@ async function b() {
     }
   return null;
 }
-async function F(e) {
+async function x(e) {
   if (L = e, typeof chrome < "u" && chrome.storage?.local)
     try {
       e ? await chrome.storage.local.set({ supabase_auth_session: e }) : await chrome.storage.local.remove(["supabase_auth_session"]);
@@ -280,7 +280,7 @@ async function _t() {
     let e = null;
     if (typeof chrome < "u" && chrome.storage?.local) {
       const r = await chrome.storage.local.get(["supabase_auth_session", "supabase_auth_cooldown_until"]);
-      r.supabase_auth_cooldown_until && r.supabase_auth_cooldown_until > Date.now() && (q = r.supabase_auth_cooldown_until), e = r.supabase_auth_session;
+      r.supabase_auth_cooldown_until && r.supabase_auth_cooldown_until > Date.now() && (W = r.supabase_auth_cooldown_until), e = r.supabase_auth_session;
     } else
       e = L;
     if (!e)
@@ -288,33 +288,33 @@ async function _t() {
     if (e.expires_at && e.expires_at > Date.now() + 6e4)
       return L = e, w(f.AUTHENTICATED), L;
     if (e.refresh_token) {
-      if (M())
+      if (H())
         return w(f.AUTH_ERROR, "Authentication temporarily rate-limited. Please wait."), null;
       const r = await wt(e.refresh_token);
       if (r)
         return r;
     }
-    return await F(null), w(f.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
+    return await x(null), w(f.SESSION_EXPIRED, "Session expired. Please sign in again."), null;
   } catch (e) {
     return console.warn("[SupabaseClient] Error restoring session:", e), w(f.AUTH_ERROR, e.message), null;
   }
 }
 async function wt(e) {
-  if (M())
+  if (H())
     return w(f.AUTH_ERROR, "Rate limited"), null;
   try {
     const r = await fetch(`${E}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: H
+        apikey: F
       },
       body: JSON.stringify({ refresh_token: e })
     });
     if (r.status === 429)
-      return ie(60), w(f.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
+      return le(60), w(f.AUTH_ERROR, "Supabase authentication rate limit exceeded."), null;
     if (!r.ok)
-      return await F(null), w(f.SESSION_EXPIRED, "Session expired or revoked."), null;
+      return await x(null), w(f.SESSION_EXPIRED, "Session expired or revoked."), null;
     const t = await r.json(), s = {
       access_token: t.access_token,
       refresh_token: t.refresh_token,
@@ -322,14 +322,14 @@ async function wt(e) {
       email: t.user?.email,
       expires_at: Date.now() + (t.expires_in ? t.expires_in * 1e3 : 3600 * 1e3)
     };
-    return await F(s), w(f.AUTHENTICATED), s;
+    return await x(s), w(f.AUTHENTICATED), s;
   } catch (r) {
     return console.warn("[SupabaseClient] Network error during token refresh:", r), w(f.AUTH_ERROR, r.message), null;
   }
 }
 async function gt(e, r) {
-  if (M()) {
-    const t = ce();
+  if (H()) {
+    const t = ie();
     throw new Error(`Rate limit cooldown active. Please wait ${t} seconds.`);
   }
   if (!e || !r)
@@ -339,12 +339,12 @@ async function gt(e, r) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: H
+        apikey: F
       },
       body: JSON.stringify({ email: e, password: r })
     });
     if (t.status === 429)
-      throw ie(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
+      throw le(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email rate limit exceeded. Please wait 1 minute before retrying.");
     if (!t.ok) {
       const o = await t.text();
       let n = "Invalid email or password";
@@ -362,14 +362,14 @@ async function gt(e, r) {
       email: s.user?.email || e,
       expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 3600 * 1e3)
     };
-    return await F(a), w(f.AUTHENTICATED), a;
+    return await x(a), w(f.AUTHENTICATED), a;
   } catch (t) {
     throw w(f.AUTH_ERROR, t.message), t;
   }
 }
 async function yt(e, r) {
-  if (M()) {
-    const t = ce();
+  if (H()) {
+    const t = ie();
     throw new Error(`Rate limit cooldown active. Please wait ${t} seconds.`);
   }
   if (!e || !r)
@@ -379,12 +379,12 @@ async function yt(e, r) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: H
+        apikey: F
       },
       body: JSON.stringify({ email: e, password: r })
     });
     if (t.status === 429)
-      throw ie(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
+      throw le(60), w(f.AUTH_ERROR, "Rate limit exceeded"), new Error("Email signup rate limit exceeded. Please wait before retrying.");
     if (!t.ok) {
       const a = await t.text();
       let o = "Failed to create account";
@@ -404,7 +404,7 @@ async function yt(e, r) {
         email: s.user?.email || e,
         expires_at: Date.now() + (s.expires_in ? s.expires_in * 1e3 : 36e5)
       };
-      return await F(a), w(f.AUTHENTICATED), { success: !0, session: a };
+      return await x(a), w(f.AUTHENTICATED), { success: !0, session: a };
     }
     return w(f.AUTH_REQUIRED), {
       success: !0,
@@ -423,20 +423,20 @@ async function pt() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: H,
+        apikey: F,
         Authorization: `Bearer ${e.access_token}`
       }
     }).catch(() => {
     });
   } catch {
   }
-  return await F(null), w(f.AUTH_REQUIRED), { success: !0 };
+  return await x(null), w(f.AUTH_REQUIRED), { success: !0 };
 }
 async function R() {
-  const r = (await b())?.access_token || H;
+  const r = (await b())?.access_token || F;
   return {
     "Content-Type": "application/json",
-    apikey: H,
+    apikey: F,
     Authorization: `Bearer ${r}`,
     Prefer: "return=representation"
   };
@@ -483,7 +483,7 @@ async function Ie(e) {
     return console.error("Supabase getProfile error:", r), null;
   }
 }
-async function W(e, r) {
+async function I(e, r) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return !1;
   try {
     const t = await b();
@@ -515,7 +515,7 @@ async function W(e, r) {
     return console.error("Supabase upsertProfile error:", t), !1;
   }
 }
-async function Z() {
+async function ee() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return null;
   try {
     const e = await b();
@@ -570,7 +570,7 @@ async function Et() {
     return console.warn("[SupabaseClient] getOnlineFriends error:", e), [];
   }
 }
-async function le(e) {
+async function ue(e) {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE" || !e) return { success: !1 };
   try {
     return await T("sync_friendship", { p_target_username: e.toLowerCase() }) || { success: !1 };
@@ -613,7 +613,7 @@ async function bt() {
     return console.error("[SupabaseClient] getOwnProfile error:", e), null;
   }
 }
-async function ae() {
+async function oe() {
   if (h === "YOUR_SUPABASE_PROJECT_URL_HERE") return { success: !1 };
   try {
     if (!(await b())?.user_id)
@@ -679,7 +679,7 @@ async function ae() {
       );
       if (c.length > 0)
         for (const l of c)
-          le(l).catch(() => {
+          ue(l).catch(() => {
           });
     }
     return {
@@ -792,7 +792,7 @@ async function Y() {
     return console.error("Error reading own profile from storage:", e), null;
   }
 }
-async function ee(e) {
+async function te(e) {
   if (typeof chrome > "u" || !chrome.storage?.local) return !1;
   try {
     await chrome.storage.local.set({
@@ -800,7 +800,7 @@ async function ee(e) {
       last_own_profile_sync: Date.now()
     });
     const r = await Q();
-    return r && O() === f.AUTHENTICATED && W(r, e).catch((t) => {
+    return r && O() === f.AUTHENTICATED && I(r, e).catch((t) => {
       console.warn("[Storage] Cloud sync for own profile failed (non-blocking):", t);
     }), !0;
   } catch (r) {
@@ -849,7 +849,7 @@ async function K() {
     return console.error("Error getting friends:", e), {};
   }
 }
-async function ue(e) {
+async function de(e) {
   if (!e) return null;
   try {
     const r = await Q();
@@ -868,12 +868,12 @@ async function ue(e) {
     return console.error("Error getting single friend:", r), null;
   }
 }
-async function de(e, r) {
+async function fe(e, r) {
   if (!e || !r) return { success: !1 };
   try {
     const t = await Q();
     if (t && e.toLowerCase() === t.toLowerCase())
-      return await ee(r), { success: !0 };
+      return await te(r), { success: !0 };
     if (typeof chrome < "u" && chrome.storage?.local) {
       const a = await chrome.storage.local.get(["friends_cache", "friends_list"]), o = a.friends_cache || {}, n = a.friends_list || [];
       o[e] = r;
@@ -883,8 +883,8 @@ async function de(e, r) {
         friends_list: i
       });
     }
-    return O() === f.AUTHENTICATED && (W(e, r).catch(() => {
-    }), t && Z().then((a) => {
+    return O() === f.AUTHENTICATED && (I(e, r).catch(() => {
+    }), t && ee().then((a) => {
       const o = a?.friends_list || [];
       o.includes(e) || Ne({ friends_list: [...o, e] }).catch(() => {
       });
@@ -907,7 +907,7 @@ async function kt(e) {
       });
     }
     return O() === f.AUTHENTICATED && (Pe(e).catch(() => {
-    }), Z().then((r) => {
+    }), ee().then((r) => {
       if (r?.friends_list) {
         const t = r.friends_list.filter((s) => s.toLowerCase() !== e.toLowerCase());
         Ne({ friends_list: t }).catch(() => {
@@ -927,7 +927,7 @@ async function Fe() {
         return e.friends_list;
     }
     if (O() === f.AUTHENTICATED) {
-      const e = await Z();
+      const e = await ee();
       if (e?.friends_list)
         return typeof chrome < "u" && chrome.storage?.local && chrome.storage.local.set({ friends_list: e.friends_list }).catch(() => {
         }), e.friends_list;
@@ -944,7 +944,7 @@ async function xe() {
   const e = await Q();
   return e ? await He(e) : !1;
 }
-const Rt = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), fe = /* @__PURE__ */ new Set([
+const Rt = h.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""), me = /* @__PURE__ */ new Set([
   "completed",
   "declined",
   "expired",
@@ -980,7 +980,7 @@ async function Lt(e, r, t = "javascript") {
     return { success: !1, error: "Cannot challenge yourself" };
   try {
     const d = await Y();
-    e && d && await W(e, d);
+    e && d && await I(e, d);
   } catch {
   }
   try {
@@ -1018,7 +1018,7 @@ async function Lt(e, r, t = "javascript") {
   let i = n?.find((d) => d.leetcode_username.toLowerCase() === e.toLowerCase()), c = n?.find((d) => d.leetcode_username.toLowerCase() === r.toLowerCase());
   if (!i && o?.user_id) {
     const d = await Y();
-    await W(e, d || { profile: { realName: e } }), i = { id: o.user_id, leetcode_username: e.toLowerCase() };
+    await I(e, d || { profile: { realName: e } }), i = { id: o.user_id, leetcode_username: e.toLowerCase() };
   }
   const l = o?.user_id || i?.id, u = c?.id, _ = Date.now(), y = new Date(_ + Dt * 1e3).toISOString(), g = {
     challenger_username: e,
@@ -1036,21 +1036,21 @@ async function Lt(e, r, t = "javascript") {
 }
 async function X(e) {
   if (!e) return null;
-  const r = Array.from(fe).join(","), t = e.toLowerCase(), s = await A(
+  const r = Array.from(me).join(","), t = e.toLowerCase(), s = await A(
     `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=not.in.(${r})&order=created_at.desc&limit=1`
   );
   return s && s.length > 0 ? s[0] : null;
 }
-async function I(e) {
+async function N(e) {
   if (!e) return null;
   const r = await A(`battles?id=eq.${e}&select=*`);
   return r && r.length > 0 ? r[0] : null;
 }
-async function me(e) {
+async function he(e) {
   return e ? await A(`battle_results?battle_id=eq.${e}&select=*`) || [] : [];
 }
 async function Ot(e, r, t) {
-  const s = await I(e);
+  const s = await N(e);
   if (!s) return { success: !1, error: "Battle not found" };
   if ((s.challenged_username || s.challenged).toLowerCase() !== r.toLowerCase())
     return { success: !1, error: "You are not the invited opponent for this battle" };
@@ -1070,7 +1070,7 @@ async function Ot(e, r, t) {
   return !n || n.length === 0 ? { success: !1, error: "Failed to accept battle" } : { success: !0, battle: n[0] };
 }
 async function Ut(e, r, t, s) {
-  const a = await I(e);
+  const a = await N(e);
   if (!a) return { success: !1, error: "Battle not found" };
   if (a.status !== S.SELECTING)
     return { success: !1, error: "Battle is not in the problem selection phase" };
@@ -1103,8 +1103,8 @@ async function Ut(e, r, t, s) {
 async function It(e, r) {
   const t = await T("confirm_battle_ready", { p_battle_id: e });
   if (t && t.success)
-    return { success: !0, battle: await I(e), bothReady: t.status === S.COUNTDOWN };
-  const s = await I(e);
+    return { success: !0, battle: await N(e), bothReady: t.status === S.COUNTDOWN };
+  const s = await N(e);
   if (!s) return { success: !1, error: "Battle not found" };
   const o = (s.challenger_username || s.challenger).toLowerCase() === r.toLowerCase(), n = o ? { challenger_ready: !0 } : { challenged_ready: !0 }, i = o ? s.challenged_ready : s.challenger_ready;
   if (i) {
@@ -1131,9 +1131,9 @@ async function Nt(e, r, t) {
     memory_mb: i,
     language: c,
     timeTakenSeconds: l
-  } = t, u = await I(e);
+  } = t, u = await N(e);
   if (!u) return { success: !1, error: "Battle not found" };
-  if (fe.has(u.status))
+  if (me.has(u.status))
     return { success: !1, error: `Battle is already closed (${u.status})` };
   const _ = u.match_starts_at ? new Date(u.match_starts_at).getTime() : Date.now(), y = l ?? Math.max(0, Math.floor((Date.now() - _) / 1e3)), g = await T("record_battle_submission", {
     p_battle_id: e,
@@ -1170,9 +1170,9 @@ async function Pt(e) {
   const r = await T("evaluate_and_finalize_battle", { p_battle_id: e });
   if (r && r.finalized)
     return r;
-  const t = await I(e);
-  if (!t || fe.has(t.status)) return null;
-  const s = await me(e), a = t.challenger_username || t.challenger, o = t.challenged_username || t.challenged;
+  const t = await N(e);
+  if (!t || me.has(t.status)) return null;
+  const s = await he(e), a = t.challenger_username || t.challenger, o = t.challenged_username || t.challenged;
   let n = 0, i = 0, c = 0, l = 0, u = !1, _ = !1, y = !1, g = !1;
   for (const m of s)
     m.accepted && (m.username.toLowerCase() === a.toLowerCase() ? (n += m.points || 1, c += m.time_taken_seconds || 0, m.problem_slug === t.problem_1 && (u = !0), m.problem_slug === t.problem_2 && (_ = !0)) : m.username.toLowerCase() === o.toLowerCase() && (i += m.points || 1, l += m.time_taken_seconds || 0, m.problem_slug === t.problem_1 && (y = !0), m.problem_slug === t.problem_2 && (g = !0)));
@@ -1191,7 +1191,7 @@ async function $t(e, r) {
   const t = await T("forfeit_battle", { p_battle_id: e });
   if (t && t.success)
     return t;
-  const s = await I(e);
+  const s = await N(e);
   if (!s) return { success: !1, error: "Battle not found" };
   const a = s.challenger_username || s.challenger, o = s.challenged_username || s.challenged, n = a.toLowerCase() === r.toLowerCase() ? o : a;
   return await j(e, S.FORFEITED, {
@@ -1201,7 +1201,7 @@ async function $t(e, r) {
   }), { success: !0, winner: n };
 }
 async function Bt(e, r) {
-  const t = await I(e);
+  const t = await N(e);
   return t ? (t.challenger_username || t.challenger).toLowerCase() !== r.toLowerCase() ? { success: !1, error: "Only the challenger can cancel a pending match" } : t.status !== S.PENDING ? { success: !1, error: "Can only cancel pending challenges" } : (await j(e, S.CANCELLED), { success: !0 }) : { success: !1, error: "Battle not found" };
 }
 async function Mt(e, r = 10) {
@@ -1210,7 +1210,7 @@ async function Mt(e, r = 10) {
     `battles?or=(challenger_username.ilike.${t},challenged_username.ilike.${t})&status=in.(completed,forfeited)&order=created_at.desc&limit=${r}`
   );
   return !s || s.length === 0 ? [] : await Promise.all(s.map(async (o) => {
-    const n = await me(o.id), i = o.challenger_username || o.challenger, c = o.challenged_username || o.challenged, l = i.toLowerCase() === e.toLowerCase() ? c : i, u = o.winner_username || o.winner;
+    const n = await he(o.id), i = o.challenger_username || o.challenger, c = o.challenged_username || o.challenged, l = i.toLowerCase() === e.toLowerCase() ? c : i, u = o.winner_username || o.winner;
     let _ = "draw";
     return u && (u === "draw" ? _ = "draw" : u.toLowerCase() === e.toLowerCase() ? _ = "win" : _ = "loss"), {
       ...o,
@@ -1257,7 +1257,7 @@ async function qe(e) {
     return console.warn("[Battle] validateLeetCodeProblem error:", r), { valid: !1, error: "Connection error while validating problem" };
   }
 }
-async function he(e, r = "online") {
+async function Z(e, r = "online") {
   if (!(!e || !h || h === "YOUR_SUPABASE_PROJECT_URL_HERE"))
     try {
       const t = await T("heartbeat_presence", {
@@ -1322,7 +1322,7 @@ function Ft(e) {
     throw new Error(r.error);
   return r.username;
 }
-function N(e, r) {
+function P(e, r) {
   const t = typeof e == "string" ? parseInt(e, 10) : e;
   if (isNaN(t) || t <= 0) return "";
   const s = r || (typeof Intl < "u" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC") || "UTC";
@@ -1343,7 +1343,7 @@ function We(e = [], r = null, t = null) {
   if (Array.isArray(e)) {
     for (const a of e)
       if (a && a.timestamp) {
-        const o = N(a.timestamp, t);
+        const o = P(a.timestamp, t);
         o && s.add(o);
       }
   }
@@ -1353,7 +1353,7 @@ function We(e = [], r = null, t = null) {
       if (a && typeof a == "object") {
         for (const [o, n] of Object.entries(a))
           if (parseInt(n, 10) > 0) {
-            const i = N(o, t);
+            const i = P(o, t);
             i && s.add(i);
           }
       }
@@ -1383,7 +1383,7 @@ function xt(e, r = null, t = null) {
     const v = n(o[p - 1], o[p]);
     v === 1 ? (c++, c > i && (i = c)) : v > 1 && (c = 1);
   }
-  const l = Math.floor(Date.now() / 1e3), u = N(l, t), _ = Math.floor((Date.now() - 864e5) / 1e3), y = N(_, t), g = o.includes(u), C = o[o.length - 1];
+  const l = Math.floor(Date.now() / 1e3), u = P(l, t), _ = Math.floor((Date.now() - 864e5) / 1e3), y = P(_, t), g = o.includes(u), C = o[o.length - 1];
   if (C !== u && C !== y)
     return {
       currentStreak: 0,
@@ -1411,7 +1411,7 @@ function xt(e, r = null, t = null) {
   };
 }
 function Ye(e, r = null, t = null) {
-  const s = We(e, r, t), a = Math.floor(Date.now() / 1e3), o = N(a, t);
+  const s = We(e, r, t), a = Math.floor(Date.now() / 1e3), o = P(a, t);
   return s.includes(o);
 }
 function qt(e) {
@@ -1436,7 +1436,7 @@ function qt(e) {
   }
   return r.total === 0 && (r.easy > 0 || r.medium > 0 || r.hard > 0) && (r.total = r.easy + r.medium + r.hard), r;
 }
-function oe(e) {
+function ne(e) {
   return e ? Date.now() - e > 900 * 1e3 : !0;
 }
 const J = "leetfriends_notifications", Ae = {
@@ -1563,7 +1563,7 @@ function zt(e, r, t) {
   }
 }
 const ke = 1.7, Ce = 30, Re = 19, ve = 4, De = "schedule_preferences";
-async function te() {
+async function re() {
   try {
     return (await chrome.storage.local.get(De))[De] || {
       activeInterval: ke,
@@ -1581,23 +1581,23 @@ async function te() {
   }
 }
 async function _e(e = null) {
-  e || (e = await te());
+  e || (e = await re());
   const t = (/* @__PURE__ */ new Date()).getHours(), { activeStartHour: s, activeEndHour: a } = e;
   return s > a ? t >= s || t < a : t >= s && t < a;
 }
 async function we() {
-  const e = await te();
+  const e = await re();
   return await _e(e) ? e.activeInterval : e.quietInterval;
 }
 async function Qt() {
-  const e = await te(), r = /* @__PURE__ */ new Date(), t = r.getHours(), s = r.getMinutes();
+  const e = await re(), r = /* @__PURE__ */ new Date(), t = r.getHours(), s = r.getMinutes();
   let a;
   await _e(e) ? a = e.activeEndHour : a = e.activeStartHour;
   let o = a - t;
   return o < 0 && (o += 24), o === 0 && s > 0 && (o = 24), o * 60 - s;
 }
 async function ge() {
-  const e = await te(), r = await we(), t = await _e(e), s = Le(e.activeStartHour), a = Le(e.activeEndHour);
+  const e = await re(), r = await we(), t = await _e(e), s = Le(e.activeStartHour), a = Le(e.activeEndHour);
   return t ? `Active Mode: Checking every ${r} minutes (${s} - ${a})` : `Quiet Mode: Checking every ${r} minutes`;
 }
 async function Vt() {
@@ -1688,7 +1688,7 @@ const ze = [
     allowedPrefixes: ["/jobs", "/messaging", "/in"]
   }
 ];
-function $(e) {
+function B(e) {
   return e ? e.toLowerCase().replace(/^(www\.|m\.)/, "") : "";
 }
 function U(e, r = {}) {
@@ -1705,35 +1705,35 @@ function U(e, r = {}) {
   }
   if (a.protocol !== "http:" && a.protocol !== "https:")
     return { isDistraction: !1, reason: "NON_HTTP_PROTOCOL", label: "" };
-  const o = a.hostname.toLowerCase(), n = $(o);
+  const o = a.hostname.toLowerCase(), n = B(o);
   if (n.includes("leetcode.com"))
     return { isDistraction: !1, reason: "SYSTEM_ALLOW_LEETCODE", label: "LeetCode" };
   for (const i of s) {
     if (!i) continue;
     const c = i.trim().toLowerCase();
-    if (e.toLowerCase().includes(c) || n === $(c))
+    if (e.toLowerCase().includes(c) || n === B(c))
       return { isDistraction: !1, reason: "USER_ALLOWLIST", label: i };
   }
   for (const i of Ve)
-    if (n === $(i.domain)) {
+    if (n === B(i.domain)) {
       for (const c of i.allowedPrefixes)
         if (a.pathname.startsWith(c))
           return { isDistraction: !1, reason: "EDUCATIONAL_EXCEPTION", label: `${i.domain}${c}` };
     }
   for (const i of Qe)
-    if (n === $(i.domain)) {
+    if (n === B(i.domain)) {
       for (const c of i.paths)
         if (a.pathname.startsWith(c))
           return { isDistraction: !0, reason: "PATH_DISTRACTION", label: i.label };
     }
   for (const i of t) {
     if (!i) continue;
-    const c = $(i.trim().toLowerCase());
+    const c = B(i.trim().toLowerCase());
     if (n === c || n.endsWith("." + c))
       return { isDistraction: !0, reason: "CUSTOM_BLOCKED_DOMAIN", label: c };
   }
   for (const i of ze) {
-    const c = $(i);
+    const c = B(i);
     if (n === c || n.endsWith("." + c))
       return { isDistraction: !0, reason: "DEFAULT_BLOCKED_DOMAIN", label: c };
   }
@@ -1794,7 +1794,7 @@ function Kt(e = {}) {
   const o = Array.from(/* @__PURE__ */ new Set([...ze, ...r]));
   for (const n of o) {
     if (!n || !n.trim()) continue;
-    const i = $(n.trim());
+    const i = B(n.trim());
     s.push({
       id: a++,
       priority: 1,
@@ -1820,7 +1820,7 @@ async function D() {
       "last_solve_date",
       "user_timezone",
       "own_profile"
-    ]), r = e.user_timezone, t = Math.floor(Date.now() / 1e3), s = N(t, r);
+    ]), r = e.user_timezone, t = Math.floor(Date.now() / 1e3), s = P(t, r);
     if (!e.hardcore_mode_enabled)
       return { active: !1, reason: "HARDCORE_DISABLED", todayStr: s, streak: 0 };
     const a = e.my_leetcode_username;
@@ -1832,7 +1832,7 @@ async function D() {
           const i = Object.keys(n.friends_cache).find((c) => c.toLowerCase() === a.toLowerCase());
           i && (o = n.friends_cache[i]);
         }
-        o || (o = await ue(a));
+        o || (o = await de(a));
       } catch (n) {
         console.warn("[BlockerManager] Error fetching cached friend data:", n);
       }
@@ -1845,7 +1845,7 @@ async function D() {
     return console.error("[BlockerManager] isBlockerActive check error:", e), { active: !1, reason: `ERROR: ${e.message}`, todayStr: "", streak: 0 };
   }
 }
-async function P() {
+async function $() {
   if (typeof chrome > "u" || !chrome.declarativeNetRequest)
     return console.warn("[BlockerManager] chrome.declarativeNetRequest API not available"), { success: !1, locked: !1, ruleCount: 0, reason: "DNR_NOT_AVAILABLE" };
   try {
@@ -1897,7 +1897,7 @@ async function P() {
   }
 }
 let Oe = !1;
-function B(e, r, t = "") {
+function M(e, r, t = "") {
   if (!(typeof chrome > "u" || !chrome.tabs || !chrome.tabs.update))
     try {
       const s = chrome.runtime.getURL(`blocked.html?blocked=${encodeURIComponent(r)}&label=${encodeURIComponent(t)}`);
@@ -1919,7 +1919,7 @@ async function Xt() {
       if (!n.id || !n.url || n.url.includes("blocked.html") || n.url.startsWith("chrome") || n.url.startsWith("about:") || n.url.startsWith("edge:") || n.url.includes("leetcode.com"))
         continue;
       const i = U(n.url, { customBlocked: t, allowlist: s });
-      i.isDistraction && (console.log(`[BlockerManager] Sweeping open distracting tab #${n.id}: ${n.url} (${i.label || i.reason})`), B(n.id, n.url, i.label), o.push({ id: n.id, url: n.url }));
+      i.isDistraction && (console.log(`[BlockerManager] Sweeping open distracting tab #${n.id}: ${n.url} (${i.label || i.reason})`), M(n.id, n.url, i.label), o.push({ id: n.id, url: n.url }));
     }
     return { sweptCount: o.length, redirectedTabs: o };
   } catch (e) {
@@ -1927,7 +1927,7 @@ async function Xt() {
   }
 }
 function Zt() {
-  Oe || typeof chrome > "u" || (Oe = !0, P().catch((e) => console.error("[BlockerManager] Startup sync failed:", e)), chrome.webNavigation && chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener(async (e) => {
+  Oe || typeof chrome > "u" || (Oe = !0, $().catch((e) => console.error("[BlockerManager] Startup sync failed:", e)), chrome.webNavigation && chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener(async (e) => {
     if (e.frameId === 0 && !(!e.url || e.url.includes("blocked.html") || e.url.startsWith("chrome") || e.url.startsWith("about:")))
       try {
         if (!(await D()).active) return;
@@ -1941,7 +1941,7 @@ function Zt() {
             label: s.label,
             timestamp: Date.now()
           }
-        }), B(e.tabId, e.url, s.label));
+        }), M(e.tabId, e.url, s.label));
       } catch (r) {
         console.warn("[BlockerManager] onBeforeNavigate error:", r);
       }
@@ -1953,7 +1953,7 @@ function Zt() {
           customBlocked: t.custom_blocked_domains || [],
           allowlist: t.allowlist || []
         });
-        s.isDistraction && B(e.tabId, e.url, s.label);
+        s.isDistraction && M(e.tabId, e.url, s.label);
       } catch {
       }
   }), chrome.webNavigation && chrome.webNavigation.onHistoryStateUpdated && chrome.webNavigation.onHistoryStateUpdated.addListener(async (e) => {
@@ -1970,7 +1970,7 @@ function Zt() {
             label: s.label,
             timestamp: Date.now()
           }
-        }), B(e.tabId, e.url, s.label));
+        }), M(e.tabId, e.url, s.label));
       } catch (r) {
         console.warn("[BlockerManager] onHistoryStateUpdated error:", r);
       }
@@ -1983,7 +1983,7 @@ function Zt() {
           customBlocked: o.custom_blocked_domains || [],
           allowlist: o.allowlist || []
         });
-        n.isDistraction && B(e, s, n.label);
+        n.isDistraction && M(e, s, n.label);
       } catch {
       }
   }), chrome.tabs && chrome.tabs.onActivated && chrome.tabs.onActivated.addListener(async (e) => {
@@ -1995,7 +1995,7 @@ function Zt() {
         customBlocked: s.custom_blocked_domains || [],
         allowlist: s.allowlist || []
       });
-      a.isDistraction && (console.log(`[BlockerManager] onActivated blocking active tab #${e.tabId} (${t.url})`), B(e.tabId, t.url, a.label));
+      a.isDistraction && (console.log(`[BlockerManager] onActivated blocking active tab #${e.tabId} (${t.url})`), M(e.tabId, t.url, a.label));
     } catch {
     }
   }), chrome.windows && chrome.windows.onFocusChanged && chrome.windows.onFocusChanged.addListener(async (e) => {
@@ -2008,7 +2008,7 @@ function Zt() {
           customBlocked: s.custom_blocked_domains || [],
           allowlist: s.allowlist || []
         });
-        a.isDistraction && (console.log(`[BlockerManager] onFocusChanged blocking window tab #${t.id} (${t.url})`), B(t.id, t.url, a.label));
+        a.isDistraction && (console.log(`[BlockerManager] onFocusChanged blocking window tab #${t.id} (${t.url})`), M(t.id, t.url, a.label));
       } catch {
       }
   }), chrome.storage && chrome.storage.onChanged && chrome.storage.onChanged.addListener((e, r) => {
@@ -2021,7 +2021,7 @@ function Zt() {
       "own_profile",
       "custom_blocked_domains",
       "allowlist"
-    ].some((a) => e[a]) && P().catch((a) => {
+    ].some((a) => e[a]) && $().catch((a) => {
       console.error("[BlockerManager] Storage change sync error:", a);
     });
   }), console.log("🛡️ [BlockerManager] Multi-layer network blocker initialized"));
@@ -2044,7 +2044,7 @@ function er() {
       }
   }), console.log("✅ [TabMonitor] Hardcore Mode Tab Monitor and Blocker initialized");
 }
-const ne = "leetfriends_sync", tr = "schedule_transition_check", G = "presence_heartbeat_alarm", Ke = 500;
+const ce = "leetfriends_sync", tr = "schedule_transition_check", G = "presence_heartbeat_alarm", Ke = 500;
 self.addEventListener("error", (e) => {
   console.error("[ServiceWorker] Uncaught error:", e.error);
 });
@@ -2056,7 +2056,7 @@ _t().catch((e) => {
   console.warn("[ServiceWorker] Session restoration (non-blocking):", e.message);
 });
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log("[ServiceWorker] Installed - setting up sync alarm and cleaning legacy keys"), ye(), rr(), await P();
+  console.log("[ServiceWorker] Installed - setting up sync alarm and cleaning legacy keys"), ye(), rr(), await $();
   try {
     await chrome.alarms.clear(G), chrome.alarms.create(G, {
       delayInMinutes: 0.1,
@@ -2066,7 +2066,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 chrome.runtime.onStartup.addListener(async () => {
-  console.log("[ServiceWorker] Browser startup - reconciling blocker rules & presence"), await P();
+  console.log("[ServiceWorker] Browser startup - reconciling blocker rules & presence"), await $();
   try {
     await chrome.alarms.clear(G), chrome.alarms.create(G, {
       delayInMinutes: 0.1,
@@ -2094,7 +2094,7 @@ async function rr() {
 async function ye() {
   const e = Vt(), r = e?.intervalMinutes || 30;
   try {
-    await chrome.alarms.clear(ne), await chrome.alarms.clear(tr), chrome.alarms.create(ne, {
+    await chrome.alarms.clear(ce), await chrome.alarms.clear(tr), chrome.alarms.create(ce, {
       delayInMinutes: r,
       periodInMinutes: r
     }), await chrome.storage.local.set({
@@ -2117,7 +2117,7 @@ async function sr() {
   }
 }
 chrome.alarms.onAlarm.addListener(async (e) => {
-  e.name === ne ? (console.log(`[ServiceWorker] Background sync triggered - ${ge()}`), await sr(), await Xe(), await P()) : e.name === G && await Ze();
+  e.name === ce ? (console.log(`[ServiceWorker] Background sync triggered - ${ge()}`), await sr(), await Xe(), await $()) : e.name === G && await Ze();
 });
 chrome.runtime.onMessage.addListener((e, r, t) => {
   if (e.type === "PING") {
@@ -2142,7 +2142,7 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
     case "SUBMISSION_ACCEPTED":
       return ur(e.problemSlug, e.title).then(t), !0;
     case "SYNC_BLOCKER_RULES":
-      return P().then(t), !0;
+      return $().then(t), !0;
     case "GET_BLOCKER_STATUS":
       return D().then(t), !0;
     case "SHOW_NOTIFICATION":
@@ -2188,7 +2188,7 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
         if (!Array.isArray(e.usernames))
           return t({ success: !0, count: 0 });
         const s = await Promise.all(
-          e.usernames.map((a) => le(a).catch(() => ({ success: !1 })))
+          e.usernames.map((a) => ue(a).catch(() => ({ success: !1 })))
         );
         t({ success: !0, count: s.filter((a) => a?.success).length });
       })().catch((s) => t({ success: !1, error: s.message })), !0;
@@ -2204,25 +2204,34 @@ chrome.runtime.onMessage.addListener((e, r, t) => {
           success: !0,
           state: O(),
           session: s ? { user_id: s.user_id, email: s.email, expires_at: s.expires_at } : null,
-          isRateLimited: M(),
-          cooldownSeconds: ce()
+          isRateLimited: H(),
+          cooldownSeconds: ie()
         });
       })().catch((s) => t({ success: !1, error: s.message })), !0;
     case "SIGN_IN_EMAIL":
       return gt(e.email, e.password).then(async (s) => {
         try {
-          await ae();
-          const a = await chrome.storage.local.get(["my_leetcode_username"]);
-          a.my_leetcode_username && await he(a.my_leetcode_username, "online");
+          await oe(), e.username && await chrome.storage.local.set({ my_leetcode_username: e.username });
+          const a = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), o = e.username || a.my_leetcode_username;
+          o && (await I(o, a.own_profile || { profile: { realName: o } }), await Z(o, "online"));
         } catch (a) {
           console.warn("[ServiceWorker] Social account restore error:", a);
         }
         t({ success: !0, session: { user_id: s.user_id, email: s.email } });
-      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: M() })), !0;
+      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: H() })), !0;
     case "RESTORE_ACCOUNT_DATA":
-      return ae().then((s) => t(s)).catch((s) => t({ success: !1, error: s.message })), !0;
+      return oe().then((s) => t(s)).catch((s) => t({ success: !1, error: s.message })), !0;
     case "SIGN_UP_EMAIL":
-      return yt(e.email, e.password).then((s) => t(s)).catch((s) => t({ success: !1, error: s.message, isRateLimited: M() })), !0;
+      return yt(e.email, e.password).then(async (s) => {
+        if (e.username && await chrome.storage.local.set({ my_leetcode_username: e.username }), s?.session && s.session.user_id)
+          try {
+            const a = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), o = e.username || a.my_leetcode_username;
+            o && (await I(o, a.own_profile || { profile: { realName: o } }), await Z(o, "online"));
+          } catch (a) {
+            console.warn("[ServiceWorker] Sign up profile sync error:", a);
+          }
+        t(s);
+      }).catch((s) => t({ success: !1, error: s.message, isRateLimited: H() })), !0;
     case "SIGN_OUT":
       return pt().then(async (s) => {
         try {
@@ -2252,11 +2261,11 @@ async function ar(e = !1) {
     if (!t)
       return { success: !1, error: "No LeetCode username configured. Please enter your username." };
     let s = await Y(), a = !1;
-    if (e || !s || oe(s.lastUpdated)) {
+    if (e || !s || ne(s.lastUpdated)) {
       console.log(`[ServiceWorker] Fetching own LeetCode data for: ${t}`);
       try {
-        const u = await x(t);
-        s = await z(u, r.user_timezone), await ee(s), a = !0;
+        const u = await q(t);
+        s = await z(u, r.user_timezone), await te(s), a = !0;
       } catch (u) {
         if (console.error(`[ServiceWorker] Error fetching own LeetCode profile for ${t}:`, u), !s)
           return {
@@ -2271,7 +2280,7 @@ async function ar(e = !1) {
     let c = e;
     if (!c && i.length > 0) {
       for (const u of i)
-        if (!n[u] || oe(n[u]?.lastUpdated)) {
+        if (!n[u] || ne(n[u]?.lastUpdated)) {
           c = !0;
           break;
         }
@@ -2281,8 +2290,8 @@ async function ar(e = !1) {
       for (const u of i)
         if (u.toLowerCase() !== t.toLowerCase())
           try {
-            const _ = await x(u), y = await z(_, r.user_timezone);
-            await de(u, y), await et(Ke);
+            const _ = await q(u), y = await z(_, r.user_timezone);
+            await fe(u, y), await et(Ke);
           } catch (_) {
             console.warn(`[ServiceWorker] Error updating friend ${u}:`, _.message);
           }
@@ -2305,9 +2314,9 @@ async function or(e = !1) {
     if (!t)
       return { success: !1, error: "No LeetCode username configured" };
     let s = await Y();
-    if (e || !s || oe(s.lastUpdated)) {
-      const o = await x(t);
-      s = await z(o, r.user_timezone), await ee(s);
+    if (e || !s || ne(s.lastUpdated)) {
+      const o = await q(t);
+      s = await z(o, r.user_timezone), await te(s);
     }
     return { success: !0, ownProfile: s };
   } catch (r) {
@@ -2323,10 +2332,10 @@ async function nr(e) {
     } catch (n) {
       return { success: !1, error: n.message };
     }
-    if (await ue(t))
+    if (await de(t))
       return { success: !1, error: `${r} is already in your friends list` };
-    const a = await x(r), o = await z(a);
-    return await de(t, o), O() === f.AUTHENTICATED && le(t).catch((n) => {
+    const a = await q(r), o = await z(a);
+    return await fe(t, o), O() === f.AUTHENTICATED && ue(t).catch((n) => {
       console.warn("[ServiceWorker] Cloud syncFriendship failed:", n);
     }), { success: !0, message: `${r} added successfully`, data: o };
   } catch (r) {
@@ -2345,7 +2354,7 @@ async function cr(e) {
 async function ir() {
   try {
     let e = await K();
-    return O() === f.AUTHENTICATED && (!e || Object.keys(e).length === 0) && (await ae(), e = await K()), { success: !0, friends: e };
+    return O() === f.AUTHENTICATED && (!e || Object.keys(e).length === 0) && (await oe(), e = await K()), { success: !0, friends: e };
   } catch (e) {
     return { success: !1, error: e.message };
   }
@@ -2369,8 +2378,8 @@ async function lr(e) {
 }
 async function ur(e, r) {
   try {
-    const t = await chrome.storage.local.get(["my_leetcode_username", "user_timezone", "problem_queue"]), s = N(Math.floor(Date.now() / 1e3), t.user_timezone);
-    if (await chrome.storage.local.set({ last_solve_date: s }), console.log(`[ServiceWorker] Solve recorded today (${s}) — Hardcore Mode unlocked!`), await P(), t.problem_queue && Array.isArray(t.problem_queue)) {
+    const t = await chrome.storage.local.get(["my_leetcode_username", "user_timezone", "problem_queue"]), s = P(Math.floor(Date.now() / 1e3), t.user_timezone);
+    if (await chrome.storage.local.set({ last_solve_date: s }), console.log(`[ServiceWorker] Solve recorded today (${s}) — Hardcore Mode unlocked!`), await $(), t.problem_queue && Array.isArray(t.problem_queue)) {
       const a = t.problem_queue.map((o) => o.slug === e || o.id === e || r && o.title === r ? { ...o, status: "completed" } : o);
       await chrome.storage.local.set({ problem_queue: a });
     }
@@ -2412,7 +2421,7 @@ async function Xe() {
             }), l.status === "sent" && c.push(l.id);
           c.length > 0 && await Tt(c);
         }
-        const i = await Z(r);
+        const i = await ee(r);
         if (i?.pending_roasts && i.pending_roasts.length > 0) {
           for (const c of i.pending_roasts)
             o.push({
@@ -2428,13 +2437,13 @@ async function Xe() {
       }
     for (const n of a)
       try {
-        const i = await ue(n), c = await x(n), l = await z(c, t);
-        if (await de(n, l), r && n.toLowerCase() === r.toLowerCase()) {
-          if (await ee(l), Ye(l.allAcceptedSubmissions, l.submissionCalendar, t)) {
-            const u = N(Math.floor(Date.now() / 1e3), t);
+        const i = await de(n), c = await q(n), l = await z(c, t);
+        if (await fe(n, l), r && n.toLowerCase() === r.toLowerCase()) {
+          if (await te(l), Ye(l.allAcceptedSubmissions, l.submissionCalendar, t)) {
+            const u = P(Math.floor(Date.now() / 1e3), t);
             await chrome.storage.local.set({ last_solve_date: u });
           }
-          await P();
+          await $();
         }
         if (!await Je()) {
           const u = await fr(n, i, l, r);
@@ -2521,7 +2530,7 @@ async function mr(e) {
       Mt(t, 10)
     ]);
     if (!s) return { success: !0, battle: null, history: a };
-    const o = await me(s.id);
+    const o = await he(s.id);
     return { success: !0, battle: s, results: o, history: a };
   } catch (r) {
     return { success: !1, error: r.message };
@@ -2530,7 +2539,7 @@ async function mr(e) {
 async function hr(e, r, t) {
   try {
     const s = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), a = e || s.my_leetcode_username;
-    return a && s.own_profile && W(a, s.own_profile).catch(() => {
+    return a && s.own_profile && I(a, s.own_profile).catch(() => {
     }), await Lt(a, r, t);
   } catch (s) {
     return { success: !1, error: s.message };
@@ -2598,15 +2607,16 @@ async function Ze() {
   try {
     if (!(await b())?.user_id) return;
     const t = (await chrome.storage.local.get("my_leetcode_username")).my_leetcode_username;
-    t && await he(t, "online");
+    t && await Z(t, "online");
   } catch (e) {
     console.warn("[ServiceWorker] handlePresenceHeartbeat error:", e);
   }
 }
 async function Er(e) {
   try {
-    const r = await chrome.storage.local.get("my_leetcode_username"), t = e || r.my_leetcode_username;
-    return t && await he(t), { success: !0 };
+    const r = await chrome.storage.local.get(["my_leetcode_username", "own_profile"]), t = e || r.my_leetcode_username;
+    return t && (I(t, r.own_profile || { profile: { realName: t } }).catch(() => {
+    }), await Z(t)), { success: !0 };
   } catch (r) {
     return { success: !1, error: r.message };
   }
