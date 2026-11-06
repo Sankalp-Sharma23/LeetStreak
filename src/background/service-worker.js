@@ -56,7 +56,13 @@ import {
   cancelBattle,
   validateLeetCodeProblem,
   updatePresence,
-  getPresence
+  getPresence,
+  createBattleV2,
+  acceptBattleV2,
+  confirmReadyV2,
+  submitBattleSolveV2,
+  getBattleStateV2,
+  forfeitBattleV2
 } from '../shared/battle-manager.js';
 import { validateUsername } from '../shared/validation.js';
 import { calculateStreak, getProblemsSolved, needsRefresh, timestampToDateString, hasSolvedToday } from '../shared/streak-calculator.js';
@@ -281,6 +287,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // ===== 1v1 Battle System =====
     case 'BATTLE_GET_STATUS':
       handleBattleGetStatus(message.username).then(sendResponse);
+      return true;
+
+    case 'BATTLE_CHALLENGE_V2':
+      handleBattleChallengeV2(message).then(sendResponse);
+      return true;
+
+    case 'BATTLE_ACCEPT_V2':
+      handleBattleAcceptV2(message.battleId).then(sendResponse);
+      return true;
+
+    case 'BATTLE_READY_V2':
+      handleBattleReadyV2(message.battleId, message.username).then(sendResponse);
+      return true;
+
+    case 'BATTLE_SOLVED_V2':
+      handleBattleSolvedV2(message).then(sendResponse);
+      return true;
+
+    case 'BATTLE_GET_STATE_V2':
+      handleBattleGetStateV2(message.battleId).then(sendResponse);
+      return true;
+
+    case 'BATTLE_FORFEIT_V2':
+      handleBattleForfeitV2(message.battleId, message.username).then(sendResponse);
       return true;
 
     case 'BATTLE_CHALLENGE':
@@ -939,6 +969,117 @@ async function handleBattleGetStatus(usernameOverride) {
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+async function handleBattleChallengeV2(message) {
+  try {
+    const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
+    const challenger = message.challenger || stored.my_leetcode_username;
+    if (challenger && stored.own_profile) {
+      upsertProfile(challenger, stored.own_profile).catch(() => {});
+    }
+    return await createBattleV2(challenger, message.challenged, {
+      topics: message.topics,
+      difficulty: message.difficulty,
+      durationMinutes: message.durationMinutes,
+      problemCount: message.problemCount,
+      language: message.language || 'javascript'
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handleBattleAcceptV2(battleId) {
+  try {
+    return await acceptBattleV2(battleId);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handleBattleReadyV2(battleId, usernameOverride) {
+  try {
+    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const username = usernameOverride || stored.my_leetcode_username;
+    const res = await confirmReadyV2(battleId, username);
+
+    if (res?.bothReady) {
+      scheduleBattleStart(battleId);
+    }
+    return res;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handleBattleSolvedV2(message) {
+  try {
+    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const username = stored.my_leetcode_username;
+    return await submitBattleSolveV2(message.battleId, message.problemSlug, {
+      submissionId: message.submissionId,
+      timeTakenMs: message.timeTakenMs,
+      runtimeMs: message.runtimeMs,
+      memoryMb: message.memoryMb,
+      language: message.language,
+      username
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handleBattleGetStateV2(battleId) {
+  try {
+    const state = await getBattleStateV2(battleId);
+    return { success: !!state, state };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handleBattleForfeitV2(battleId, usernameOverride) {
+  try {
+    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const username = usernameOverride || stored.my_leetcode_username;
+    return await forfeitBattleV2(battleId, username);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function scheduleBattleStart(battleId) {
+  setTimeout(async () => {
+    try {
+      const state = await getBattleStateV2(battleId);
+      if (!state?.problems?.length) return;
+      const firstProblem = state.problems[0];
+      const targetUrl = firstProblem.problem_url || `https://leetcode.com/problems/${firstProblem.problem_slug}/`;
+
+      const tabs = await chrome.tabs.query({ url: '*://leetcode.com/*' });
+      if (tabs.length > 0) {
+        await chrome.tabs.update(tabs[0].id, { url: targetUrl, active: true });
+        if (tabs[0].windowId) {
+          await chrome.windows.update(tabs[0].windowId, { focused: true });
+        }
+      } else {
+        await chrome.tabs.create({ url: targetUrl, active: true });
+      }
+
+      if (chrome.notifications) {
+        chrome.notifications.create(`battle_start_${battleId}`, {
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: '⚔️ Battle Started!',
+          message: `Duel is live! First problem: ${firstProblem.problem_title}`,
+          priority: 2
+        });
+      }
+    } catch (e) {
+      console.warn('[ServiceWorker] scheduleBattleStart error:', e);
+    }
+  }, 10000);
 }
 
 async function handleBattleChallenge(challengerOverride, challenged, language) {

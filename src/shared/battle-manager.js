@@ -2,19 +2,27 @@
  * Authoritative Battle Manager — Canonical State Machine & Real-Time Sync
  *
  * Implements deterministic scoring:
- * - 1 point per accepted problem (maximum 2 points per participant).
+ * - 1 point per accepted problem
  * - Player with higher solved count wins.
  * - If equal, tiebreaker is total accepted completion time across completed problems.
  * - If still equal, match is declared a draw.
  * - Under no circumstances are lines of code or hardware-dependent runtime/memory beats% used.
  *
  * Canonical State Machine:
- * PENDING -> ACCEPTED -> SELECTING -> READY_CHECK -> COUNTDOWN -> IN_PROGRESS -> COMPLETED
+ * PENDING -> ACCEPTED -> READY_CHECK -> COUNTDOWN -> IN_PROGRESS -> COMPLETED
  * (Terminal: COMPLETED, DECLINED, EXPIRED, CANCELLED, FORFEITED)
  */
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY, getAuthHeaders, getAuthSession, callRpc, upsertProfile, getOnlineFriends as clientGetOnlineFriends } from './supabase-client.js';
+import {
+  SUPABASE_URL,
+  getAuthHeaders,
+  getAuthSession,
+  callRpc,
+  upsertProfile,
+  getOnlineFriends as clientGetOnlineFriends
+} from './supabase-client.js';
 import { getOwnProfile } from './storage.js';
+import { PROBLEMS } from '../data/problems.js';
 
 const BASE_URL = SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
 
@@ -73,13 +81,100 @@ async function supabaseFetch(path, options = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// BATTLE LIFECYCLE
+// RANDOM PROBLEM GENERATION (SHARED SEQUENCE)
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Create a new battle challenge room with locked programming language
+ * Deterministically or randomly select `count` problems matching filters.
  */
-export async function createBattle(challenger, challenged, language = 'javascript') {
+export function generateBattleProblems({ topics = [], difficulty = 'Medium', count = 5 }) {
+  const all = PROBLEMS || [];
+  if (!all.length) return [];
+
+  const normalizedTopics = Array.isArray(topics) && topics.length > 0
+    ? topics.map(t => t.toLowerCase())
+    : [];
+
+  // 1. Filter by topic
+  let pool = all;
+  if (normalizedTopics.length > 0) {
+    const topicFiltered = all.filter(p =>
+      Array.isArray(p.topics) && p.topics.some(t => normalizedTopics.includes(t.toLowerCase()))
+    );
+    if (topicFiltered.length >= count) {
+      pool = topicFiltered;
+    } else {
+      pool = topicFiltered; // will backfill later if needed
+    }
+  }
+
+  // 2. Filter by difficulty
+  let filtered = [];
+  const targetDiff = (difficulty || 'Medium').toLowerCase();
+  const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+
+  if (targetDiff === 'mixed') {
+    const easy = shuffle(pool.filter(p => p.difficulty?.toLowerCase() === 'easy'));
+    const med = shuffle(pool.filter(p => p.difficulty?.toLowerCase() === 'medium'));
+    const hard = shuffle(pool.filter(p => p.difficulty?.toLowerCase() === 'hard'));
+
+    const numEasy = Math.max(1, Math.floor(count * 0.25));
+    const numHard = count >= 5 ? 1 : 0;
+    const numMed = count - numEasy - numHard;
+
+    filtered.push(...easy.slice(0, numEasy));
+    filtered.push(...med.slice(0, numMed));
+    filtered.push(...hard.slice(0, numHard));
+
+    if (filtered.length < count) {
+      const existingSlugs = new Set(filtered.map(p => p.slug));
+      const remaining = shuffle(pool.filter(p => !existingSlugs.has(p.slug)));
+      filtered.push(...remaining.slice(0, count - filtered.length));
+    }
+  } else {
+    const exact = pool.filter(p => p.difficulty?.toLowerCase() === targetDiff);
+    if (exact.length >= count) {
+      filtered = shuffle(exact).slice(0, count);
+    } else {
+      const existingSlugs = new Set(exact.map(p => p.slug));
+      const others = shuffle(pool.filter(p => !existingSlugs.has(p.slug)));
+      filtered = [...exact, ...others].slice(0, count);
+    }
+  }
+
+  // Backfill from entire dataset if pool was too small
+  if (filtered.length < count) {
+    const existingSlugs = new Set(filtered.map(p => p.slug));
+    const backfill = shuffle(all.filter(p => !existingSlugs.has(p.slug)));
+    filtered.push(...backfill.slice(0, count - filtered.length));
+  }
+
+  return filtered.slice(0, count).map((p, idx) => ({
+    sequence_number: idx + 1,
+    slug: p.slug,
+    title: p.title,
+    url: `https://leetcode.com/problems/${p.slug}/`,
+    difficulty: p.difficulty,
+    topics: p.topics || []
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// BATTLE V2 LIFECYCLE (TOPIC-BASED 1v1 DUEL)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Create battle challenge v2 with selected DSA topics, difficulty, duration, and problem count
+ */
+export async function createBattleV2(challenger, challenged, options = {}) {
+  const {
+    topics = ['Arrays', 'Strings'],
+    difficulty = 'Medium',
+    durationMinutes = 30,
+    problemCount = 5,
+    language = 'javascript'
+  } = options;
+
   if (!challenger || !challenged) {
     return { success: false, error: 'Challenger and opponent usernames are required' };
   }
@@ -87,7 +182,7 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     return { success: false, error: 'Cannot challenge yourself' };
   }
 
-  // Proactively ensure challenger's own profile is stored in Supabase profiles
+  // Proactively ensure challenger's profile is in Supabase profiles
   try {
     const ownData = await getOwnProfile();
     if (challenger && ownData) {
@@ -95,36 +190,27 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     }
   } catch {}
 
-  // 1. Attempt atomic server-authoritative RPC
+  // 1. Attempt atomic create_battle_v2 RPC
   try {
-    const rpcRes = await callRpc('create_battle_challenge', {
+    const rpcRes = await callRpc('create_battle_v2', {
       p_challenged_username: challenged.toLowerCase(),
+      p_topics: topics,
+      p_difficulty: difficulty,
+      p_duration_minutes: durationMinutes,
+      p_problem_count: problemCount,
       p_language: language.toLowerCase(),
       p_challenger_username: challenger.toLowerCase()
     });
+
     if (rpcRes && rpcRes.success && rpcRes.battle) {
       return { success: true, battle: rpcRes.battle };
     }
-    // Check if RPC function is missing (PGRST202) or challenger profile needs sync
+
     const isMissingFunction = rpcRes?.code === 'PGRST202' || (
-      rpcRes?.error && typeof rpcRes.error === 'string' && (
-        rpcRes.error.includes('PGRST202') ||
-        rpcRes.error.includes('schema cache') ||
-        rpcRes.error.includes('Could not find the function')
-      )
-    ) || (
-      rpcRes?.raw && typeof rpcRes.raw === 'string' && (
-        rpcRes.raw.includes('PGRST202') ||
-        rpcRes.raw.includes('schema cache')
-      )
-    );
-    const isProfileNotFound = rpcRes?.error && typeof rpcRes.error === 'string' && (
-      rpcRes.error.toLowerCase().includes('challenger profile not found')
+      typeof rpcRes?.error === 'string' && rpcRes.error.includes('PGRST202')
     );
 
-    if (isMissingFunction || isProfileNotFound) {
-      console.warn('[BattleManager] RPC fallback triggered (missing RPC or profile). Executing REST fallback.');
-    } else if (rpcRes && rpcRes.error) {
+    if (!isMissingFunction && rpcRes?.error) {
       let cleanMsg = rpcRes.error;
       try {
         const parsed = JSON.parse(rpcRes.error);
@@ -133,7 +219,7 @@ export async function createBattle(challenger, challenged, language = 'javascrip
       return { success: false, error: cleanMsg };
     }
   } catch (rpcErr) {
-    console.warn('[BattleManager] create_battle_challenge RPC error, using REST fallback:', rpcErr);
+    console.warn('[BattleManager] create_battle_v2 RPC error, falling back to REST:', rpcErr);
   }
 
   // 2. Direct REST fallback
@@ -142,19 +228,16 @@ export async function createBattle(challenger, challenged, language = 'javascrip
     getActiveBattle(challenged)
   ]);
 
-  if (existingChallenger) {
-    return { success: false, error: 'You already have an active battle in progress' };
-  }
-  if (existingChallenged) {
-    return { success: false, error: `${challenged} is currently in an active battle` };
-  }
+  if (existingChallenger) return { success: false, error: 'You already have an active battle in progress' };
+  if (existingChallenged) return { success: false, error: `${challenged} is currently in an active battle` };
 
   const session = await getAuthSession();
-  const profiles = await supabaseFetch(`profiles?leetcode_username=in.("${challenger.toLowerCase()}","${challenged.toLowerCase()}")&select=id,leetcode_username`);
+  const profiles = await supabaseFetch(
+    `profiles?leetcode_username=in.("${challenger.toLowerCase()}","${challenged.toLowerCase()}")&select=id,leetcode_username`
+  );
   let challengerProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenger.toLowerCase());
   let challengedProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenged.toLowerCase());
 
-  // If challenger profile was missing, ensure it is created with session user_id
   if (!challengerProfile && session?.user_id) {
     const ownData = await getOwnProfile();
     await upsertProfile(challenger, ownData || { profile: { realName: challenger } });
@@ -163,20 +246,24 @@ export async function createBattle(challenger, challenged, language = 'javascrip
 
   const challengerId = session?.user_id || challengerProfile?.id;
   const challengedId = challengedProfile?.id;
+  if (!challengedId) return { success: false, error: `${challenged} does not have a LeetStreak account.` };
 
   const now = Date.now();
   const expiresAt = new Date(now + CHALLENGE_EXPIRY_SECONDS * 1000).toISOString();
 
   const payload = {
+    challenger_id: challengerId,
+    challenged_id: challengedId,
     challenger_username: challenger,
     challenged_username: challenged,
     language: language.toLowerCase(),
     status: BATTLE_STATUS.PENDING,
+    topics,
+    difficulty,
+    duration_minutes: durationMinutes,
+    problem_count: problemCount,
     expires_at: expiresAt
   };
-
-  if (challengerId) payload.challenger_id = challengerId;
-  if (challengedId) payload.challenged_id = challengedId;
 
   const data = await supabaseFetch('battles', {
     method: 'POST',
@@ -185,6 +272,182 @@ export async function createBattle(challenger, challenged, language = 'javascrip
 
   if (!data || data.length === 0) return { success: false, error: 'Failed to create battle room' };
   return { success: true, battle: data[0] };
+}
+
+/**
+ * Accept a battle invitation v2
+ */
+export async function acceptBattleV2(battleId) {
+  if (!battleId) return { success: false, error: 'Battle ID required' };
+
+  // 1. Try atomic accept_battle_v2 RPC
+  const rpcRes = await callRpc('accept_battle_v2', { p_battle_id: battleId });
+  if (rpcRes && rpcRes.success && rpcRes.battle) {
+    return { success: true, battle: rpcRes.battle };
+  }
+
+  // 2. Direct REST fallback
+  const battle = await getBattle(battleId);
+  if (!battle) return { success: false, error: 'Battle not found' };
+
+  const updated = await supabaseFetch(`battles?id=eq.${battleId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: BATTLE_STATUS.ACCEPTED,
+      accepted_at: new Date().toISOString()
+    })
+  });
+
+  // Create participant rows
+  if (battle.challenger_id && battle.challenged_id) {
+    await supabaseFetch('battle_participants', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify([
+        { battle_id: battleId, user_id: battle.challenger_id, username: battle.challenger_username, is_ready: false },
+        { battle_id: battleId, user_id: battle.challenged_id, username: battle.challenged_username, is_ready: false }
+      ])
+    }).catch(() => {});
+  }
+
+  return { success: true, battle: updated?.[0] || battle };
+}
+
+/**
+ * Confirm readiness v2:
+ * Passes generated problem sequence to backend so both players get identical sequence.
+ */
+export async function confirmReadyV2(battleId, username) {
+  if (!battleId) return { success: false, error: 'Battle ID required' };
+
+  const battle = await getBattle(battleId);
+  if (!battle) return { success: false, error: 'Battle not found' };
+
+  // Generate sequence matching battle configuration
+  const problems = generateBattleProblems({
+    topics: battle.topics || ['Arrays', 'Strings'],
+    difficulty: battle.difficulty || 'Medium',
+    count: battle.problem_count || 5
+  });
+
+  // 1. Try atomic confirm_ready_v2 RPC
+  const rpcRes = await callRpc('confirm_ready_v2', {
+    p_battle_id: battleId,
+    p_problems: problems
+  });
+
+  if (rpcRes && rpcRes.success) {
+    const updated = await getBattle(battleId);
+    return {
+      success: true,
+      battle: updated || rpcRes.battle,
+      bothReady: rpcRes.bothReady,
+      status: rpcRes.status
+    };
+  }
+
+  // 2. Fallback to confirmReady
+  return await confirmReady(battleId, username);
+}
+
+/**
+ * Submit an accepted problem solve v2
+ */
+export async function submitBattleSolveV2(battleId, problemSlug, solveData = {}) {
+  const {
+    submissionId,
+    timeTakenMs = 0,
+    runtimeMs = null,
+    memoryMb = null,
+    language = 'javascript',
+    username = 'user'
+  } = solveData;
+
+  // 1. Try atomic record_battle_solve RPC
+  const rpcRes = await callRpc('record_battle_solve', {
+    p_battle_id: battleId,
+    p_problem_slug: problemSlug,
+    p_submission_id: submissionId || `sub_${Date.now()}`,
+    p_time_taken_ms: timeTakenMs,
+    p_runtime_ms: runtimeMs,
+    p_memory_mb: memoryMb,
+    p_language: language
+  });
+
+  if (rpcRes && rpcRes.success) {
+    return rpcRes;
+  }
+
+  // 2. Fallback to submitBattleResult
+  const res = await submitBattleResult(battleId, username, {
+    problemSlug,
+    submissionId,
+    accepted: true,
+    runtime_ms: runtimeMs,
+    memory_mb: memoryMb,
+    language,
+    timeTakenSeconds: Math.floor(timeTakenMs / 1000)
+  });
+
+  return {
+    success: res?.success || false,
+    solved_count: 1,
+    next_problem_slug: null,
+    battle_complete: false
+  };
+}
+
+/**
+ * Get full battle state for active battle & reconnection (problems + participants + results)
+ */
+export async function getBattleStateV2(battleId) {
+  if (!battleId) return null;
+
+  // 1. Try atomic get_battle_state_v2 RPC
+  const rpcRes = await callRpc('get_battle_state_v2', { p_battle_id: battleId });
+  if (rpcRes && rpcRes.success) {
+    return rpcRes;
+  }
+
+  // 2. Fallback: query tables directly
+  const [battle, problems, participants, results] = await Promise.all([
+    getBattle(battleId),
+    supabaseFetch(`battle_problems?battle_id=eq.${battleId}&order=sequence_number.asc`),
+    supabaseFetch(`battle_participants?battle_id=eq.${battleId}`),
+    getBattleResults(battleId)
+  ]);
+
+  if (!battle) return null;
+
+  return {
+    success: true,
+    battle,
+    problems: problems || [],
+    participants: participants || [],
+    results: results || []
+  };
+}
+
+/**
+ * Forfeit active battle v2
+ */
+export async function forfeitBattleV2(battleId, username) {
+  const rpcRes = await callRpc('forfeit_battle_v2', { p_battle_id: battleId });
+  if (rpcRes && rpcRes.success) {
+    return rpcRes;
+  }
+  return await forfeitBattle(battleId, username);
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEGACY BATTLE LIFECYCLE (V1 BACK-COMPAT)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Create a new battle challenge room (legacy v1)
+ */
+export async function createBattle(challenger, challenged, language = 'javascript') {
+  return await createBattleV2(challenger, challenged, { language });
 }
 
 /**
@@ -200,13 +463,22 @@ export async function getActiveBattle(username) {
   if (!data || data.length === 0) return null;
   const b = data[0];
 
-  // Auto-advance COUNTDOWN -> IN_PROGRESS when 10s countdown completes
-  if (b.status === BATTLE_STATUS.COUNTDOWN && b.match_starts_at && new Date(b.match_starts_at) <= new Date()) {
+  const now = Date.now();
+
+  // Auto-advance COUNTDOWN -> IN_PROGRESS when countdown completes
+  const startsAt = b.start_at || b.match_starts_at;
+  if (b.status === BATTLE_STATUS.COUNTDOWN && startsAt && new Date(startsAt).getTime() <= now) {
     b.status = BATTLE_STATUS.IN_PROGRESS;
     supabaseFetch(`battles?id=eq.${b.id}&status=eq.countdown`, {
       method: 'PATCH',
       body: JSON.stringify({ status: BATTLE_STATUS.IN_PROGRESS })
     }).catch(() => {});
+  }
+
+  // Auto-finalize if match deadline has passed
+  const endsAt = b.end_at || b.match_deadline;
+  if (b.status === BATTLE_STATUS.IN_PROGRESS && endsAt && new Date(endsAt).getTime() <= now) {
+    checkAndFinalizeBattle(b.id).catch(() => {});
   }
 
   return b;
@@ -234,51 +506,20 @@ export async function getBattleResults(battleId) {
  * Accept or decline a battle invitation
  */
 export async function respondToBattle(battleId, username, accept) {
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-  
-  const opponentName = battle.challenged_username || battle.challenged;
-  if (opponentName.toLowerCase() !== username.toLowerCase()) {
-    return { success: false, error: 'You are not the invited opponent for this battle' };
-  }
-  if (battle.status !== BATTLE_STATUS.PENDING) {
-    return { success: false, error: `Battle is no longer pending (current: ${battle.status})` };
-  }
-
-  if (new Date(battle.expires_at) < new Date()) {
-    await updateBattleStatus(battleId, BATTLE_STATUS.EXPIRED);
-    return { success: false, error: 'Challenge has expired' };
-  }
-
   if (!accept) {
     await updateBattleStatus(battleId, BATTLE_STATUS.DECLINED);
-    return { success: true, battle: { ...battle, status: BATTLE_STATUS.DECLINED } };
+    return { success: true };
   }
-
-  const now = new Date();
-  const data = await supabaseFetch(`battles?id=eq.${battleId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      status: BATTLE_STATUS.SELECTING,
-      accepted_at: now.toISOString()
-    })
-  });
-
-  if (!data || data.length === 0) return { success: false, error: 'Failed to accept battle' };
-  return { success: true, battle: data[0] };
+  return await acceptBattleV2(battleId);
 }
 
 /**
- * Submit a problem pick (Challenger contributes 1 problem, Opponent contributes 1 problem)
+ * Submit a problem pick (Legacy v1)
  */
 export async function submitProblemPick(battleId, username, problemSlug, problemTitle) {
   const battle = await getBattle(battleId);
   if (!battle) return { success: false, error: 'Battle not found' };
-  if (battle.status !== BATTLE_STATUS.SELECTING) {
-    return { success: false, error: 'Battle is not in the problem selection phase' };
-  }
 
-  // Validate problem on LeetCode first
   const validated = await validateLeetCodeProblem(problemSlug);
   if (!validated.valid) {
     return { success: false, error: validated.error || 'Invalid LeetCode problem' };
@@ -296,7 +537,6 @@ export async function submitProblemPick(battleId, username, problemSlug, problem
     [pickTitleField]: validated.title || problemTitle || validated.slug
   };
 
-  // If both players have now submitted a problem, assign Problem 1 and Problem 2 and advance to READY_CHECK
   if (otherPick) {
     Object.assign(patchData, {
       problem_1: validated.slug,
@@ -324,18 +564,15 @@ export async function submitProblemPick(battleId, username, problemSlug, problem
 }
 
 /**
- * Confirm readiness for the ready check.
- * Uses atomic RPC `confirm_battle_ready` when available, with synchronized timestamps.
+ * Confirm readiness (Legacy v1 fallback)
  */
 export async function confirmReady(battleId, username) {
-  // First attempt atomic RPC call
   const rpcRes = await callRpc('confirm_battle_ready', { p_battle_id: battleId });
   if (rpcRes && rpcRes.success) {
     const updated = await getBattle(battleId);
     return { success: true, battle: updated, bothReady: rpcRes.status === BATTLE_STATUS.COUNTDOWN };
   }
 
-  // Fallback REST path
   const battle = await getBattle(battleId);
   if (!battle) return { success: false, error: 'Battle not found' };
 
@@ -346,15 +583,18 @@ export async function confirmReady(battleId, username) {
 
   if (otherIsReady) {
     const now = Date.now();
+    const duration = (battle.duration_minutes || 30) * 60;
     const countdownStarts = new Date(now).toISOString();
     const matchStartsAt = new Date(now + REVEAL_COUNTDOWN_SECONDS * 1000).toISOString();
-    const matchDeadline = new Date(now + (REVEAL_COUNTDOWN_SECONDS + BATTLE_TIME_LIMIT_SECONDS) * 1000).toISOString();
+    const matchDeadline = new Date(now + (REVEAL_COUNTDOWN_SECONDS + duration) * 1000).toISOString();
 
     Object.assign(patchData, {
       status: BATTLE_STATUS.COUNTDOWN,
       countdown_starts: countdownStarts,
       match_starts_at: matchStartsAt,
-      match_deadline: matchDeadline
+      match_deadline: matchDeadline,
+      start_at: matchStartsAt,
+      end_at: matchDeadline
     });
   }
 
@@ -368,8 +608,7 @@ export async function confirmReady(battleId, username) {
 }
 
 /**
- * Submit a verified battle submission with idempotency key.
- * Uses atomic RPC `record_battle_submission` to prevent client tampering.
+ * Submit battle result (Legacy v1)
  */
 export async function submitBattleResult(battleId, username, resultData) {
   const {
@@ -389,29 +628,13 @@ export async function submitBattleResult(battleId, username, resultData) {
     return { success: false, error: `Battle is already closed (${battle.status})` };
   }
 
-  // Calculate elapsed time from match_starts_at
-  const startTimestamp = battle.match_starts_at ? new Date(battle.match_starts_at).getTime() : Date.now();
-  const elapsed = timeTakenSeconds != null 
-    ? timeTakenSeconds 
+  const startTimestamp = (battle.start_at || battle.match_starts_at)
+    ? new Date(battle.start_at || battle.match_starts_at).getTime()
+    : Date.now();
+  const elapsed = timeTakenSeconds != null
+    ? timeTakenSeconds
     : Math.max(0, Math.floor((Date.now() - startTimestamp) / 1000));
 
-  // Execute atomic RPC submission
-  const rpcRes = await callRpc('record_battle_submission', {
-    p_battle_id: battleId,
-    p_problem_slug: problemSlug,
-    p_submission_id: submissionId || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-    p_accepted: !!accepted,
-    p_time_taken: elapsed,
-    p_runtime_ms: runtime_ms || null,
-    p_memory_mb: memory_mb || null,
-    p_language: language || battle.language || 'javascript'
-  });
-
-  if (rpcRes && rpcRes.success) {
-    return { success: true, result: rpcRes };
-  }
-
-  // Fallback REST insertion if RPC unavailable
   const insertData = await supabaseFetch('battle_results', {
     method: 'POST',
     body: JSON.stringify({
@@ -430,9 +653,7 @@ export async function submitBattleResult(battleId, username, resultData) {
     })
   });
 
-  // Evaluate state transitions
   await checkAndFinalizeBattle(battleId);
-
   return { success: true, result: insertData?.[0] };
 }
 
@@ -449,32 +670,29 @@ export async function checkAndFinalizeBattle(battleId) {
   if (!battle || TERMINAL_STATES.has(battle.status)) return null;
 
   const results = await getBattleResults(battleId);
-  const challenger = battle.challenger_username || battle.challenger;
-  const challenged = battle.challenged_username || battle.challenged;
+  const challenger = battle.challenger_username;
+  const challenged = battle.challenged_username;
 
   let scoreA = 0, scoreB = 0, timeA = 0, timeB = 0;
-  let p1A = false, p2A = false, p1B = false, p2B = false;
 
   for (const r of results) {
     if (r.accepted) {
       if (r.username.toLowerCase() === challenger.toLowerCase()) {
         scoreA += (r.points || 1);
         timeA += (r.time_taken_seconds || 0);
-        if (r.problem_slug === battle.problem_1) p1A = true;
-        if (r.problem_slug === battle.problem_2) p2A = true;
       } else if (r.username.toLowerCase() === challenged.toLowerCase()) {
         scoreB += (r.points || 1);
         timeB += (r.time_taken_seconds || 0);
-        if (r.problem_slug === battle.problem_1) p1B = true;
-        if (r.problem_slug === battle.problem_2) p2B = true;
       }
     }
   }
 
-  const bothCompleted = (p1A && p2A) && (p1B && p2B);
-  const timedOut = battle.match_deadline && Date.now() >= new Date(battle.match_deadline).getTime();
+  const deadline = battle.end_at || battle.match_deadline;
+  const timedOut = deadline && Date.now() >= new Date(deadline).getTime();
+  const problemCount = battle.problem_count || 2;
+  const bothFinished = (scoreA >= problemCount && scoreB >= problemCount);
 
-  if (bothCompleted || timedOut) {
+  if (bothFinished || timedOut) {
     let winner = 'draw';
     let winReason = 'draw';
 
@@ -519,8 +737,8 @@ export async function forfeitBattle(battleId, username) {
   const battle = await getBattle(battleId);
   if (!battle) return { success: false, error: 'Battle not found' };
 
-  const challengerName = battle.challenger_username || battle.challenger;
-  const challengedName = battle.challenged_username || battle.challenged;
+  const challengerName = battle.challenger_username;
+  const challengedName = battle.challenged_username;
 
   const winner = challengerName.toLowerCase() === username.toLowerCase()
     ? challengedName
@@ -541,8 +759,8 @@ export async function forfeitBattle(battleId, username) {
 export async function cancelBattle(battleId, username) {
   const battle = await getBattle(battleId);
   if (!battle) return { success: false, error: 'Battle not found' };
-  
-  const challengerName = battle.challenger_username || battle.challenger;
+
+  const challengerName = battle.challenger_username;
   if (challengerName.toLowerCase() !== username.toLowerCase()) {
     return { success: false, error: 'Only the challenger can cancel a pending match' };
   }
@@ -567,13 +785,13 @@ export async function getBattleHistory(username, limit = 10) {
 
   const enriched = await Promise.all(data.map(async (battle) => {
     const results = await getBattleResults(battle.id);
-    const challengerName = battle.challenger_username || battle.challenger;
-    const challengedName = battle.challenged_username || battle.challenged;
+    const challengerName = battle.challenger_username;
+    const challengedName = battle.challenged_username;
     const opponent = challengerName.toLowerCase() === username.toLowerCase()
       ? challengedName
       : challengerName;
 
-    const winnerName = battle.winner_username || battle.winner;
+    const winnerName = battle.winner_username;
     let outcome = 'draw';
     if (winnerName) {
       if (winnerName === 'draw') outcome = 'draw';
@@ -593,12 +811,7 @@ export async function getBattleHistory(username, limit = 10) {
 }
 
 /**
- * Deterministic battle scoring calculation:
- * - 1 point per accepted problem
- * - Higher points wins
- * - If equal, tiebreaker is total accepted completion time across completed problems
- * - If still equal, draw
- * - NO points for lines-of-code, runtime beats%, or memory beats%.
+ * Deterministic battle scoring calculation (used by unit tests)
  */
 export function calculateScores(r1, r2, allResults1 = [], allResults2 = []) {
   let score1 = 0;
@@ -645,7 +858,7 @@ export function calculateScores(r1, r2, allResults1 = [], allResults2 = []) {
 
   const breakdown = {
     solved: score1 > score2 ? 'r1' : score2 > score1 ? 'r2' : 'tie',
-    speed: (time1 > 0 && time2 > 0) 
+    speed: (time1 > 0 && time2 > 0)
       ? (time1 < time2 ? 'r1' : time2 < time1 ? 'r2' : 'tie')
       : (score1 > 0 ? 'r1' : score2 > 0 ? 'r2' : 'tie')
   };
@@ -715,20 +928,17 @@ export async function validateLeetCodeProblem(slugOrUrl) {
 export async function updatePresence(username, status = 'online') {
   if (!username || !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return;
   try {
-    // 1. Try atomic server-side heartbeat RPC with username auto-provisioning
     let rpcRes = await callRpc('heartbeat_presence', {
       p_status: status,
       p_username: username.toLowerCase()
     });
     if (rpcRes && rpcRes.success) return;
 
-    // Gracefully support single-parameter heartbeat_presence(p_status) if schema cache has not reloaded
     if (rpcRes?.code === 'PGRST202' || (typeof rpcRes?.error === 'string' && rpcRes.error.includes('PGRST202'))) {
       const fallbackRpc = await callRpc('heartbeat_presence', { p_status: status });
       if (fallbackRpc && (fallbackRpc.success || fallbackRpc === true)) return;
     }
 
-    // 2. Direct upsert fallback with session user_id
     const session = await getAuthSession();
     if (session?.user_id) {
       await supabaseFetch('user_presence', {
@@ -751,7 +961,6 @@ export async function getPresence(usernames) {
   const result = new Map();
   if (!usernames?.length || !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return result;
   try {
-    // 1. Try atomic RPC get_friends_presence
     const rpcRes = await callRpc('get_friends_presence', { p_usernames: usernames });
     if (rpcRes && typeof rpcRes === 'object' && !rpcRes.error) {
       for (const [uname, info] of Object.entries(rpcRes)) {
@@ -765,10 +974,9 @@ export async function getPresence(usernames) {
       return result;
     }
 
-    // 2. Direct table query fallback with 120s threshold
     const list = usernames.map(u => `"${u.toLowerCase()}"`).join(',');
     const data = await supabaseFetch(`user_presence?username=in.(${list})&select=username,status,last_seen,in_battle`);
-    const threshold = Date.now() - 120 * 1000; // 120 seconds
+    const threshold = Date.now() - 120 * 1000;
     for (const row of (data || [])) {
       const isRecent = row.last_seen && new Date(row.last_seen).getTime() > threshold;
       const status = !isRecent ? 'offline' : (row.in_battle ? 'in_battle' : (row.status || 'online'));

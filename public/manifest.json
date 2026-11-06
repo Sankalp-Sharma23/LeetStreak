@@ -34,7 +34,7 @@
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/problems/*"],
+      "matches": ["https://leetcode.com/*"],
       "js": ["leetcode-integration.js"],
       "run_at": "document_idle"
     }

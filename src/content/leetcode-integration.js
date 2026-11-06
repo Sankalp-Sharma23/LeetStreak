@@ -1,1304 +1,730 @@
 /**
- * LeetCode Page Content Script
- * Injects "Add to Queue" and "Code Screenshot" buttons
- * Autonomous submission observer and Battle HUD
+ * LeetCode Page Content Script — LeetStreak Battle HUD
+ *
+ * Responsibilities:
+ * 1. Detect "Accepted" submission verdicts
+ * 2. Auto-redirect to next battle problem after solving
+ * 3. Render a battle HUD bar (countdown, scores, opponent progress)
+ * 4. Show opponent-solved toast notifications
+ * 5. Report accepted solves to service worker
+ *
+ * Removed: "Add to Queue", "Code Screenshot" button injection
  */
 
-(function() {
+(function () {
   'use strict';
-  
-  console.log('LeetStreak: Content script loaded');
-  
-  let buttonsInjected = false;
-  let currentProblemData = null;
-  let submissionWatcher = null;
-  
-  // Battle Mode state
-  let activeBattle = null;
+
+  // ─────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────
+
+  let activeBattle      = null;  // battle row from service worker
+  let battleProblems    = [];    // [{sequence_number, problem_slug, problem_title, problem_url, difficulty}]
+  let myResults         = [];    // my accepted solves
+  let oppResults        = [];    // opponent's accepted solves
+  let myUsername        = null;
   let battleAttemptCount = 0;
+  let hudInjected       = false;
+  let hudTimer          = null;
+  let submissionObserving = false;
+  let redirectPending   = false; // prevent double-redirect
+
+  // ─────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────
+
+  function isProblemPage() {
+    return window.location.pathname.startsWith('/problems/') &&
+           window.location.pathname !== '/problems/';
+  }
+
+  function getCurrentSlug() {
+    return window.location.pathname.split('/problems/')[1]?.split('/')[0] || null;
+  }
 
   function normalizeLanguage(language) {
     const normalized = String(language).toLowerCase().trim();
     const aliases = {
-      python: 'python3', py: 'python3', javascript: 'javascript', js: 'javascript',
-      typescript: 'typescript', ts: 'typescript', 'c++': 'cpp', cpp: 'cpp',
-      csharp: 'csharp', 'c#': 'csharp', golang: 'go'
+      python: 'python3', py: 'python3',
+      javascript: 'javascript', js: 'javascript',
+      typescript: 'typescript', ts: 'typescript',
+      'c++': 'cpp', cpp: 'cpp',
+      csharp: 'csharp', 'c#': 'csharp',
+      golang: 'go'
     };
     return aliases[normalized] || normalized;
   }
-  
-  // Check if there is an active battle on load
-  async function checkBattleStatus() {
-    try {
-      const [resp, userData] = await Promise.all([
-        chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS' }),
-        chrome.storage.local.get('my_leetcode_username')
-      ]);
-      const myUsername = userData.my_leetcode_username;
-      if (resp?.battle) {
-        const status = resp.battle.status;
-        const activeStatuses = [
-          'starting', 'problem_1_active', 'problem_1_waiting',
-          'transitioning', 'problem_2_active', 'problem_2_waiting'
-        ];
-        
-        if (activeStatuses.includes(status)) {
-          activeBattle = resp.battle;
-          
-          // Determine which problem is currently active
-          const isP1 = ['starting', 'problem_1_active', 'problem_1_waiting'].includes(status);
-          const activeSlug = isP1 ? activeBattle.problem_1 : activeBattle.problem_2;
-          
-          console.log('[LeetStreak Battle] Active battle detected. Current problem:', activeSlug);
-          
-          // Check if opponent solved the current problem
-          const opponentResult = (resp.results || []).find(r => 
-            r.username !== myUsername && 
-            r.problem_index === (isP1 ? 1 : 2) && 
-            r.accepted
-          );
-          const opponentSolvedText = opponentResult ? ` — ⚠️ Opponent Finished!` : '';
-          
-          // Auto-inject language if required
-          if (activeBattle.language) {
-            const currentLang = window.localStorage.getItem('global_lang');
-            if (currentLang !== activeBattle.language) {
-              console.log('[LeetStreak Battle] Forcing language to:', activeBattle.language);
-              window.localStorage.setItem('global_lang', activeBattle.language);
-              // Force a reload once to ensure Monaco editor picks it up
-              if (!window.sessionStorage.getItem('leetstreak_lang_forced')) {
-                window.sessionStorage.setItem('leetstreak_lang_forced', '1');
-                window.location.reload();
-                return;
-              }
-            }
-          }
-          
-          // Determine the start time for the current problem
-          const problemStartTime = isP1 ? activeBattle.p1_start_time : activeBattle.p2_start_time;
 
-          injectBattleIndicator(isP1 ? 1 : 2, activeSlug, problemStartTime, opponentSolvedText);
-        } else {
-          activeBattle = null;
-        }
-      }
+  function isExtensionContextValid() {
+    try {
+      return typeof chrome !== 'undefined' &&
+             typeof chrome.runtime !== 'undefined' &&
+             !!chrome.runtime.id;
+    } catch {
+      return false;
+    }
+  }
+
+  async function safeMessage(msg) {
+    if (!isExtensionContextValid()) return null;
+    try {
+      return await chrome.runtime.sendMessage(msg);
     } catch (e) {
-      // Service worker may not be ready yet, ignore
-    }
-  }
-
-  // Poll battle status periodically
-  setInterval(checkBattleStatus, 5000);
-  
-  // Show a ⚔️ indicator on the page when in battle mode
-  function injectBattleIndicator(problemIndex, activeSlug, startTimeIso, opponentSolvedText = '') {
-    if (!activeBattle || !isProblemPage()) return;
-    const currentSlug = window.location.pathname.split('/problems/')[1]?.split('/')[0];
-    if (currentSlug !== activeSlug) return;
-    
-    let bar = document.getElementById('leetstreak-battle-indicator');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'leetstreak-battle-indicator';
-      bar.style.cssText = `
-        position: fixed; top: 0; left: 0; right: 0;
-        background: linear-gradient(90deg, #7f1d1d, #dc2626, #7f1d1d);
-        color: white; text-align: center; font-size: 13px; font-weight: 700;
-        padding: 6px 16px; z-index: 99999;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        letter-spacing: 0.5px; box-shadow: 0 2px 8px rgba(220,38,38,0.4);
-        display: flex; justify-content: space-between; align-items: center;
-      `;
-      
-      const leftText = document.createElement('div');
-      leftText.id = 'leetstreak-battle-status-text';
-      
-      const rightText = document.createElement('div');
-      rightText.style.cssText = 'font-family: monospace; font-size: 14px; background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 4px;';
-      rightText.innerHTML = `⏱️ <span id="leetstreak-battle-timer">00:00</span>`;
-      
-      bar.appendChild(leftText);
-      bar.appendChild(rightText);
-      document.body.prepend(bar);
-      
-      // Start timer interval
-      const startMs = startTimeIso ? new Date(startTimeIso).getTime() : Date.now();
-      setInterval(() => {
-        const elapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-        const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
-        const s = (elapsed % 60).toString().padStart(2, '0');
-        const timerSpan = document.getElementById('leetstreak-battle-timer');
-        if (timerSpan) {
-          timerSpan.textContent = `${m}:${s}`;
-        }
-      }, 1000);
-    }
-    
-    const leftText = document.getElementById('leetstreak-battle-status-text');
-    if (leftText) {
-      leftText.textContent = `⚔️ BATTLE ACTIVE — Problem ${problemIndex} of 2${opponentSolvedText}`;
-    }
-  }
-  
-  // Send battle submission result to service worker
-  async function triggerBattleSubmission(performanceStats, code, language) {
-    if (!activeBattle) return;
-    
-    const currentSlug = window.location.pathname.split('/problems/')[1]?.split('/')[0];
-    if (!currentSlug) return;
-
-    const isProblem1 = activeBattle.problem_1 && currentSlug.toLowerCase() === activeBattle.problem_1.toLowerCase();
-    const isProblem2 = activeBattle.problem_2 && currentSlug.toLowerCase() === activeBattle.problem_2.toLowerCase();
-    
-    if (!isProblem1 && !isProblem2) return;
-    
-    const lines = code ? code.split('\n').filter(l => l.trim().length > 0).length : null;
-    
-    try {
-      const runtime_ms = performanceStats.runtime ? parseInt(performanceStats.runtime) : null;
-      const memory_mb = performanceStats.memory ? parseFloat(performanceStats.memory) : null;
-      const runtime_beats = performanceStats.runtimePercentile ? parseFloat(performanceStats.runtimePercentile) : null;
-      const memory_beats = performanceStats.memoryPercentile ? parseFloat(performanceStats.memoryPercentile) : null;
-      
-      let submissionId = null;
-      const subLink = document.querySelector('a[href*="/submissions/detail/"]');
-      if (subLink) {
-        const match = subLink.href.match(/detail\/(\d+)/);
-        if (match) submissionId = match[1];
+      if (e?.message?.includes('context invalidated') ||
+          e?.message?.includes('Extension context')) {
+        showBattleToast('⚠️ Extension reloaded — refresh this page (F5)', 'warn');
       }
-      if (!submissionId) {
-        submissionId = `sub_${currentSlug}_${Date.now()}`;
-      }
-
-      const resp = await chrome.runtime.sendMessage({
-        type: 'BATTLE_SUBMISSION',
-        battleId: activeBattle.id,
-        problemSlug: currentSlug,
-        submissionId,
-        accepted: true,
-        runtime_ms,
-        memory_mb,
-        runtime_beats,
-        memory_beats,
-        language: normalizeLanguage(language),
-        lines_of_code: lines,
-        attempts: battleAttemptCount || 1,
-        problemIndex: isProblem1 ? 1 : 2
-      });
-      
-      if (resp?.success) {
-        // Update the battle indicator
-        const bar = document.getElementById('leetstreak-battle-indicator');
-        if (bar) {
-          bar.style.background = 'linear-gradient(90deg, #14532d, #16a34a, #14532d)';
-          bar.textContent = `✅ Accepted for ${currentSlug}! Progress recorded.`;
-        }
-        activeBattle = null; // Clear local state so we stop tracking on this page
-      }
-    } catch (e) {
-      console.error('[LeetStreak Battle] Failed to send battle submission:', e);
-    }
-  }
-
-  // Check if we're on a problem page
-  function isProblemPage() {
-    return window.location.pathname.startsWith('/problems/') && 
-           window.location.pathname !== '/problems/';
-  }
-  
-  // Extract problem information
-  function extractProblemData() {
-    try {
-      // Get problem title
-      const titleElement = document.querySelector('[data-cy="question-title"]') || 
-                          document.querySelector('div[class*="text-title"]');
-      const title = titleElement ? titleElement.textContent.trim() : 'Unknown Problem';
-      
-      // Get problem slug from URL
-      const slug = window.location.pathname.split('/problems/')[1]?.split('/')[0] || '';
-      
-      // Get difficulty
-      const difficultyElement = document.querySelector('div[diff]') ||
-                               document.querySelector('[class*="text-difficulty"]');
-      const difficulty = difficultyElement ? difficultyElement.textContent.trim() : 'Medium';
-      
-      // Get problem description
-      const descriptionElement = document.querySelector('[data-track-load="description_content"]') ||
-                                document.querySelector('[class*="elfjS"]');
-      const description = descriptionElement ? descriptionElement.textContent.trim().substring(0, 500) : '';
-      
-      // Get problem number
-      const numberMatch = title.match(/^(\d+)\./);
-      const number = numberMatch ? numberMatch[1] : '';
-      
-      return {
-        title: title,
-        slug: slug,
-        difficulty: difficulty,
-        description: description,
-        number: number,
-        url: window.location.href
-      };
-    } catch (error) {
-      console.error('Error extracting problem data:', error);
       return null;
     }
   }
-  
-  // Check if problem is marked as solved/submitted on the page
-  function checkIfProblemSolved() {
-    try {
-      // Look for "Solved" badge or checkmark icon
-      // LeetCode shows solved status with checkmark or "Solved" text
-      
-      // Check 1: Look for SVG checkmark in problem title area
-      const titleArea = document.querySelector('[data-cy="question-title"]')?.parentElement;
-      if (titleArea) {
-        const checkmarks = titleArea.querySelectorAll('svg[class*="check"], svg[class*="done"]');
-        if (checkmarks.length > 0) {
-          console.log('Found checkmark in title area');
-          return true;
-        }
-      }
-      
-      // Check 2: Look for "Solved" text badge
-      const allElements = document.querySelectorAll('*');
-      for (let elem of allElements) {
-        if (elem.textContent === 'Solved' && elem.offsetParent !== null) {
-          console.log('Found "Solved" badge');
-          return true;
-        }
-      }
-      
-      // Check 3: Look for checkmark in the problem header area
-      const headerArea = document.querySelector('[data-cy="question-header"]') ||
-                        document.querySelector('[class*="header"]');
-      if (headerArea) {
-        const successIcon = headerArea.querySelector('[class*="success"], [class*="accepted"], svg[class*="fill-green"]');
-        if (successIcon) {
-          console.log('Found success icon in header');
-          return true;
-        }
-      }
-      
-      // Check 4: Look for green checkmark SVG anywhere in top section
-      const topSection = document.querySelector('[class*="top"], [data-cy="problem-statement"]');
-      if (topSection) {
-        const svgs = topSection.querySelectorAll('svg');
-        for (let svg of svgs) {
-          const classes = svg.className.baseVal || svg.className;
-          const fill = svg.getAttribute('fill') || svg.style.fill;
-          // Green fill indicates accepted/solved
-          if ((classes.includes('check') || classes.includes('done')) && 
-              (fill === '#22c55e' || fill.includes('green') || classes.includes('green'))) {
-            console.log('Found green checkmark SVG');
-            return true;
-          }
-        }
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Error checking if problem solved:', error);
-      return false;
-    }
-  }
-  
-  // Extract user's code
-  function extractCode() {
-    try {
-      // Try to get code from Monaco editor
-      const codeEditors = document.querySelectorAll('.view-lines');
-      if (codeEditors.length > 0) {
-        const codeLines = Array.from(codeEditors[0].querySelectorAll('.view-line'));
-        return codeLines.map(line => line.textContent).join('\n');
-      }
-      
-      // Fallback: try textarea
-      const textarea = document.querySelector('textarea[class*="code"]');
-      if (textarea) {
-        return textarea.value;
-      }
-      
-      return '';
-    } catch (error) {
-      console.error('Error extracting code:', error);
-      return '';
-    }
-  }
-  
-  // Get selected language - improved detection
+
+  // ─────────────────────────────────────────────────────────
+  // LANGUAGE DETECTION
+  // ─────────────────────────────────────────────────────────
+
   function getSelectedLanguage() {
     try {
-      // Strategy 1: Try Monaco editor language
-      if (window.monaco && window.monaco.editor) {
+      if (window.monaco?.editor) {
         const models = window.monaco.editor.getModels();
         if (models.length > 0) {
           const lang = models[0].getLanguageId();
-          if (lang && lang !== 'plaintext') {
-            return normalizeLanguage(lang);
-          }
+          if (lang && lang !== 'plaintext') return normalizeLanguage(lang);
         }
       }
-      
-      // Strategy 2: Try language selector dropdown button
-      const langButton = document.querySelector('button[title*="language"], button[aria-label*="language"]') ||
-                        document.querySelector('[class*="lang-select"] button') ||
-                        document.querySelector('button[id*="lang"]');
-      if (langButton && langButton.textContent) {
-        const text = langButton.textContent.trim();
-        if (text && text !== '') {
-          return normalizeLanguage(text);
-        }
-      }
-      
-      // Strategy 3: Try to find language from dropdown menu
+      const langButton = document.querySelector(
+        'button[title*="language"], button[aria-label*="language"], [class*="lang-select"] button, button[id*="lang"]'
+      );
+      if (langButton?.textContent?.trim()) return normalizeLanguage(langButton.textContent.trim());
       const langDropdown = document.querySelector('[data-mode-id]');
-      if (langDropdown) {
-        const modeId = langDropdown.getAttribute('data-mode-id');
-        if (modeId) {
-          return normalizeLanguage(modeId);
-        }
-      }
-      
-      // Strategy 4: Try localStorage for language preference
+      if (langDropdown) return normalizeLanguage(langDropdown.getAttribute('data-mode-id') || '');
       try {
         const globalLang = localStorage.getItem('global_lang');
         if (globalLang) {
           const parsed = JSON.parse(globalLang);
-          if (parsed.lang) {
-            return normalizeLanguage(parsed.lang);
-          }
+          if (parsed.lang) return normalizeLanguage(parsed.lang);
         }
-      } catch (e) {}
-      
-      // Default fallback
-      return 'python3';
-    } catch (error) {
-      console.error('Error detecting language:', error);
-      return 'python3';
-    }
-  }
-  
-  // Create button element with modern, smooth UI
-  function createButton(text, icon, onClick, isFloating = false) {
-    const button = document.createElement('button');
-    button.className = isFloating ? 'leetstreak-floating-btn' : 'leetstreak-btn';
-    
-    // Create smooth gradient background - LeetCode Premium style (gold)
-    const gradientColors = isFloating 
-      ? 'linear-gradient(135deg, #ffa116 0%, #f89f1b 50%, #ffc01e 100%)'
-      : 'linear-gradient(135deg, #ffa116 0%, #f89f1b 100%)';
-    
-    // Safely create button content
-    const iconSpan = document.createElement('span');
-    iconSpan.className = 'icon';
-    iconSpan.style.cssText = 'display: inline-block; transition: transform 0.3s ease;';
-    iconSpan.innerHTML = icon; // SVG is safe - comes from static code
-    
-    const textSpan = document.createElement('span');
-    textSpan.className = 'text';
-    textSpan.textContent = text; // Use textContent for user text
-    
-    button.appendChild(iconSpan);
-    button.appendChild(textSpan);
-    
-    if (isFloating) {
-      button.style.cssText = `
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        padding: 14px 24px;
-        background: ${gradientColors};
-        color: #1a1a1a;
-        border: none;
-        border-radius: 12px;
-        font-size: 14px;
-        font-weight: 700;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 12px rgba(255, 161, 22, 0.35);
-        z-index: 10000;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        letter-spacing: 0.3px;
-        text-transform: none;
-      `;
-    } else {
-      button.style.cssText = `
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        padding: 8px 16px;
-        margin-left: 10px;
-        background: ${gradientColors};
-        color: #1a1a1a;
-        border: none;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 700;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 8px rgba(255, 161, 22, 0.3);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        letter-spacing: 0.2px;
-        position: relative;
-        overflow: hidden;
-        text-transform: none;
-      `;
-      
-      // Add shimmer effect on hover
-      const shimmer = document.createElement('span');
-      shimmer.style.cssText = `
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-        transition: left 0.5s ease;
-      `;
-      button.appendChild(shimmer);
-      
-      button.addEventListener('mouseenter', () => {
-        shimmer.style.left = '100%';
-      });
-    }
-    
-    // Enhanced hover effects
-    button.addEventListener('mouseenter', () => {
-      if (isFloating) {
-        button.style.transform = 'translateY(-2px)';
-        button.style.boxShadow = '0 6px 16px rgba(255, 161, 22, 0.45)';
-      } else {
-        button.style.transform = 'translateY(-1px)';
-        button.style.boxShadow = '0 4px 12px rgba(255, 161, 22, 0.4)';
-      }
-      button.querySelector('.icon').style.transform = 'scale(1.1)';
-    });
-    
-    button.addEventListener('mouseleave', () => {
-      button.style.transform = 'translateY(0)';
-      if (isFloating) {
-        button.style.boxShadow = '0 4px 12px rgba(255, 161, 22, 0.35)';
-      } else {
-        button.style.boxShadow = '0 2px 8px rgba(255, 161, 22, 0.3)';
-      }
-      button.querySelector('.icon').style.transform = 'scale(1)';
-    });
-    
-    button.addEventListener('mousedown', () => {
-      button.style.transform = 'translateY(0) scale(0.98)';
-    });
-    
-    button.addEventListener('mouseup', () => {
-      if (isFloating) {
-        button.style.transform = 'translateY(-2px)';
-      } else {
-        button.style.transform = 'translateY(-1px)';
-      }
-    });
-    
-    // Add click animation
-    button.addEventListener('click', (e) => {
-      // Ripple effect
-      const ripple = document.createElement('span');
-      const rect = button.getBoundingClientRect();
-      const size = Math.max(rect.width, rect.height);
-      const x = e.clientX - rect.left - size / 2;
-      const y = e.clientY - rect.top - size / 2;
-      
-      ripple.style.cssText = `
-        position: absolute;
-        width: ${size}px;
-        height: ${size}px;
-        left: ${x}px;
-        top: ${y}px;
-        background: rgba(255, 255, 255, 0.5);
-        border-radius: 50%;
-        transform: scale(0);
-        animation: ripple 0.6s ease-out;
-        pointer-events: none;
-      `;
-      
-      // Add animation keyframes if not already added
-      if (!document.getElementById('leetstreak-ripple-animation')) {
-        const style = document.createElement('style');
-        style.id = 'leetstreak-ripple-animation';
-        style.textContent = `
-          @keyframes ripple {
-            to {
-              transform: scale(4);
-              opacity: 0;
-            }
-          }
-        `;
-        document.head.appendChild(style);
-      }
-      
-      button.appendChild(ripple);
-      setTimeout(() => ripple.remove(), 600);
-      
-      onClick(e);
-    });
-    
-    return button;
+      } catch {}
+    } catch {}
+    return 'python3';
   }
 
-  function showNotification(message, type = 'info') {
-    document.getElementById('leetstreak-notification')?.remove();
-    const colors = { success: '#10b981', error: '#ef4444', info: '#667eea' };
-    const notification = document.createElement('div');
-    notification.id = 'leetstreak-notification';
-    notification.textContent = message;
-    notification.style.cssText = `position: fixed; top: 20px; right: 20px; background: ${colors[type] || colors.info}; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; z-index: 10001;`;
-    document.body.appendChild(notification);
-    setTimeout(() => notification.remove(), 3000);
-  }
-
-  function injectButtons() {
-    if (buttonsInjected || document.getElementById('leetstreak-buttons')) return;
-    const submitButton = [...document.querySelectorAll('button')].find(button =>
-      /^(Submit|Run|Test)$/.test(button.textContent.trim())
-    );
-    const target = submitButton?.parentElement || document.querySelector('[class*="toolbar"]');
-    if (!target) return;
-
-    const container = document.createElement('div');
-    container.id = 'leetstreak-buttons';
-    container.style.cssText = 'display: inline-flex; gap: 8px; align-items: center; margin-left: 12px; z-index: 100;';
-    container.append(
-      createButton('Add to Queue', '📋', handleAddToQueue),
-      createButton('Code Screenshot', '📸', handleCodeScreenshot)
-    );
-    target.appendChild(container);
-    buttonsInjected = true;
-  }
-
-  function handleCodeScreenshot() {
-    const problem = currentProblemData || extractProblemData() || {};
-    const code = extractCode();
-    if (!code) {
-      showNotification('No code found in editor. Write some code first.', 'error');
-      return;
-    }
-
+  function extractCode() {
     try {
-      const language = getSelectedLanguage() || 'code';
-      const lines = code.split('\n');
-
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      const fontSize = 14;
-      const lineHeight = 22;
-      const padding = 32;
-      const headerHeight = 70;
-
-      ctx.font = `${fontSize}px "Fira Code", monospace, "Courier New"`;
-
-      let maxLineWidth = 0;
-      lines.forEach(line => {
-        const w = ctx.measureText(line).width;
-        if (w > maxLineWidth) maxLineWidth = w;
-      });
-
-      const lineNumWidth = 45;
-      const width = Math.max(640, Math.ceil(maxLineWidth + padding * 2 + lineNumWidth + 40));
-      const height = Math.ceil(headerHeight + (lines.length * lineHeight) + padding * 2);
-
-      canvas.width = width;
-      canvas.height = height;
-
-      ctx.font = `${fontSize}px "Fira Code", monospace, "Courier New"`;
-
-      // Background gradient
-      const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-      bgGrad.addColorStop(0, '#18181B');
-      bgGrad.addColorStop(1, '#09090B');
-      ctx.fillStyle = bgGrad;
-      if (ctx.roundRect) {
-        ctx.roundRect(0, 0, width, height, 16);
-      } else {
-        ctx.rect(0, 0, width, height);
+      const codeEditors = document.querySelectorAll('.view-lines');
+      if (codeEditors.length > 0) {
+        return Array.from(codeEditors[0].querySelectorAll('.view-line'))
+                    .map(l => l.textContent).join('\n');
       }
-      ctx.fill();
-
-      // Window controls
-      ctx.fillStyle = '#EF4444';
-      ctx.beginPath(); ctx.arc(padding, 28, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#F59E0B';
-      ctx.beginPath(); ctx.arc(padding + 18, 28, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#10B981';
-      ctx.beginPath(); ctx.arc(padding + 36, 28, 6, 0, Math.PI * 2); ctx.fill();
-
-      // Title
-      ctx.fillStyle = '#F4F4F5';
-      ctx.font = 'bold 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.fillText(`${problem.title || 'LeetCode Problem'} (${language})`, padding + 60, 33);
-
-      // Badge
-      ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.fillStyle = '#F59E0B';
-      const watermark = '⚡ LeetStreak';
-      ctx.fillText(watermark, width - padding - ctx.measureText(watermark).width, 33);
-
-      // Separator
-      ctx.strokeStyle = '#27272A';
-      ctx.beginPath();
-      ctx.moveTo(padding, 50);
-      ctx.lineTo(width - padding, 50);
-      ctx.stroke();
-
-      // Code text
-      ctx.font = `${fontSize}px "Fira Code", monospace, "Courier New"`;
-      let y = headerHeight + padding;
-      lines.forEach((line, index) => {
-        ctx.fillStyle = '#52525B';
-        ctx.fillText(String(index + 1), padding, y);
-        ctx.fillStyle = '#E4E4E7';
-        ctx.fillText(line, padding + lineNumWidth, y);
-        y += lineHeight;
-      });
-
-      canvas.toBlob(blob => {
-        if (!blob) {
-          showNotification('Failed to generate image', 'error');
-          return;
-        }
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        const slug = problem.slug || 'leetcode-solution';
-        link.download = `${slug}-solution.png`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-        showNotification('📸 Code screenshot saved as PNG!', 'success');
-      }, 'image/png');
-    } catch (err) {
-      console.error('[LeetStreak] Code screenshot error:', err);
-      showNotification('Screenshot generation failed', 'error');
-    }
-  }
-  
-  // Create floating action button as fallback
-  function _createFloatingButton() {
-    // Remove if already exists
-    const existing = document.getElementById('leetstreak-floating-menu');
-    if (existing) return;
-    
-    const container = document.createElement('div');
-    container.id = 'leetstreak-floating-menu';
-    container.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      z-index: 10000;
-    `;
-    
-    const queueBtn = createButton('Queue', '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="15" y1="10" x2="9" y2="10"/></svg>', handleAddToQueue, true);
-    const insightsBtn = createButton('Insights', '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', handleFriendsInsights, true);
-    
-    queueBtn.style.bottom = '80px';
-    insightsBtn.style.bottom = '20px';
-    
-    container.appendChild(queueBtn);
-    container.appendChild(insightsBtn);
-    
-    document.body.appendChild(container);
-    console.log('LeetStreak: Floating buttons added as fallback');
-  }
-  
-  // Check if extension context is still valid
-  function isExtensionContextValid() {
-    try {
-      // Try to access chrome.runtime - this will throw if context is invalidated
-      return typeof chrome !== 'undefined' && 
-             typeof chrome.storage !== 'undefined' && 
-             typeof chrome.storage.local !== 'undefined';
-    } catch (e) {
-      return false;
-    }
-  }
-  
-  // Safe storage access helper
-  async function safeStorageGet(key) {
-    // Check context first
-    if (!isExtensionContextValid()) {
-      showNotification('⚠️ Extension reloaded. Please refresh this page (F5).', 'error');
-      throw new Error('Extension context invalidated');
-    }
-    
-    try {
-      return await chrome.storage.local.get(key);
-    } catch (error) {
-      const errorMsg = error.message || error.toString() || '';
-      const isInvalidated = errorMsg.includes('Extension context invalidated') || 
-                           errorMsg.includes('context invalidated') ||
-                           errorMsg.includes('message port closed') ||
-                           !isExtensionContextValid();
-      
-      if (isInvalidated) {
-        showNotification('⚠️ Extension reloaded. Please refresh this page (F5) to continue.', 'error');
-        throw new Error('Extension context invalidated');
-      }
-      throw error;
-    }
-  }
-  
-  async function safeStorageSet(data) {
-    // Check context first
-    if (!isExtensionContextValid()) {
-      showNotification('⚠️ Extension reloaded. Please refresh this page (F5).', 'error');
-      throw new Error('Extension context invalidated');
-    }
-    
-    try {
-      return await chrome.storage.local.set(data);
-    } catch (error) {
-      const errorMsg = error.message || error.toString() || '';
-      const isInvalidated = errorMsg.includes('Extension context invalidated') || 
-                           errorMsg.includes('context invalidated') ||
-                           errorMsg.includes('message port closed') ||
-                           !isExtensionContextValid();
-      
-      if (isInvalidated) {
-        showNotification('⚠️ Extension reloaded. Please refresh this page (F5) to continue.', 'error');
-        throw new Error('Extension context invalidated');
-      }
-      throw error;
-    }
-  }
-  
-  // Handle Add to Queue - Use message passing to avoid context issues
-  async function handleAddToQueue() {
-    currentProblemData = extractProblemData();
-    
-    if (!currentProblemData) {
-      showNotification('❌ Could not extract problem data', 'error');
-      return;
-    }
-
-    // Check if problem is already solved/submitted on the page
-    const isSolved = checkIfProblemSolved();
-    if (isSolved) {
-      currentProblemData.status = 'completed';
-      console.log('Problem detected as solved on page');
-    }
-    
-    try {
-      // Use chrome.runtime.sendMessage instead of direct storage access
-      // This avoids extension context invalidated errors
-      const response = await new Promise((resolve, reject) => {
-        try {
-          if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
-            reject(new Error('Extension not available'));
-            return;
-          }
-          
-          chrome.runtime.sendMessage(
-            {
-              type: 'ADD_TO_QUEUE',
-              problemData: currentProblemData
-            },
-            (response) => {
-              // Check for errors
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-              } else {
-                resolve(response);
-              }
-            }
-          );
-        } catch (error) {
-          reject(error);
-        }
-      });
-      
-      if (response.success) {
-        const msg = response.status === 'completed' 
-          ? '✅ Added to queue! (Already Submitted ✓)' 
-          : '✅ Added to queue!';
-        showNotification(msg, 'success');
-      } else {
-        if (response.alreadyExists) {
-          showNotification('📋 Already in queue!', 'info');
-        } else {
-          showNotification('❌ ' + (response.error || 'Failed to add to queue'), 'error');
-        }
-      }
-      
-    } catch (error) {
-      console.error('Error adding to queue:', error);
-      const errorMsg = error.message || error.toString() || '';
-      
-      if (errorMsg.includes('Extension context invalidated') || 
-          errorMsg.includes('message port closed') ||
-          errorMsg.includes('Extension not available')) {
-        showNotification('⚠️ Extension reloaded. Please refresh this page (F5).', 'error');
-      } else {
-        showNotification('❌ Failed to add to queue: ' + errorMsg.substring(0, 50), 'error');
-      }
-    }
-  }
-  
-  // Handle Friends Insights
-  async function handleFriendsInsights() {
-    try {
-      currentProblemData = extractProblemData();
-      if (!currentProblemData || !currentProblemData.slug) {
-        showNotification('❌ Could not identify current problem', 'error');
-        return;
-      }
-      
-      const slug = currentProblemData.slug;
-      
-      // Get friends data from storage
-      const data = await safeStorageGet(['leetfriends_data', 'my_leetcode_username']);
-      const friendsData = data.leetfriends_data || {};
-      
-      let solvedFriends = [];
-      
-      for (const [username, userData] of Object.entries(friendsData)) {
-        if (username === 'timestamp') continue;
-        
-        let hasSolved = false;
-        
-        // Check allAcceptedSubmissions
-        if (userData.allAcceptedSubmissions && userData.allAcceptedSubmissions.length > 0) {
-          hasSolved = userData.allAcceptedSubmissions.some(sub => sub.titleSlug === slug);
-        }
-        
-        // Fallback: check recentSubmissions
-        if (!hasSolved && userData.profile && userData.profile.recentSubmissions) {
-          hasSolved = userData.profile.recentSubmissions.some(sub => sub.titleSlug === slug && sub.statusDisplay === 'Accepted');
-        }
-        
-        if (hasSolved) {
-          solvedFriends.push({
-            username: username,
-            avatar: userData.profile?.avatar || 'https://assets.leetcode.com/users/default_avatar.jpg'
-          });
-        }
-      }
-      
-      showInsightsModal(solvedFriends, currentProblemData.title);
-      
-    } catch (error) {
-      console.error('Insights error:', error);
-      showNotification('❌ Failed to load insights', 'error');
-    }
-  }
-
-  function showInsightsModal(solvedFriends, problemTitle) {
-    const existingModal = document.getElementById('leetstreak-insights-modal');
-    if (existingModal) existingModal.remove();
-    
-    const modal = document.createElement('div');
-    modal.id = 'leetstreak-insights-modal';
-    modal.style.cssText = `
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.7);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 10000; backdrop-filter: blur(8px);
-    `;
-    
-    // Close when clicking outside
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
-    });
-    
-    const content = document.createElement('div');
-    content.style.cssText = `
-      background: linear-gradient(145deg, #161b22, #0d1117);
-      border: 1px solid #30363d;
-      border-radius: 16px;
-      width: 420px;
-      padding: 24px;
-      color: #c9d1d9;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-      font-family: 'Inter', system-ui, sans-serif;
-    `;
-    
-    let friendsHtml = '';
-    if (solvedFriends.length === 0) {
-      friendsHtml = `<div style="text-align:center; padding: 20px; color: #8b949e; background: rgba(255,255,255,0.05); border-radius: 8px;">
-        None of your friends have solved this yet. Be the first! 🏆
-      </div>`;
-    } else {
-      friendsHtml = `<div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
-        ${solvedFriends.map(f => `
-          <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
-            <img src="${f.avatar}" style="width: 32px; height: 32px; border-radius: 50%;" />
-            <span style="font-weight: 600;">${f.username}</span>
-            <span style="margin-left:auto; color: #2ea043; font-size: 12px;">Solved ✓</span>
-          </div>
-        `).join('')}
-      </div>`;
-    }
-    
-    content.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e3b341" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          Friends Insights
-        </h2>
-        <button id="close-insights-btn" style="background: none; border: none; color: #8b949e; cursor: pointer; font-size: 20px;">&times;</button>
-      </div>
-      
-      <div style="font-size: 14px; margin-bottom: 12px; color: #8b949e;">
-        Problem: <strong style="color: #c9d1d9;">${problemTitle}</strong>
-      </div>
-      
-      <h3 style="font-size: 14px; margin: 20px 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px; color: #8b949e;">Friends who solved this</h3>
-      ${friendsHtml}
-      
-      <div style="margin-top: 24px; padding: 16px; background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 8px;">
-        <div style="font-weight: 600; color: #58a6ff; margin-bottom: 4px;">📈 Rank Predictor</div>
-        <div style="font-size: 13px; color: #c9d1d9; line-height: 1.5;">
-          Solving this problem will boost your overall solved count and improve your standing on the LeetStreak leaderboard!
-        </div>
-      </div>
-    `;
-    
-    modal.appendChild(content);
-    document.body.appendChild(modal);
-    
-    document.getElementById('close-insights-btn').addEventListener('click', () => {
-      modal.remove();
-    });
+      const textarea = document.querySelector('textarea[class*="code"]');
+      if (textarea) return textarea.value;
+    } catch {}
+    return '';
   }
 
   function extractPerformanceStats() {
-    let stats = {
-      runtime: null,
-      runtimePercentile: null,
-      memory: null,
-      memoryPercentile: null,
-      acceptanceRate: null
-    };
-
+    const stats = { runtime: null, runtimePercentile: null, memory: null, memoryPercentile: null };
     try {
-      const resultArea = document.querySelector('[class*="result"], [data-e2e-locator="submission-result"]');
+      const resultArea = document.querySelector('[data-e2e-locator="submission-result"], [class*="result"]');
       if (resultArea) {
         const text = resultArea.textContent;
-        
-        // Extract runtime (e.g., "Runtime: 52 ms" or "52 ms")
-        const runtimeMatch = text.match(/(?:Runtime[:\s]*)?(\d+)\s*ms/i);
-        if (runtimeMatch) {
-          stats.runtime = `${runtimeMatch[1]} ms`;
+        const runtimeMatch = text.match(/(?:Runtime[:\s]*)?(\\d+)\\s*ms/i);
+        if (runtimeMatch) stats.runtime = parseInt(runtimeMatch[1]);
+        const allBeats = [...text.matchAll(/(?:Beats|less than)[\\s]+([\d.]+)[\\s]*%/gi)].map(m => parseFloat(m[1]));
+        if (allBeats.length >= 2) {
+          stats.runtimePercentile = allBeats[0];
+          stats.memoryPercentile = allBeats[1];
+        } else if (allBeats.length === 1) {
+          stats.runtimePercentile = allBeats[0];
         }
-        
-        // Extract runtime percentile (e.g., "Beats 89.5%" or "faster than 89.5%")
-        const runtimePercentMatch = text.match(/(?:Beats|faster than)\s*([\d.]+)\s*%/i);
-        if (runtimePercentMatch) {
-          stats.runtimePercentile = parseFloat(runtimePercentMatch[1]).toFixed(1);
-        }
-        
-        // Extract memory (e.g., "Memory: 17.2 MB" or "17.2 MB")
-        const memoryMatch = text.match(/(?:Memory[:\s]*)?([\d.]+)\s*MB/i);
-        if (memoryMatch) {
-          stats.memory = `${memoryMatch[1]} MB`;
-        }
-        
-        // Extract memory percentile (e.g., "Beats 45.3%" after memory)
-        // This is tricky because there might be two "Beats X%" - one for runtime, one for memory
-        const allBeatsMatches = text.matchAll(/(?:Beats|less than)\s*([\d.]+)\s*%/gi);
-        const beatsValues = [...allBeatsMatches].map(m => parseFloat(m[1]));
-        if (beatsValues.length >= 2) {
-          // First is runtime, second is memory
-          stats.runtimePercentile = beatsValues[0].toFixed(1);
-          stats.memoryPercentile = beatsValues[1].toFixed(1);
-        } else if (beatsValues.length === 1 && !stats.runtimePercentile) {
-          stats.runtimePercentile = beatsValues[0].toFixed(1);
-        }
+        const memMatch = text.match(/(?:Memory[:\s]*)?([\d.]+)\s*MB/i);
+        if (memMatch) stats.memory = parseFloat(memMatch[1]);
       }
-
-      // Strategy 2: Look for specific elements with stats
-      const statElements = document.querySelectorAll('[class*="flex"][class*="items-center"]');
-      statElements.forEach(elem => {
-        const text = elem.textContent;
-        
-        // Check for runtime info
-        if (text.includes('ms') && !stats.runtime) {
-          const match = text.match(/(\d+)\s*ms/);
-          if (match) stats.runtime = `${match[1]} ms`;
-        }
-        
-        // Check for memory info
-        if (text.includes('MB') && !stats.memory) {
-          const match = text.match(/([\d.]+)\s*MB/);
-          if (match) stats.memory = `${match[1]} MB`;
-        }
-      });
-
-      // Strategy 3: Look for percentile bars/charts
-      const percentileElements = document.querySelectorAll('[class*="percent"], [class*="beats"]');
-      percentileElements.forEach(elem => {
-        const text = elem.textContent;
-        const match = text.match(/([\d.]+)\s*%/);
-        if (match) {
-          const value = parseFloat(match[1]).toFixed(1);
-          // Try to determine if it's runtime or memory based on context
-          const parent = elem.closest('[class*="runtime"], [class*="memory"]');
-          if (parent) {
-            if (parent.className.includes('runtime') && !stats.runtimePercentile) {
-              stats.runtimePercentile = value;
-            } else if (parent.className.includes('memory') && !stats.memoryPercentile) {
-              stats.memoryPercentile = value;
-            }
-          }
-        }
-      });
-
-      // Strategy 4: Extract from GraphQL data in page
-      const scripts = document.querySelectorAll('script');
-      scripts.forEach(script => {
-        const content = script.textContent;
-        
-        // Look for submission details in JSON
-        if (content.includes('statusRuntime') || content.includes('runtimePercentile')) {
-          try {
-            // Try to extract runtime
-            const runtimeMatch = content.match(/"statusRuntime"\s*:\s*"?(\d+)\s*ms"?/);
-            if (runtimeMatch && !stats.runtime) {
-              stats.runtime = `${runtimeMatch[1]} ms`;
-            }
-            
-            // Try to extract runtime percentile
-            const runtimePctMatch = content.match(/"runtimePercentile"\s*:\s*([\d.]+)/);
-            if (runtimePctMatch && !stats.runtimePercentile) {
-              stats.runtimePercentile = parseFloat(runtimePctMatch[1]).toFixed(1);
-            }
-            
-            // Try to extract memory
-            const memoryMatch = content.match(/"statusMemory"\s*:\s*"?([\d.]+)\s*MB"?/);
-            if (memoryMatch && !stats.memory) {
-              stats.memory = `${memoryMatch[1]} MB`;
-            }
-            
-            // Try to extract memory percentile
-            const memoryPctMatch = content.match(/"memoryPercentile"\s*:\s*([\d.]+)/);
-            if (memoryPctMatch && !stats.memoryPercentile) {
-              stats.memoryPercentile = parseFloat(memoryPctMatch[1]).toFixed(1);
-            }
-          } catch (e) {
-            // Continue
-          }
-        }
-      });
-
-      // Strategy 5: Extract acceptance rate from problem info
-      try {
-        const acceptanceElement = document.querySelector('[class*="acceptance"], [class*="Acceptance"]');
-        if (acceptanceElement) {
-          const match = acceptanceElement.textContent.match(/([\d.]+)\s*%/);
-          if (match) {
-            stats.acceptanceRate = parseFloat(match[1]).toFixed(1);
-          }
-        }
-        
-        // Also try from the problem description area
-        if (!stats.acceptanceRate) {
-          const allText = document.body.textContent;
-          const acceptMatch = allText.match(/Acceptance Rate\s*:?\s*([\d.]+)\s*%/i);
-          if (acceptMatch) {
-            stats.acceptanceRate = parseFloat(acceptMatch[1]).toFixed(1);
-          }
-        }
-      } catch (e) {
-        // Continue
-      }
-
-      console.log('📊 Extracted performance stats:', stats);
-      return stats;
-
-    } catch (error) {
-      console.error('Error extracting performance stats:', error);
-      return stats;
-    }
+    } catch {}
+    return stats;
   }
 
-  /**
-   * Check if submission was accepted
-   */
+  // ─────────────────────────────────────────────────────────
+  // SUBMISSION DETECTION
+  // ─────────────────────────────────────────────────────────
+
   function isSubmissionAccepted() {
-    const indicators = [
-      // Check for "Accepted" text in various locations
+    const checks = [
       () => {
-        const result = document.querySelector('[data-e2e-locator="submission-result"]');
-        if (result && result.textContent.includes('Accepted')) {
-          console.log('Found Accepted in submission-result');
-          return true;
+        const r = document.querySelector('[data-e2e-locator="submission-result"]');
+        return r && r.textContent.includes('Accepted');
+      },
+      () => {
+        const g = document.querySelector('.text-green-500, .text-green-600, [class*="text-green"]');
+        return g && g.textContent.includes('Accepted');
+      },
+      () => {
+        for (const el of document.querySelectorAll('[class*="success"]')) {
+          if (el.textContent.includes('Accepted')) return true;
         }
         return false;
       },
       () => {
-        const greenText = document.querySelector('.text-green-500, .text-green-600, [class*="text-green"]');
-        if (greenText && greenText.textContent.includes('Accepted')) {
-          console.log('Found Accepted in green text');
-          return true;
-        }
-        return false;
-      },
-      () => {
-        const successElements = document.querySelectorAll('[class*="success"]');
-        for (const elem of successElements) {
-          if (elem.textContent.includes('Accepted')) {
-            console.log('Found Accepted in success element');
-            return true;
-          }
-        }
-        return false;
-      },
-      () => {
-        // Look for the specific "Accepted" div
-        const allDivs = document.querySelectorAll('div');
-        for (const div of allDivs) {
-          const text = div.textContent.trim();
-          if (text === 'Accepted' && div.className.includes('text')) {
-            console.log('Found Accepted div with text class');
-            return true;
-          }
+        for (const div of document.querySelectorAll('div')) {
+          if (div.textContent.trim() === 'Accepted' && div.className?.includes?.('text')) return true;
         }
         return false;
       }
     ];
-
-    return indicators.some(check => {
-      try {
-        return check();
-      } catch (e) {
-        return false;
-      }
-    });
+    return checks.some(fn => { try { return fn(); } catch { return false; } });
   }
 
-  /**
-   * Check if submission failed
-   */
   function isSubmissionFailed() {
-    const failureKeywords = ['Wrong Answer', 'Time Limit Exceeded', 'Runtime Error', 'Compile Error'];
-    
-    return failureKeywords.some(keyword => {
-      const resultElement = document.querySelector('[data-e2e-locator="submission-result"]');
-      return resultElement && resultElement.textContent.includes(keyword);
-    });
+    const failKeywords = ['Wrong Answer', 'Time Limit Exceeded', 'Runtime Error', 'Compile Error', 'Memory Limit'];
+    const result = document.querySelector('[data-e2e-locator="submission-result"]');
+    if (!result) return false;
+    return failKeywords.some(k => result.textContent.includes(k));
   }
 
-  /**
-   * Autonomous LeetCode Submission Observer
-   * Unconditionally monitors submission verdict on problem pages without GitHub coupling.
-   */
-  let isObservingSubmission = false;
+  // ─────────────────────────────────────────────────────────
+  // BATTLE HUD
+  // ─────────────────────────────────────────────────────────
+
+  function getHudEndAt() {
+    return activeBattle?.end_at || activeBattle?.match_deadline || null;
+  }
+
+  function iAmSolvedThisProblem(slug) {
+    return myResults.some(r => r.problem_slug === slug);
+  }
+
+  function oppSolvedThisProblem(slug) {
+    return oppResults.some(r => r.problem_slug === slug);
+  }
+
+  function getCurrentProblemInfo() {
+    const slug = getCurrentSlug();
+    if (!slug || !battleProblems.length) return null;
+    return battleProblems.find(p => p.problem_slug === slug) || null;
+  }
+
+  function injectBattleHUD() {
+    if (!activeBattle || !isProblemPage()) return;
+    const currentProblem = getCurrentProblemInfo();
+    if (!currentProblem && battleProblems.length > 0) return; // Not on a battle problem page
+
+    // Remove old HUD if present
+    document.getElementById('ls-battle-hud')?.remove();
+    hudInjected = false;
+
+    const opp = activeBattle.challenger_username?.toLowerCase() === myUsername?.toLowerCase()
+      ? activeBattle.challenged_username
+      : activeBattle.challenger_username;
+
+    const mySolved = myResults.length;
+    const oppSolved = oppResults.length;
+    const totalProblems = battleProblems.length || activeBattle.problem_count || '?';
+
+    const bar = document.createElement('div');
+    bar.id = 'ls-battle-hud';
+    bar.style.cssText = [
+      'position:fixed',
+      'top:0',
+      'left:0',
+      'right:0',
+      'z-index:2147483647',
+      'height:38px',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'padding:0 16px',
+      'gap:12px',
+      'background:#0f0f0f',
+      'border-bottom:1px solid #2a2a2a',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'font-size:11px',
+      'color:#e4e4e7',
+      'box-shadow:0 1px 8px rgba(0,0,0,0.5)',
+      'box-sizing:border-box',
+      'pointer-events:none', // allow clicks through except on forfeit button
+    ].join(';');
+
+    // Left: battle badge + current problem
+    const left = document.createElement('div');
+    left.style.cssText = 'display:flex;align-items:center;gap:10px;min-width:0;';
+
+    const badge = document.createElement('span');
+    badge.style.cssText = 'color:#ef4444;font-weight:700;letter-spacing:0.5px;white-space:nowrap;';
+    badge.textContent = '⚔ BATTLE';
+    left.appendChild(badge);
+
+    if (currentProblem) {
+      const probLabel = document.createElement('span');
+      probLabel.style.cssText = 'color:#a1a1aa;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;';
+      probLabel.textContent = `#${currentProblem.sequence_number} ${currentProblem.problem_title}`;
+      left.appendChild(probLabel);
+
+      if (iAmSolvedThisProblem(currentProblem.problem_slug)) {
+        const solvedBadge = document.createElement('span');
+        solvedBadge.style.cssText = 'color:#22c55e;font-weight:700;font-size:10px;white-space:nowrap;';
+        solvedBadge.textContent = '✓ Solved';
+        left.appendChild(solvedBadge);
+      }
+    }
+
+    bar.appendChild(left);
+
+    // Center: score
+    const center = document.createElement('div');
+    center.style.cssText = 'display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0;';
+
+    const myScoreEl = document.createElement('span');
+    myScoreEl.style.cssText = 'color:#fbbf24;font-weight:700;';
+    myScoreEl.id = 'ls-hud-my-score';
+    myScoreEl.textContent = `You ${mySolved}`;
+
+    const sep = document.createElement('span');
+    sep.style.cssText = 'color:#3f3f46;';
+    sep.textContent = '—';
+
+    const oppScoreEl = document.createElement('span');
+    oppScoreEl.style.cssText = 'color:#a1a1aa;font-weight:600;';
+    oppScoreEl.id = 'ls-hud-opp-score';
+    oppScoreEl.textContent = `${opp || 'Opp'} ${oppSolved}`;
+
+    const totalEl = document.createElement('span');
+    totalEl.style.cssText = 'color:#52525b;font-size:10px;';
+    totalEl.textContent = `/${totalProblems}`;
+
+    center.append(myScoreEl, sep, oppScoreEl, totalEl);
+    bar.appendChild(center);
+
+    // Right: countdown timer
+    const right = document.createElement('div');
+    right.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap;';
+
+    const timerEl = document.createElement('span');
+    timerEl.id = 'ls-hud-timer';
+    timerEl.style.cssText = 'font-family:monospace;font-weight:700;font-size:12px;';
+    right.appendChild(timerEl);
+
+    // Forfeit button (needs pointer-events)
+    const forfeitBtn = document.createElement('button');
+    forfeitBtn.textContent = 'Forfeit';
+    forfeitBtn.style.cssText = [
+      'pointer-events:all',
+      'cursor:pointer',
+      'background:transparent',
+      'border:1px solid #3f3f46',
+      'color:#71717a',
+      'border-radius:6px',
+      'padding:2px 8px',
+      'font-size:10px',
+      'font-family:inherit',
+      'transition:all 0.15s',
+    ].join(';');
+    forfeitBtn.addEventListener('mouseover', () => { forfeitBtn.style.borderColor = '#ef4444'; forfeitBtn.style.color = '#ef4444'; });
+    forfeitBtn.addEventListener('mouseout', () => { forfeitBtn.style.borderColor = '#3f3f46'; forfeitBtn.style.color = '#71717a'; });
+    forfeitBtn.addEventListener('click', async () => {
+      if (!activeBattle?.id) return;
+      if (!confirm('Forfeit this battle? Your opponent wins.')) return;
+      await safeMessage({ type: 'BATTLE_FORFEIT_V2', battleId: activeBattle.id });
+    });
+    right.appendChild(forfeitBtn);
+
+    bar.appendChild(right);
+    document.body.prepend(bar);
+    hudInjected = true;
+
+    // Push page content down
+    document.body.style.marginTop = '38px';
+
+    // Start timer
+    if (hudTimer) clearInterval(hudTimer);
+    hudTimer = setInterval(updateHudTimer, 1000);
+    updateHudTimer();
+  }
+
+  function updateHudTimer() {
+    const timerEl = document.getElementById('ls-hud-timer');
+    if (!timerEl) return;
+
+    const endAt = getHudEndAt();
+    if (!endAt) {
+      timerEl.textContent = '--:--:--';
+      return;
+    }
+
+    const remaining = Math.max(0, Math.floor((new Date(endAt).getTime() - Date.now()) / 1000));
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    const s = remaining % 60;
+    const formatted = [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+
+    timerEl.textContent = formatted;
+    timerEl.style.color = remaining < 300 ? '#ef4444' : remaining < 600 ? '#f59e0b' : '#a1a1aa';
+
+    if (remaining === 0) {
+      clearInterval(hudTimer);
+      hudTimer = null;
+      timerEl.textContent = '00:00:00';
+    }
+  }
+
+  function updateHudScores() {
+    const myScoreEl = document.getElementById('ls-hud-my-score');
+    const oppScoreEl = document.getElementById('ls-hud-opp-score');
+    if (myScoreEl) myScoreEl.textContent = `You ${myResults.length}`;
+    if (oppScoreEl) {
+      const opp = activeBattle?.challenger_username?.toLowerCase() === myUsername?.toLowerCase()
+        ? activeBattle?.challenged_username
+        : activeBattle?.challenger_username;
+      oppScoreEl.textContent = `${opp || 'Opp'} ${oppResults.length}`;
+    }
+  }
+
+  function removeHUD() {
+    document.getElementById('ls-battle-hud')?.remove();
+    document.body.style.marginTop = '';
+    if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
+    hudInjected = false;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // TOAST NOTIFICATIONS
+  // ─────────────────────────────────────────────────────────
+
+  function showBattleToast(message, type = 'info') {
+    document.getElementById('ls-battle-toast')?.remove();
+    const toast = document.createElement('div');
+    toast.id = 'ls-battle-toast';
+
+    const bgColors = { success: '#16a34a', warn: '#d97706', info: '#3b82f6', error: '#ef4444' };
+    toast.style.cssText = [
+      'position:fixed',
+      'top:50px', // below HUD
+      'right:16px',
+      'z-index:2147483646',
+      `background:${bgColors[type] || bgColors.info}`,
+      'color:#fff',
+      'padding:10px 16px',
+      'border-radius:10px',
+      'font-size:13px',
+      'font-weight:600',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'box-shadow:0 4px 16px rgba(0,0,0,0.4)',
+      'max-width:320px',
+      'line-height:1.4',
+      'animation:ls-slide-in 0.25s ease',
+      'pointer-events:none',
+    ].join(';');
+    toast.textContent = message;
+
+    // Inject animation keyframes if not present
+    if (!document.getElementById('ls-anim')) {
+      const s = document.createElement('style');
+      s.id = 'ls-anim';
+      s.textContent = `
+        @keyframes ls-slide-in {
+          from { transform: translateX(120%); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // OPPONENT NOTIFICATION
+  // ─────────────────────────────────────────────────────────
+
+  let _prevOppResults = [];
+
+  function checkForOpponentSolves(newOppResults) {
+    if (!Array.isArray(newOppResults)) return;
+    for (const r of newOppResults) {
+      const already = _prevOppResults.some(pr => pr.problem_slug === r.problem_slug);
+      if (!already) {
+        const prob = battleProblems.find(p => p.problem_slug === r.problem_slug);
+        const title = prob?.problem_title || r.problem_slug;
+        showBattleToast(`⚡ ${activeBattle?.challenger_username?.toLowerCase() === myUsername?.toLowerCase()
+          ? activeBattle?.challenged_username
+          : activeBattle?.challenger_username
+        } solved "${title}"!`, 'warn');
+      }
+    }
+    _prevOppResults = [...newOppResults];
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // AUTO-REDIRECT TO NEXT PROBLEM
+  // ─────────────────────────────────────────────────────────
+
+  async function handleAcceptedSolve(stats, code, language) {
+    if (!activeBattle?.id || redirectPending) return;
+    const slug = getCurrentSlug();
+    if (!slug) return;
+
+    // Check if this slug is in our battle problems
+    const isInBattle = battleProblems.some(p => p.problem_slug === slug) ||
+                       slug === activeBattle.problem_1 ||
+                       slug === activeBattle.problem_2;
+    if (!isInBattle) return;
+
+    // Check if already solved
+    if (iAmSolvedThisProblem(slug)) {
+      console.log('[LeetStreak] Already recorded solve for', slug);
+      return;
+    }
+
+    redirectPending = true;
+
+    // Show accepted toast
+    showBattleToast('✅ Accepted! Reporting solve…', 'success');
+
+    // Report to service worker
+    const startMs = activeBattle.start_at || activeBattle.match_starts_at
+      ? new Date(activeBattle.start_at || activeBattle.match_starts_at).getTime()
+      : Date.now();
+    const timeTakenMs = Math.max(0, Date.now() - startMs);
+
+    let submissionId = null;
+    const subLink = document.querySelector('a[href*="/submissions/detail/"]');
+    if (subLink) {
+      const m = subLink.href.match(/detail\/(\d+)/);
+      if (m) submissionId = m[1];
+    }
+
+    const resp = await safeMessage({
+      type: 'BATTLE_SOLVED_V2',
+      battleId: activeBattle.id,
+      problemSlug: slug,
+      submissionId,
+      timeTakenMs,
+      runtimeMs: stats?.runtime || null,
+      memoryMb: stats?.memory || null,
+      language: normalizeLanguage(language)
+    });
+
+    // Also send legacy SUBMISSION_ACCEPTED for streak tracking
+    safeMessage({ type: 'SUBMISSION_ACCEPTED', problemSlug: slug, title: slug }).catch(() => {});
+
+    if (resp?.success) {
+      // Update local state
+      myResults = [...myResults, { problem_slug: slug }];
+      updateHudScores();
+
+      if (resp.next_problem_slug) {
+        const nextUrl = resp.next_problem_url || `https://leetcode.com/problems/${resp.next_problem_slug}/`;
+        showBattleToast(`⏭ Next problem: ${resp.next_problem_slug}`, 'info');
+        setTimeout(() => {
+          redirectPending = false;
+          window.location.href = nextUrl;
+        }, 2000);
+      } else if (resp.battle_complete) {
+        showBattleToast('🏁 All problems solved! Waiting for battle to end…', 'success');
+        redirectPending = false;
+      } else {
+        redirectPending = false;
+      }
+    } else {
+      redirectPending = false;
+      console.error('[LeetStreak] Failed to record solve:', resp?.error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // SUBMISSION OBSERVER
+  // ─────────────────────────────────────────────────────────
 
   function initSubmissionObserver() {
-    if (isObservingSubmission) return;
-    isObservingSubmission = true;
+    if (submissionObserving) return;
+    submissionObserving = true;
 
     document.addEventListener('click', (event) => {
       const button = event.target.closest?.('button');
       if (!button || !/^Submit$/i.test(button.textContent.trim())) return;
 
-      console.log('[LeetStreak] Submit button clicked. Starting observation...');
-      const problem = currentProblemData || extractProblemData() || {};
-      const code = extractCode();
-      const language = getSelectedLanguage();
       battleAttemptCount++;
+      const language = getSelectedLanguage();
+      const code = extractCode();
 
       let checkInterval = null;
       let timeoutId = null;
 
-      const stopChecking = () => {
-        if (checkInterval) {
-          clearInterval(checkInterval);
-          checkInterval = null;
-        }
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
+      const stop = () => {
+        clearInterval(checkInterval);
+        clearTimeout(timeoutId);
+        checkInterval = null;
+        timeoutId = null;
       };
 
       checkInterval = setInterval(async () => {
         if (isSubmissionAccepted()) {
-          stopChecking();
-          console.log('✅ [LeetStreak] Accepted submission detected!');
-          showNotification('✅ LeetStreak: Accepted submission detected!', 'success');
-
+          stop();
           const stats = extractPerformanceStats();
 
-          // 1. Notify service worker of accepted solve (lifts Hardcore Mode, updates Problem Queue, syncs stats)
-          try {
-            await chrome.runtime.sendMessage({
-              type: 'SUBMISSION_ACCEPTED',
-              problemSlug: problem.slug,
-              title: problem.title
-            });
-          } catch (e) {
-            console.warn('[LeetStreak] Could not send SUBMISSION_ACCEPTED:', e);
+          // If we have an active battle, handle battle solve (which also sends SUBMISSION_ACCEPTED)
+          if (activeBattle && activeBattle.status === 'in_progress') {
+            await handleAcceptedSolve(stats, code, language);
+          } else {
+            // No battle: just notify service worker for streak tracking
+            safeMessage({ type: 'SUBMISSION_ACCEPTED', problemSlug: getCurrentSlug(), title: document.title }).catch(() => {});
+            showBattleToast('✅ Submission accepted!', 'success');
           }
-
-          // 2. Report battle submission if active
-          await triggerBattleSubmission(stats, code, language);
-
         } else if (isSubmissionFailed()) {
-          stopChecking();
-          console.log('❌ [LeetStreak] Submission failed or rejected.');
+          stop();
         }
       }, 1000);
 
-      // 5-minute timeout safety
-      timeoutId = setTimeout(() => {
-        stopChecking();
-      }, 5 * 60 * 1000);
+      // 5 minute safety timeout
+      timeoutId = setTimeout(stop, 5 * 60 * 1000);
     }, true);
   }
 
-  // Initialize
-  function init() {
-    if (!isProblemPage()) {
-      return;
-    }
+  // ─────────────────────────────────────────────────────────
+  // BATTLE STATUS POLLING
+  // ─────────────────────────────────────────────────────────
 
-    console.log('[LeetStreak] Initializing content scripts on problem page...');
-    initSubmissionObserver();
+  async function checkBattleStatus() {
+    if (!isExtensionContextValid()) return;
+    try {
+      const stored = await chrome.storage.local.get('my_leetcode_username');
+      myUsername = stored.my_leetcode_username || myUsername;
 
-    setTimeout(() => {
-      if (!buttonsInjected) injectButtons();
-    }, 1500);
+      const resp = await safeMessage({ type: 'BATTLE_GET_STATUS', username: myUsername });
+      if (!resp) return;
 
-    setTimeout(() => {
-      if (!buttonsInjected) injectButtons();
-    }, 4000);
+      const battle = resp?.battle;
 
-    // Watch for SPA URL changes
-    let lastUrl = location.href;
-    const urlObserver = new MutationObserver(() => {
-      try {
-        const url = location.href;
-        if (url !== lastUrl) {
-          lastUrl = url;
-          buttonsInjected = false;
-          if (isProblemPage()) {
-            initSubmissionObserver();
-            setTimeout(() => injectButtons(), 2000);
+      if (battle && ['in_progress', 'countdown'].includes(battle.status)) {
+        activeBattle = battle;
+
+        // Fetch full v2 state if we have a battle ID
+        if (battle.id) {
+          const stateResp = await safeMessage({
+            type: 'BATTLE_GET_STATE_V2',
+            battleId: battle.id
+          });
+
+          if (stateResp?.success && stateResp.state) {
+            battleProblems = stateResp.state.problems || [];
+            const allResults = stateResp.state.results || [];
+            const newMyResults = allResults.filter(r => r.username?.toLowerCase() === myUsername?.toLowerCase());
+            const newOppResults = allResults.filter(r => r.username?.toLowerCase() !== myUsername?.toLowerCase());
+
+            checkForOpponentSolves(newOppResults);
+            myResults = newMyResults;
+            oppResults = newOppResults;
+
+            // Check if we should redirect to first problem (battle just started / page navigated away)
+            if (battle.status === 'in_progress' && !isProblemPage() && battleProblems.length > 0) {
+              const nextUnsolved = battleProblems.find(p =>
+                !myResults.some(r => r.problem_slug === p.problem_slug)
+              );
+              if (nextUnsolved && !redirectPending) {
+                redirectPending = true;
+                window.location.href = nextUnsolved.problem_url;
+                return;
+              }
+            }
+
+            // Inject or update HUD on problem pages
+            if (isProblemPage()) {
+              if (!hudInjected) {
+                injectBattleHUD();
+              } else {
+                updateHudScores();
+              }
+            }
+          } else {
+            // Fallback for old-schema battles
+            battleProblems = [
+              battle.problem_1 ? { sequence_number: 1, problem_slug: battle.problem_1, problem_title: battle.problem_1_title || battle.problem_1, problem_url: `https://leetcode.com/problems/${battle.problem_1}/` } : null,
+              battle.problem_2 ? { sequence_number: 2, problem_slug: battle.problem_2, problem_title: battle.problem_2_title || battle.problem_2, problem_url: `https://leetcode.com/problems/${battle.problem_2}/` } : null,
+            ].filter(Boolean);
+
+            if (resp.results) {
+              myResults = resp.results.filter(r => r.username?.toLowerCase() === myUsername?.toLowerCase() && r.accepted);
+              const newOpp = resp.results.filter(r => r.username?.toLowerCase() !== myUsername?.toLowerCase() && r.accepted);
+              checkForOpponentSolves(newOpp);
+              oppResults = newOpp;
+            }
+
+            if (isProblemPage()) {
+              if (!hudInjected) injectBattleHUD();
+              else updateHudScores();
+            }
           }
         }
-      } catch {}
-    });
+      } else if (battle?.status === 'countdown' && isProblemPage()) {
+        // Battle is in countdown but we're on LeetCode — show minimal info
+        activeBattle = battle;
+        removeHUD();
+      } else {
+        // No active battle
+        activeBattle = null;
+        battleProblems = [];
+        myResults = [];
+        oppResults = [];
+        if (hudInjected) removeHUD();
+      }
 
-    try {
-      urlObserver.observe(document, { subtree: true, childList: true });
-    } catch {}
+      // Auto-redirect from non-battle page when battle is in_progress
+      if (activeBattle?.status === 'in_progress' && !isProblemPage() && battleProblems.length > 0) {
+        const nextUnsolved = battleProblems.find(p => !myResults.some(r => r.problem_slug === p.problem_slug));
+        if (nextUnsolved && !redirectPending) {
+          redirectPending = true;
+          window.location.href = nextUnsolved.problem_url;
+        }
+      }
+    } catch (e) {
+      // Service worker may not be ready
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // SPA URL CHANGE OBSERVER
+  // ─────────────────────────────────────────────────────────
+
+  let lastUrl = location.href;
+
+  function handleUrlChange() {
+    const url = location.href;
+    if (url === lastUrl) return;
+    lastUrl = url;
+
+    // Reset per-page state (but keep activeBattle)
+    submissionObserving = false;
+    redirectPending = false;
+    hudInjected = false;
+    document.body.style.marginTop = '';
+
+    if (isProblemPage()) {
+      initSubmissionObserver();
+      // Re-check battle status after navigation settles
+      setTimeout(checkBattleStatus, 2000);
+    } else {
+      removeHUD();
+    }
+  }
+
+  const urlObserver = new MutationObserver(() => {
+    try { handleUrlChange(); } catch {}
+  });
+
+  try {
+    urlObserver.observe(document, { subtree: true, childList: true });
+  } catch {}
+
+  // ─────────────────────────────────────────────────────────
+  // INIT
+  // ─────────────────────────────────────────────────────────
+
+  function init() {
+    initSubmissionObserver();
+    checkBattleStatus();
+    // Poll every 5s while on any LeetCode page
+    setInterval(checkBattleStatus, 5000);
   }
 
   init();
+
 })();
