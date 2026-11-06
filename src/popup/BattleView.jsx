@@ -4,7 +4,18 @@ import {
   ExternalLink, Flag, RefreshCw, Loader2, Sparkles, Zap,
   Target, Timer, Hash
 } from 'lucide-react';
-import { BATTLE_STATUS, TERMINAL_STATES } from '../shared/battle-manager.js';
+import {
+  BATTLE_STATUS,
+  TERMINAL_STATES,
+  createBattleV2,
+  acceptBattleV2,
+  confirmReadyV2,
+  forfeitBattleV2,
+  getBattleStateV2,
+  getActiveBattle,
+  respondToBattle,
+  cancelBattle
+} from '../shared/battle-manager.js';
 import { SUPABASE_URL } from '../shared/supabase-client.js';
 import { PresenceIndicator, AvatarWithPresence } from './PresenceIndicator.jsx';
 
@@ -629,24 +640,46 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   const fetchBattleState = useCallback(async () => {
     if (!myUsername) return;
     try {
-      const resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS', username: myUsername });
-      if (resp?.battle) {
-        setBattle(resp.battle);
+      let resp = null;
+      try {
+        resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS', username: myUsername });
+      } catch (e) {
+        console.warn('[BattleView] BATTLE_GET_STATUS error:', e);
+      }
+
+      let currentBattle = resp?.battle;
+      if (!currentBattle && (!resp || resp?.error?.includes('Unknown message type'))) {
+        try {
+          currentBattle = await getActiveBattle(myUsername);
+        } catch (e) {}
+      }
+
+      if (currentBattle) {
+        setBattle(currentBattle);
 
         // Set reveal countdown from server timestamp
-        if (resp.battle.status === 'countdown' && resp.battle.match_starts_at) {
-          const rem = Math.max(0, Math.round((new Date(resp.battle.match_starts_at).getTime() - Date.now()) / 1000));
+        if (currentBattle.status === 'countdown' && currentBattle.match_starts_at) {
+          const rem = Math.max(0, Math.round((new Date(currentBattle.match_starts_at).getTime() - Date.now()) / 1000));
           setRevealCountdown(rem > 0 ? rem : null);
         }
 
         // Fetch full v2 state if we have a battle
-        if (resp.battle.id) {
-          const stateResp = await chrome.runtime.sendMessage({
-            type: 'BATTLE_GET_STATE_V2',
-            battleId: resp.battle.id
-          });
+        if (currentBattle.id) {
+          let stateResp = null;
+          try {
+            stateResp = await chrome.runtime.sendMessage({
+              type: 'BATTLE_GET_STATE_V2',
+              battleId: currentBattle.id
+            });
+          } catch (e) {}
+
           if (stateResp?.success && stateResp.state) {
             setBattleState(stateResp.state);
+          } else {
+            try {
+              const directState = await getBattleStateV2(currentBattle.id);
+              if (directState) setBattleState(directState);
+            } catch (e) {}
           }
         }
       } else {
@@ -735,67 +768,163 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   const sendChallenge = async ({ challenged, topics, difficulty, durationMinutes, problemCount }) => {
     setActionLoading(true); setError('');
     try {
-      const resp = await chrome.runtime.sendMessage({
-        type: 'BATTLE_CHALLENGE_V2',
-        challenger: myUsername,
-        challenged,
-        topics,
-        difficulty,
-        durationMinutes,
-        problemCount
-      });
-      if (resp?.success) setBattle(resp.battle);
-      else setError(resp?.error || 'Failed to send challenge');
-    } finally { setActionLoading(false); }
+      let resp = null;
+      try {
+        resp = await chrome.runtime.sendMessage({
+          type: 'BATTLE_CHALLENGE_V2',
+          challenger: myUsername,
+          challenged,
+          topics,
+          difficulty,
+          durationMinutes,
+          problemCount
+        });
+      } catch (sendErr) {
+        console.warn('[BattleView] sendChallenge sendMessage error:', sendErr);
+      }
+
+      if (!resp?.success && (resp?.error?.includes('Unknown message type') || !resp)) {
+        try {
+          resp = await createBattleV2(myUsername, challenged, {
+            topics,
+            difficulty,
+            durationMinutes,
+            problemCount
+          });
+        } catch (fallbackErr) {
+          resp = { success: false, error: fallbackErr.message };
+        }
+      }
+
+      if (resp?.success) {
+        setBattle(resp.battle);
+        await fetchBattleState();
+      } else {
+        setError(resp?.error || 'Failed to send challenge');
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to send challenge');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const respond = async (accept) => {
     if (!battle) return;
     setActionLoading(true); setError('');
     try {
-      const resp = await chrome.runtime.sendMessage({
-        type: accept ? 'BATTLE_ACCEPT_V2' : 'BATTLE_RESPOND',
-        battleId: battle.id,
-        accept
-      });
-      if (resp?.success) setBattle(resp.battle);
-      else setError(resp?.error || 'Failed to respond');
-    } finally { setActionLoading(false); }
+      let resp = null;
+      try {
+        resp = await chrome.runtime.sendMessage({
+          type: accept ? 'BATTLE_ACCEPT_V2' : 'BATTLE_RESPOND',
+          battleId: battle.id,
+          accept
+        });
+      } catch (sendErr) {
+        console.warn('[BattleView] respond sendMessage error:', sendErr);
+      }
+
+      if (!resp?.success && (resp?.error?.includes('Unknown message type') || !resp)) {
+        try {
+          if (accept) {
+            resp = await acceptBattleV2(battle.id);
+          } else {
+            resp = await respondToBattle(battle.id, myUsername, false);
+          }
+        } catch (fallbackErr) {
+          resp = { success: false, error: fallbackErr.message };
+        }
+      }
+
+      if (resp?.success) {
+        if (resp.battle) setBattle(resp.battle);
+        await fetchBattleState();
+      } else {
+        setError(resp?.error || 'Failed to respond');
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to respond');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const confirmReady = async () => {
     if (!battle) return;
     setActionLoading(true); setError('');
     try {
-      const resp = await chrome.runtime.sendMessage({
-        type: 'BATTLE_READY_V2',
-        battleId: battle.id,
-        username: myUsername
-      });
-      if (resp?.success && resp.battle) {
-        setBattle(resp.battle);
+      let resp = null;
+      try {
+        resp = await chrome.runtime.sendMessage({
+          type: 'BATTLE_READY_V2',
+          battleId: battle.id,
+          username: myUsername
+        });
+      } catch (sendErr) {
+        console.warn('[BattleView] confirmReady sendMessage error:', sendErr);
+      }
+
+      if (!resp?.success && (resp?.error?.includes('Unknown message type') || !resp)) {
+        try {
+          resp = await confirmReadyV2(battle.id, myUsername);
+        } catch (fallbackErr) {
+          resp = { success: false, error: fallbackErr.message };
+        }
+      }
+
+      if (resp?.success) {
+        if (resp.battle) setBattle(resp.battle);
+        if (resp.bothReady) {
+          setBothReady(true);
+        }
+        await fetchBattleState();
       } else if (resp?.error) {
         setError(resp.error);
       }
-    } finally { setActionLoading(false); }
+    } catch (err) {
+      setError(err?.message || 'Failed to confirm ready');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const cancelChallenge = async () => {
     if (!battle) return;
     setActionLoading(true);
     try {
-      await chrome.runtime.sendMessage({ type: 'BATTLE_CANCEL', battleId: battle.id });
-      setBattle(null); setBattleState(null);
-    } finally { setActionLoading(false); }
+      let resp = null;
+      try {
+        resp = await chrome.runtime.sendMessage({ type: 'BATTLE_CANCEL', battleId: battle.id });
+      } catch (e) {}
+      if (!resp?.success && (resp?.error?.includes('Unknown message type') || !resp)) {
+        try {
+          await cancelBattle(battle.id, myUsername);
+        } catch (e) {}
+      }
+      setBattle(null);
+      setBattleState(null);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const forfeit = async () => {
     if (!battle) return;
     setActionLoading(true);
     try {
-      await chrome.runtime.sendMessage({ type: 'BATTLE_FORFEIT_V2', battleId: battle.id });
-      fetchBattleState();
-    } finally { setActionLoading(false); }
+      let resp = null;
+      try {
+        resp = await chrome.runtime.sendMessage({ type: 'BATTLE_FORFEIT_V2', battleId: battle.id, username: myUsername });
+      } catch (e) {}
+      if (!resp?.success && (resp?.error?.includes('Unknown message type') || !resp)) {
+        try {
+          resp = await forfeitBattleV2(battle.id, myUsername);
+        } catch (e) {}
+      }
+      await fetchBattleState();
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const startNewChallenge = () => {
