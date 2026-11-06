@@ -55,10 +55,11 @@ export const REVEAL_COUNTDOWN_SECONDS  = 10;
 async function supabaseFetch(path, options = {}) {
   if (!SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return null;
   try {
-    const headers = await getAuthHeaders();
+    const baseHeaders = await getAuthHeaders();
+    const { headers: optHeaders, ...restOptions } = options;
     const res = await fetch(`${BASE_URL}/rest/v1/${path}`, {
-      headers: { ...headers, ...(options.headers || {}) },
-      ...options,
+      ...restOptions,
+      headers: { ...baseHeaders, ...(optHeaders || {}) }
     });
     if (!res.ok) {
       console.error(`[Battle] Supabase error ${res.status} on ${path}:`, await res.text());
@@ -703,11 +704,17 @@ export async function updatePresence(username, status = 'online') {
   if (!username || !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return;
   try {
     // 1. Try atomic server-side heartbeat RPC with username auto-provisioning
-    const rpcRes = await callRpc('heartbeat_presence', {
+    let rpcRes = await callRpc('heartbeat_presence', {
       p_status: status,
       p_username: username.toLowerCase()
     });
     if (rpcRes && rpcRes.success) return;
+
+    // Gracefully support single-parameter heartbeat_presence(p_status) if schema cache has not reloaded
+    if (rpcRes?.code === 'PGRST202' || (typeof rpcRes?.error === 'string' && rpcRes.error.includes('PGRST202'))) {
+      const fallbackRpc = await callRpc('heartbeat_presence', { p_status: status });
+      if (fallbackRpc && (fallbackRpc.success || fallbackRpc === true)) return;
+    }
 
     // 2. Direct upsert fallback with session user_id
     const session = await getAuthSession();
