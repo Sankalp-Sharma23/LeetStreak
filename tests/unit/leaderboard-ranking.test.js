@@ -2,7 +2,6 @@ import {
   getTotalSolved,
   getStreak,
   getRating,
-  getUsername,
   sortFriends
 } from '../../src/shared/ranking-manager.js';
 

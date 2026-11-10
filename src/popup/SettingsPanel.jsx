@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Moon, Sun, Bell, RotateCcw, LogOut, AlertTriangle, X, Flame, Shield, KeyRound, CheckCircle2, Cloud, Loader2, Swords } from 'lucide-react';
+import { normalizeReminderFrequency } from '../shared/daily-reminders';
 
 function ConfirmDialog({ title, message, confirmText, cancelText, onConfirm, onCancel, isDangerous }) {
   return (
@@ -48,9 +49,9 @@ function ConfirmDialog({ title, message, confirmText, cancelText, onConfirm, onC
   );
 }
 
-function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
+function SettingsPanel({ onBack, onNavigateToBattle, onCloudSignOut, theme, onThemeChange }) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [notificationFrequency, setNotificationFrequency] = useState('all');
+  const [notificationFrequency, setNotificationFrequency] = useState('normal');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [autoSyncInterval, setAutoSyncInterval] = useState(30);
   const [hardcoreModeEnabled, setHardcoreModeEnabled] = useState(false);
@@ -62,6 +63,7 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
   // Supabase Cloud Account state
   const [authState, setAuthState] = useState('SESSION_LOADING');
   const [authSession, setAuthSession] = useState(null);
+  const [, setCooldownSeconds] = useState(0);
 
   useEffect(() => {
     // Load settings from storage
@@ -73,7 +75,7 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
         setNotificationsEnabled(data.notifications_enabled);
       }
       if (data.notification_frequency) {
-        setNotificationFrequency(data.notification_frequency);
+        setNotificationFrequency(normalizeReminderFrequency(data.notification_frequency));
       }
       if (data.auto_sync_enabled !== undefined) {
         setAutoSyncEnabled(data.auto_sync_enabled);
@@ -96,6 +98,18 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
     });
   }, []);
 
+  useEffect(() => {
+    const syncSavedPreferences = (changes, areaName) => {
+      if (areaName !== 'local') return;
+      if (changes.notifications_enabled) setNotificationsEnabled(changes.notifications_enabled.newValue !== false);
+      if (changes.notification_frequency) {
+        setNotificationFrequency(normalizeReminderFrequency(changes.notification_frequency.newValue));
+      }
+    };
+    chrome.storage.onChanged.addListener(syncSavedPreferences);
+    return () => chrome.storage.onChanged.removeListener(syncSavedPreferences);
+  }, []);
+
   const handleThemeToggle = (newTheme) => {
     chrome.storage.local.set({ theme: newTheme });
     onThemeChange(newTheme);
@@ -108,9 +122,14 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
     chrome.storage.local.set({ notifications_enabled: newValue });
   };
 
-  const handleNotificationFrequencyChange = (frequency) => {
-    setNotificationFrequency(frequency);
-    chrome.storage.local.set({ notification_frequency: frequency });
+  const handleNotificationFrequencyChange = async (frequency) => {
+    const normalized = normalizeReminderFrequency(frequency);
+    try {
+      await chrome.storage.local.set({ notification_frequency: normalized });
+      setNotificationFrequency(normalized);
+    } catch (error) {
+      console.error('Could not save notification frequency:', error);
+    }
   };
 
   const handleAutoSyncToggle = () => {
@@ -161,6 +180,7 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
       await new Promise(resolve => chrome.runtime.sendMessage({ type: 'SIGN_OUT' }, resolve));
       setAuthState('AUTH_REQUIRED');
       setAuthSession(null);
+      onCloudSignOut?.();
     } catch (err) {
       console.error('Sign out error:', err);
     }
@@ -259,14 +279,14 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
                   <label className="text-sm font-semibold text-text-main">Notification Frequency</label>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                      notificationFrequency === 'all' ? 'bg-primary/20 text-primary' : 
-                      notificationFrequency === 'important' ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 
+                      notificationFrequency === 'normal' ? 'bg-primary/20 text-primary' :
+                      notificationFrequency === 'reduced' ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' :
                       'bg-text-muted/20 text-text-muted'
                     }`}
                     >
-                      {notificationFrequency === 'all' ? 'All Updates' : 
-                       notificationFrequency === 'important' ? 'Important' : 
-                       'Minimal'}
+                      {notificationFrequency === 'normal' ? 'Normal · 2/day' :
+                       notificationFrequency === 'reduced' ? 'Reduced · 1/day' :
+                       'Off'}
                     </span>
                   </div>
                 </div>
@@ -278,10 +298,10 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
                     min="0"
                     max="2"
                     step="1"
-                    value={notificationFrequency === 'all' ? 0 : notificationFrequency === 'important' ? 1 : 2}
+                    value={notificationFrequency === 'normal' ? 0 : notificationFrequency === 'reduced' ? 1 : 2}
                     onChange={(e) => {
                       const val = parseInt(e.target.value);
-                      handleNotificationFrequencyChange(val === 0 ? 'all' : val === 1 ? 'important' : 'minimal');
+                      handleNotificationFrequencyChange(val === 0 ? 'normal' : val === 1 ? 'reduced' : 'off');
                     }}
                     className="w-full h-2 bg-gradient-to-r from-primary via-orange-500 to-gray-500 rounded-full appearance-none cursor-pointer transition-all"
                     style={{
@@ -292,17 +312,17 @@ function SettingsPanel({ onBack, onNavigateToBattle, theme, onThemeChange }) {
                   
                   {/* Slider Labels */}
                   <div className="flex justify-between text-xs text-text-muted font-medium px-1">
-                    <span>All</span>
-                    <span>Important</span>
-                    <span>Minimal</span>
+                    <span>Normal</span>
+                    <span>Reduced</span>
+                    <span>Off</span>
                   </div>
                 </div>
 
                 {/* Description */}
                 <p className="text-xs text-text-muted leading-relaxed">
-                  {notificationFrequency === 'all' && '🔔 Get notified for every milestone, achievement, and friend update'}
-                  {notificationFrequency === 'important' && '⭐ Only major streaks and top 3 leaderboard changes'}
-                  {notificationFrequency === 'minimal' && '🔕 Only critical alerts and important events'}
+                  {notificationFrequency === 'normal' && '🔔 Daily problem reminders at 11 AM and 11 PM until you solve one'}
+                  {notificationFrequency === 'reduced' && '⭐ One daily problem reminder at 11 AM until you solve one'}
+                  {notificationFrequency === 'off' && '🔕 Daily problem reminders are off. Battle and friend alerts stay available.'}
                 </p>
               </div>
             </div>

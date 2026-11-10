@@ -32,6 +32,7 @@ import {
   signOut,
   setAuthSession,
   getAuthSession,
+  getAuthHeaders,
   upsertUserSettings,
   sendRoast
 } from '../../src/shared/supabase-client.js';
@@ -108,6 +109,32 @@ describe('Initialization, Own Profile & Supabase Auth Resilience', () => {
     expect(fetchCalled).toBe(false);
   });
 
+  it('refreshes an expiring JWT once for concurrent cloud requests and sends the new bearer token', async () => {
+    await mockStorage.set({ supabase_auth_session: {
+      access_token: 'near-expiry-token',
+      refresh_token: 'rotating-refresh-token',
+      user_id: 'usr-1',
+      expires_at: Date.now() + 10_000
+    } });
+    let refreshCalls = 0;
+    global.fetch = async () => {
+      refreshCalls++;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return { ok: true, json: async () => ({
+        access_token: 'refreshed-access-token',
+        refresh_token: 'rotated-refresh-token',
+        user: { id: 'usr-1', email: 'user@example.com' },
+        expires_in: 3600
+      }) };
+    };
+
+    const [first, second] = await Promise.all([getAuthSession(), getAuthSession()]);
+    expect(refreshCalls).toBe(1);
+    expect(first.access_token).toBe('refreshed-access-token');
+    expect(second.refresh_token).toBe('rotated-refresh-token');
+    expect((await getAuthHeaders()).Authorization).toBe('Bearer refreshed-access-token');
+  });
+
   // 2. Missing Supabase session
   it('2. Missing session transitions to AUTH_REQUIRED and never triggers automatic signup', async () => {
     let signupCalled = false;
@@ -170,6 +197,22 @@ describe('Initialization, Own Profile & Supabase Auth Resilience', () => {
     expect(getAuthState()).toBe(AUTH_STATES.SESSION_EXPIRED);
     const inStorage = await mockStorage.get('supabase_auth_session');
     expect(inStorage.supabase_auth_session).toBeUndefined();
+  });
+
+  it('keeps the refresh token when session restoration fails due to a temporary network error', async () => {
+    const expiredSession = {
+      access_token: 'expired-token',
+      refresh_token: 'still-valid-refresh-token',
+      user_id: 'usr-1',
+      expires_at: Date.now() - 1000
+    };
+    await mockStorage.set({ supabase_auth_session: expiredSession });
+    global.fetch = async () => { throw new Error('offline'); };
+
+    const session = await restoreSession();
+    expect(session).toBeNull();
+    expect(getAuthState()).toBe(AUTH_STATES.AUTH_ERROR);
+    expect((await mockStorage.get('supabase_auth_session')).supabase_auth_session).toEqual(expiredSession);
   });
 
   // 6. Zero friends with valid own username

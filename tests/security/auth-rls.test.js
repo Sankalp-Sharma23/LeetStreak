@@ -44,7 +44,7 @@ class MockPostgresRLS {
   // Helper: execute query under a specific auth context { uid, role }
   query(authContext) {
     const uid = authContext?.uid || null;
-    const role = authContext?.role || (uid ? 'authenticated' : 'anon');
+    // The simulator applies the same participant checks for authenticated roles.
 
     return {
       // 1. User Settings RLS
@@ -78,7 +78,7 @@ class MockPostgresRLS {
         return { data: battle, error: null };
       },
 
-      updateBattleWinner: (battleId, winnerId, winnerUsername) => {
+      updateBattleWinner: (battleId, winnerId, _winnerUsername) => {
         // Policy: WITH CHECK (winner_id IS NOT DISTINCT FROM existing.winner_id)
         // Direct winner assignment by raw client update is forbidden!
         const battle = this.battles.get(battleId);
@@ -145,6 +145,31 @@ class MockPostgresRLS {
         return { data: roast, error: null };
       }
     };
+  }
+
+  requestFriend(requesterId, addresseeId, id = 'new-friendship') {
+    if (!requesterId || requesterId === addresseeId || !this.profiles.has(requesterId) || !this.profiles.has(addresseeId)) {
+      return { success: false };
+    }
+    const existing = [...this.friendships.values()].find(row =>
+      (row.requester_id === requesterId && row.addressee_id === addresseeId) ||
+      (row.requester_id === addresseeId && row.addressee_id === requesterId));
+    if (existing) return { success: true, status: existing.status, friendship_id: existing.id };
+    this.friendships.set(id, { id, requester_id: requesterId, addressee_id: addresseeId, status: 'pending' });
+    return { success: true, status: 'pending', friendship_id: id };
+  }
+
+  respondFriend(uid, friendshipId, accept) {
+    const request = this.friendships.get(friendshipId);
+    if (!request || request.addressee_id !== uid || request.status !== 'pending') return { success: false };
+    request.status = accept ? 'accepted' : 'rejected';
+    return { success: true, status: request.status };
+  }
+
+  acceptedFriends(uid) {
+    return [...this.friendships.values()]
+      .filter(row => row.status === 'accepted' && (row.requester_id === uid || row.addressee_id === uid))
+      .map(row => row.requester_id === uid ? row.addressee_id : row.requester_id);
   }
 }
 
@@ -295,6 +320,27 @@ describe('Negative Security & RLS Authorization Tests', () => {
     const res2 = userAQuery.insertBattleResult('battle-123', USER_A_ID, subPayload);
     expect(res2.success).toBe(true);
     expect(res2.duplicated).toBe(true);
+  });
+
+  it('10. A friend request is private until B accepts it, and C never sees it', () => {
+    db.friendships.delete('friendship-1');
+    const request = db.requestFriend(USER_A_ID, USER_B_ID, 'request-a-b');
+    expect(request).toMatchObject({ success: true, status: 'pending' });
+    expect(db.acceptedFriends(USER_A_ID)).not.toContain(USER_B_ID);
+    expect(db.acceptedFriends(USER_B_ID)).not.toContain(USER_A_ID);
+    expect(db.acceptedFriends(USER_C_ID)).toEqual([]);
+
+    expect(db.respondFriend(USER_B_ID, request.friendship_id, true)).toMatchObject({ success: true, status: 'accepted' });
+    expect(db.acceptedFriends(USER_A_ID)).toContain(USER_B_ID);
+    expect(db.acceptedFriends(USER_B_ID)).toContain(USER_A_ID);
+    expect(db.acceptedFriends(USER_C_ID)).toEqual([]);
+  });
+
+  it('11. Only the addressee can accept a pending friendship request', () => {
+    db.friendships.delete('friendship-1');
+    const request = db.requestFriend(USER_A_ID, USER_B_ID, 'request-a-b-auth');
+    expect(db.respondFriend(USER_C_ID, request.friendship_id, true)).toEqual({ success: false });
+    expect(db.friendships.get(request.friendship_id).status).toBe('pending');
   });
 });
 

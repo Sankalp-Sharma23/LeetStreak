@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, TrendingUp, BarChart3, Rocket, Loader2, Sparkles, Frown, FileBarChart, Flame, Swords } from 'lucide-react';
+import { Users, TrendingUp, BarChart3, Rocket, Loader2, Sparkles, Frown, FileBarChart, Flame, Swords, ArrowLeft, Bell } from 'lucide-react';
 import AddFriend from './AddFriend';
+import FriendRequests from './FriendRequests';
 import LoadingSkeleton from './LoadingSkeleton';
 import StreakView from './StreakView';
 import NotificationSettings from './NotificationSettings';
-import NotificationToast from './NotificationToast';
+import NotificationCenter from './NotificationCenter';
 import Footer from './Footer';
 import SplashScreen from './SplashScreen';
 import Leaderboard from './Leaderboard';
@@ -19,15 +20,27 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [initStatus, setInitStatus] = useState('INITIALIZING'); // 'INITIALIZING' | 'FETCHING_PROFILE' | 'SUCCESS' | 'EMPTY' | 'ERROR'
   const [view, setView] = useState('streak'); // 'streak', 'leaderboard', 'analytics', or 'settings'
   const [previousView, setPreviousView] = useState('streak'); // Track previous view for settings navigation
   const [myUsername, setMyUsername] = useState(null);
   const [setupMode, setSetupMode] = useState(false);
-  const [askPermissionMode, setAskPermissionMode] = useState(false);
-  const [setupUsername, setSetupUsername] = useState('');
+  const [setupStep, setSetupStep] = useState('detect'); // 'detect' | 'auth'
+  const [detectedUsername, setDetectedUsername] = useState('');
+  const [manualUsername, setManualUsername] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
   const [setupLoading, setSetupLoading] = useState(false);
   const [setupError, setSetupError] = useState('');
+
+  // Cloud account state
+  const [authMode, setAuthMode] = useState('signup'); // 'signup' | 'signin'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+  const [authCooldown, setAuthCooldown] = useState(0);
+
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
   const [theme, setTheme] = useState('dark');
   const [notifications, setNotifications] = useState([]);
@@ -35,6 +48,17 @@ function App() {
   const [dataLoadingTakingLong, setDataLoadingTakingLong] = useState(false);
   const [authRedirectTarget, setAuthRedirectTarget] = useState(null);
   const [presenceMap, setPresenceMap] = useState({});
+  const [battleInitialOpponent, setBattleInitialOpponent] = useState(null);
+
+  const roastNotifications = useMemo(() => {
+    return notifications.filter(n => n.type === 'roast');
+  }, [notifications]);
+
+  const handleChallengeFromRoast = (opponentUsername) => {
+    setBattleInitialOpponent(opponentUsername);
+    setView('battle');
+  };
+  const fetchStatsRef = React.useRef(null);
 
   // Guard against duplicate execution
   const initStartedRef = React.useRef(false);
@@ -48,7 +72,6 @@ function App() {
       console.error('Chrome runtime not available');
       setError('Extension context not available');
       setLoading(false);
-      setInitStatus('ERROR');
       return;
     }
     
@@ -62,7 +85,8 @@ function App() {
           'unread_notifications',
           'hardcore_mode_enabled',
           'own_profile',
-          'friends_cache'
+          'friends_cache',
+          'friends_account_id'
         ]);
         
         // Log only key facts, not on every render
@@ -95,26 +119,52 @@ function App() {
         if (storageData.own_profile) {
           setOwnProfile(storageData.own_profile);
           setLoading(false);
-          setInitStatus('SUCCESS');
         }
-        if (storageData.friends_cache) {
-          setFriends(storageData.friends_cache);
-        }
+        // All friend data is loaded through the background so its ownership
+        // can be checked before it reaches the UI.
+        chrome.runtime.sendMessage({ type: 'GET_FRIENDS' })
+          .then(response => {
+            if (response?.success) setFriends(response.friends || {});
+          })
+          .catch(error => console.warn('[App] Could not restore friends:', error));
         
-        // Check setup status
-        if (storageData.my_leetcode_username) {
+        // Check setup and cloud authentication status
+        let isAuthenticated = false;
+        try {
+          const authRes = await new Promise(resolve => {
+            chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, resolve);
+          });
+          if (authRes?.success && authRes.state === 'AUTHENTICATED') {
+            isAuthenticated = true;
+          }
+          if (authRes?.cooldownSeconds > 0) {
+            setAuthCooldown(authRes.cooldownSeconds);
+          }
+        } catch {
+          isAuthenticated = false;
+        }
+
+        const hasUsername = !!storageData.my_leetcode_username;
+
+        if (hasUsername && isAuthenticated) {
           setMyUsername(storageData.my_leetcode_username);
+          chrome.runtime.sendMessage({ type: 'POLL_ROASTS' }).catch(() => {});
           
           if (storageData.hardcore_mode_enabled === undefined) {
             chrome.storage.local.set({ hardcore_mode_enabled: false }).catch(console.error);
           }
 
           // Fetch fresh stats from LeetCode
-          await fetchStats(false, storageData.my_leetcode_username, storageData.own_profile);
-        } else {
+          await fetchStatsRef.current?.(false, storageData.my_leetcode_username, storageData.own_profile);
+        } else if (hasUsername && !isAuthenticated) {
+          setDetectedUsername(storageData.my_leetcode_username);
+          setSetupStep('auth');
           setSetupMode(true);
           setLoading(false);
-          setInitStatus('EMPTY');
+        } else {
+          setSetupStep('detect');
+          setSetupMode(true);
+          setLoading(false);
         }
         
         setDataLoadingTakingLong(false);
@@ -123,7 +173,6 @@ function App() {
         setError(`Initialization error: ${err.message}`);
         setSetupMode(false);
         setLoading(false);
-        setInitStatus('ERROR');
       }
     };
     
@@ -137,15 +186,30 @@ function App() {
     return () => clearTimeout(longLoadTimer);
   }, []); // Run once on mount!
 
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return undefined;
+    const onStorageChanged = (changes, areaName) => {
+      if (areaName === 'local' && changes.unread_notifications) {
+        setNotifications(changes.unread_notifications.newValue || []);
+      }
+    };
+    chrome.storage?.onChanged?.addListener(onStorageChanged);
+    return () => chrome.storage?.onChanged?.removeListener(onStorageChanged);
+  }, []);
+
   // App-wide presence sync for social features
   useEffect(() => {
     let mounted = true;
     const syncPresence = async () => {
       if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
       try {
-        const stored = await chrome.storage.local.get(['my_leetcode_username', 'friends_cache']);
+        const stored = await chrome.storage.local.get(['my_leetcode_username', 'friends_cache', 'friends_account_id']);
         const uname = stored.my_leetcode_username;
         if (!uname) return;
+
+        const auth = await chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' });
+        if (stored.friends_account_id && auth?.session?.user_id !== stored.friends_account_id) return;
+        if (!stored.friends_account_id && auth?.session?.user_id) return;
 
         // Ping self presence
         chrome.runtime.sendMessage({ type: 'BATTLE_PING_PRESENCE', username: uname }).catch(() => {});
@@ -171,6 +235,11 @@ function App() {
     };
   }, [myUsername]);
 
+  useEffect(() => {
+    if (authCooldown <= 0) return;
+    const timer = setInterval(() => setAuthCooldown(prev => Math.max(0, prev - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [authCooldown]);
 
   const handleDismissNotifications = async (notificationId) => {
     // Remove the dismissed notification
@@ -184,6 +253,17 @@ function App() {
     }
   };
 
+  const handleMarkAllRead = async () => {
+    setNotifications([]);
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.set({ unread_notifications: [] });
+      }
+    } catch (error) {
+      console.error('Error clearing all notifications:', error);
+    }
+  };
+
   const handleAutoDetect = async () => {
     setSetupLoading(true);
     setSetupError('');
@@ -193,46 +273,149 @@ function App() {
         type: 'GET_LOGGED_IN_USER'
       });
 
-      if (response.success && response.username) {
-        const detectedUsername = response.username;
-        
-        const addFriendResponse = await chrome.runtime.sendMessage({
-          type: 'ADD_FRIEND',
-          username: detectedUsername
-        });
-
-        const isAlreadyAdded = addFriendResponse.error && addFriendResponse.error.toLowerCase().includes('already in your friends list');
-
-        if (addFriendResponse.success || isAlreadyAdded) {
-          await chrome.storage.local.set({ 
-            my_leetcode_username: detectedUsername,
-            hardcore_mode_enabled: false 
-          });
-          setMyUsername(detectedUsername);
-          setTimeout(() => {
-            setSetupMode(false);
-            fetchFriends();
-          }, 500);
-        } else {
-          setSetupError(addFriendResponse.error || 'Failed to verify username');
-        }
+      if (response && response.success && response.username) {
+        const username = response.username.trim();
+        setDetectedUsername(username);
+        setSetupStep('auth');
+        setSetupError('');
       } else {
-        setSetupError('Could not detect your LeetCode account. Please make sure you are logged into leetcode.com in another tab.');
+        setSetupError('Could not detect your LeetCode account. Make sure you are logged into leetcode.com in another tab, or enter your username below.');
+        setShowManualInput(true);
       }
     } catch (err) {
       console.error('Error during auto-detect:', err);
-      setSetupError('Failed to verify username. Please try again.');
+      setSetupError('Failed to detect username. Make sure you are logged into leetcode.com or enter it manually below.');
+      setShowManualInput(true);
     } finally {
       setSetupLoading(false);
     }
   };
 
-  const fetchStats = async (forceRefresh = false, usernameOverride = null, cachedProfile = null) => {
+  const handleManualUsernameSubmit = (e) => {
+    e?.preventDefault();
+    const trimmed = manualUsername.trim();
+    if (!trimmed) {
+      setSetupError('Please enter your LeetCode username.');
+      return;
+    }
+    setDetectedUsername(trimmed);
+    setSetupStep('auth');
+    setSetupError('');
+  };
+
+  const handleCloudAuthSubmit = async (e) => {
+    e?.preventDefault();
+    if (authSubmitting) return;
+    setAuthError('');
+    setAuthSuccessMsg('');
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const cleanEmail = authEmail.trim();
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setAuthError('Please enter a valid email address.');
+      return;
+    }
+    if (!authPassword || authPassword.length < 6) {
+      setAuthError('Password must be at least 6 characters.');
+      return;
+    }
+    if (authCooldown > 0) {
+      setAuthError(`Rate limit active. Please wait ${authCooldown}s.`);
+      return;
+    }
+
+    const username = (detectedUsername || myUsername || '').trim();
+    if (!username) {
+      setAuthError('Missing LeetCode username. Please go back to step 1.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+
+    try {
+      if (authMode === 'signin') {
+        const res = await new Promise(resolve => {
+          chrome.runtime.sendMessage({
+            type: 'SIGN_IN_EMAIL',
+            email: cleanEmail,
+            password: authPassword,
+            username
+          }, resolve);
+        });
+
+        if (res?.success) {
+          await chrome.runtime.sendMessage({
+            type: 'SET_OWN_USERNAME',
+            username
+          });
+          setMyUsername(username);
+          setAuthPassword('');
+          setSetupMode(false);
+          const nextView = authRedirectTarget || 'streak';
+          setAuthRedirectTarget(null);
+          setView(nextView);
+          await fetchStatsRef.current?.(false, username);
+        } else {
+          if (res?.isRateLimited) setAuthCooldown(60);
+          setAuthError(res?.error || 'Invalid email or password.');
+        }
+      } else {
+        const res = await new Promise(resolve => {
+          chrome.runtime.sendMessage({
+            type: 'SIGN_UP_EMAIL',
+            email: cleanEmail,
+            password: authPassword,
+            username
+          }, resolve);
+        });
+
+        if (res?.success) {
+          if (res.confirmationRequired) {
+            setAuthSuccessMsg('Account created! Please check your email to verify your address, then sign in.');
+            setAuthMode('signin');
+            setAuthPassword('');
+          } else {
+            await chrome.runtime.sendMessage({
+              type: 'SET_OWN_USERNAME',
+              username
+            });
+            setMyUsername(username);
+            setAuthPassword('');
+            setSetupMode(false);
+            const nextView = authRedirectTarget || 'streak';
+            setAuthRedirectTarget(null);
+            setView(nextView);
+            await fetchStatsRef.current?.(false, username);
+          }
+        } else {
+          if (res?.isRateLimited) setAuthCooldown(60);
+          setAuthError(res?.error || 'Failed to create account.');
+        }
+      }
+    } catch (err) {
+      console.error('Error during cloud auth:', err);
+      setAuthError(err.message || 'Network error during authentication.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleRequireAuth = (target = 'streak') => {
+    setAuthRedirectTarget(target);
+    if (myUsername) {
+      setDetectedUsername(myUsername);
+      setSetupStep('auth');
+    } else {
+      setSetupStep('detect');
+    }
+    setSetupMode(true);
+  };
+
+  const fetchStats = async (forceRefresh = false, _usernameOverride = null, cachedProfile = null) => {
     try {
       const activeOwnProfile = cachedProfile || ownProfile;
       if (!activeOwnProfile) {
         setLoading(true);
-        setInitStatus('FETCHING_PROFILE');
       } else if (forceRefresh) {
         setRefreshing(true);
       }
@@ -250,27 +433,25 @@ function App() {
         if (response.friends) {
           setFriends(response.friends);
         }
-        setInitStatus('SUCCESS');
         setError(null);
       } else {
         const errMsg = response?.error || 'Failed to fetch LeetCode data';
         console.warn('[App] fetchStats response error:', errMsg);
         if (!activeOwnProfile) {
           setError(errMsg);
-          setInitStatus('ERROR');
         }
       }
     } catch (err) {
       console.error('[App] Error in fetchStats:', err);
       if (!ownProfile && !cachedProfile) {
         setError('Failed to connect to background service');
-        setInitStatus('ERROR');
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
+  fetchStatsRef.current = fetchStats;
 
   const fetchFriends = fetchStats;
 
@@ -317,45 +498,222 @@ function App() {
   // Check if data is loaded
   const hasData = myData !== null && myData !== undefined;
 
-  // Setup screen
+  // Setup screen (Step 1: LeetCode Auto-Detect, Step 2: Cloud Account)
   if (setupMode) {
     return (
-      <div className="w-[400px] h-[600px] bg-background flex items-center justify-center p-8">
-        <div className="text-center max-w-sm w-full animate-fade-in mx-auto">
-          <div className="w-24 h-24 bg-surface rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg ring-4 ring-surfaceHover">
-            <Rocket className="w-12 h-12 text-primary animate-bounce-slow" />
-          </div>
-          <h1 className="text-2xl font-bold text-text-main mb-2 text-center">Welcome to LeetStreak!</h1>
-          <p className="text-sm text-text-muted mb-8 text-center mx-auto">
-            We will securely detect your logged-in LeetCode profile to start tracking your progress.
-          </p>
-          
-          <div className="space-y-4 w-full">
-            {setupError && (
-              <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20 text-sm text-red-400 animate-shake text-center w-full">
-                {setupError}
-              </div>
-            )}
-            
-            <button
-              onClick={handleAutoDetect}
-              disabled={setupLoading}
-              className="w-full py-4 bg-primary hover:bg-primaryHover text-inverted font-bold rounded-2xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-primary/20 active:scale-95"
-            >
-              <span className="flex items-center justify-center gap-2">
+      <div className="w-[400px] h-[600px] bg-background flex flex-col justify-between p-6 text-text-main overflow-y-auto scrollbar-hide">
+        {setupStep === 'detect' ? (
+          <div className="flex flex-col items-center justify-center my-auto w-full max-w-sm mx-auto text-center animate-fade-in">
+            <div className="w-20 h-20 bg-surface rounded-2xl flex items-center justify-center mx-auto mb-4 border border-surfaceHover/50 shadow-sm">
+              <Rocket className="w-10 h-10 text-primary animate-bounce-slow" />
+            </div>
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary/10 rounded-full text-primary font-bold text-[11px] mb-3">
+              Step 1 of 2: Connect LeetCode
+            </div>
+
+            <h1 className="text-xl font-bold text-text-main mb-1.5">Welcome to LeetStreak</h1>
+            <p className="text-xs text-text-muted mb-6 leading-relaxed max-w-xs">
+              Detect your active LeetCode session to start tracking streaks, problem analytics, and daily challenges.
+            </p>
+
+            <div className="space-y-3.5 w-full">
+              {setupError && (
+                <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20 text-xs text-red-400 text-left leading-relaxed">
+                  {setupError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAutoDetect}
+                disabled={setupLoading}
+                className="w-full min-h-[48px] py-3 bg-primary hover:bg-primaryHover text-inverted font-bold text-xs rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-primary/20 active:scale-95 flex items-center justify-center gap-2"
+              >
                 {setupLoading ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> Detecting...</>
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Detecting LeetCode Session...</>
                 ) : (
                   <><Sparkles className="w-4 h-4" /> Auto-Detect Profile</>
                 )}
-              </span>
-            </button>
+              </button>
+
+              {showManualInput ? (
+                <form onSubmit={handleManualUsernameSubmit} className="space-y-2.5 pt-2 animate-fade-in">
+                  <div className="text-left">
+                    <label className="block text-[11px] font-semibold text-text-muted mb-1">
+                      Enter LeetCode Username
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. neetcode, tour_de_code"
+                      value={manualUsername}
+                      onChange={(e) => setManualUsername(e.target.value)}
+                      className="w-full min-h-[44px] px-3 py-2 bg-surface border border-surfaceHover rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all"
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full min-h-[44px] py-2.5 bg-surface hover:bg-surfaceHover border border-surfaceHover text-text-main font-semibold text-xs rounded-xl transition-all"
+                  >
+                    Continue with @{manualUsername.trim() || 'username'}
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowManualInput(true)}
+                  className="text-[11px] text-text-muted hover:text-text-main transition-colors py-1 underline-offset-2 hover:underline"
+                >
+                  Cannot auto-detect? Enter username manually
+                </button>
+              )}
+            </div>
+
+            <p className="mt-6 text-[11px] text-text-muted">
+              Make sure you are logged into <a href="https://leetcode.com" target="_blank" rel="noreferrer" className="text-primary hover:underline font-semibold">leetcode.com</a> in another tab.
+            </p>
           </div>
-          
-          <p className="mt-6 text-xs text-text-muted text-center mx-auto">
-            Make sure you are logged into leetcode.com first!
-          </p>
-        </div>
+        ) : (
+          <div className="flex flex-col justify-center my-auto w-full max-w-sm mx-auto animate-fade-in text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setSetupStep('detect');
+                setAuthError('');
+                setAuthSuccessMsg('');
+              }}
+              className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-text-main mb-3 transition-colors self-start"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to LeetCode Detection
+            </button>
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary/10 rounded-full text-primary font-bold text-[11px] mb-2.5 self-center">
+              Step 2 of 2: Cloud Account
+            </div>
+
+            <h1 className="text-xl font-bold text-text-main mb-1">
+              {authMode === 'signup' ? 'Create Your Cloud Account' : 'Sign In to Cloud Account'}
+            </h1>
+            <p className="text-xs text-text-muted mb-3.5 leading-relaxed">
+              Link your LeetCode handle to an email & password to enable 1v1 coding battles and friends sync.
+            </p>
+
+            {/* Detected LeetCode Identity Badge */}
+            <div className="flex items-center justify-between p-3 bg-surface/80 border border-surfaceHover/60 rounded-xl mb-3 text-left">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
+                  LC
+                </div>
+                <div>
+                  <p className="text-[10px] text-text-muted font-medium uppercase tracking-wider">LeetCode Identity</p>
+                  <p className="text-xs font-bold text-text-main font-mono">@{detectedUsername}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSetupStep('detect');
+                  setAuthError('');
+                  setAuthSuccessMsg('');
+                }}
+                className="text-[11px] text-primary hover:underline font-semibold min-h-[44px] min-w-[44px] flex items-center justify-center"
+              >
+                Change
+              </button>
+            </div>
+
+            {/* Mode Switcher */}
+            <div className="flex w-full bg-surface p-1 rounded-xl border border-surfaceHover/50 mb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('signup');
+                  setAuthError('');
+                  setAuthSuccessMsg('');
+                }}
+                className={`flex-1 min-h-[40px] py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                  authMode === 'signup' ? 'bg-primary text-inverted shadow-sm' : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                Create Account
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('signin');
+                  setAuthError('');
+                  setAuthSuccessMsg('');
+                }}
+                className={`flex-1 min-h-[40px] py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                  authMode === 'signin' ? 'bg-primary text-inverted shadow-sm' : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                Sign In
+              </button>
+            </div>
+
+            {authError && (
+              <div className="p-2.5 bg-red-500/10 border border-red-500/25 rounded-xl text-xs text-red-400 mb-3 text-left">
+                {authError}
+              </div>
+            )}
+            {authSuccessMsg && (
+              <div className="p-2.5 bg-green-500/10 border border-green-500/25 rounded-xl text-xs text-green-400 mb-3 text-left">
+                {authSuccessMsg}
+              </div>
+            )}
+            {authCooldown > 0 && (
+              <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400 mb-3 text-center">
+                Rate limit active. Please wait {authCooldown}s
+              </div>
+            )}
+
+            <form onSubmit={handleCloudAuthSubmit} className="space-y-2.5 text-left">
+              <div>
+                <label className="block text-[11px] font-semibold text-text-muted mb-1">Email</label>
+                <input
+                  type="email"
+                  placeholder="name@example.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  disabled={authSubmitting}
+                  required
+                  className="w-full min-h-[44px] px-3 py-2 bg-surface/80 border border-surfaceHover/60 rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-text-muted mb-1">Password</label>
+                <input
+                  type="password"
+                  placeholder={authMode === 'signup' ? 'Min 6 characters' : 'Your password'}
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  disabled={authSubmitting}
+                  required
+                  className="w-full min-h-[44px] px-3 py-2 bg-surface/80 border border-surfaceHover/60 rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={authSubmitting || authCooldown > 0}
+                className="w-full min-h-[44px] py-2.5 bg-primary hover:bg-primaryHover text-inverted text-xs font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 active:scale-95 shadow-sm mt-1"
+              >
+                {authSubmitting ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing…</>
+                ) : (
+                  authMode === 'signup' ? 'Create Account & Enter' : 'Sign In & Enter'
+                )}
+              </button>
+            </form>
+
+            <p className="mt-3 text-[11px] text-text-muted text-center leading-relaxed">
+              Your profile will be verified and linked to @{detectedUsername}.
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -504,13 +862,17 @@ function App() {
                   )}
                 </button>
                 <button
-                  onClick={() => setShowNotificationSettings(true)}
-                  className="p-2.5 text-text-muted hover:text-primary transition-all duration-200 hover:bg-surfaceHover/50 rounded-lg"
-                  title="Notification Settings"
+                  onClick={() => setShowNotificationCenter(prev => !prev)}
+                  className="p-2.5 text-text-muted hover:text-primary transition-all duration-200 hover:bg-surfaceHover/50 rounded-lg relative"
+                  title={notifications.length > 0 ? `${notifications.length} notifications` : 'Notifications'}
+                  aria-label={notifications.length > 0 ? `${notifications.length} notifications` : 'Notifications'}
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                  </svg>
+                  <Bell className="w-5 h-5" />
+                  {notifications.length > 0 && (
+                    <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-md border-2 border-surface animate-pulse">
+                      {notifications.length > 99 ? '99+' : notifications.length}
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -527,6 +889,10 @@ function App() {
                 <SettingsPanel 
                   onBack={() => setView('streak')}
                   onNavigateToBattle={() => setView('battle')}
+                  onCloudSignOut={() => {
+                    setFriends({});
+                    setPresenceMap({});
+                  }}
                   theme={theme}
                   onThemeChange={setTheme}
                 />
@@ -538,6 +904,10 @@ function App() {
                     onRefresh={handleRefresh}
                     refreshing={refreshing}
                     presenceMap={presenceMap}
+                    roastNotifications={roastNotifications}
+                    myUsername={myUsername}
+                    onDismissRoast={handleDismissNotifications}
+                    onChallengeBattle={handleChallengeFromRoast}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full p-8 text-center">
@@ -584,6 +954,9 @@ function App() {
                   friends={friendsList}
                   returnTarget={authRedirectTarget}
                   presenceMap={presenceMap}
+                  onRequireAuth={handleRequireAuth}
+                  initialOpponent={battleInitialOpponent}
+                  onClearInitialOpponent={() => setBattleInitialOpponent(null)}
                   onAuthSuccess={(target) => {
                     const next = target || authRedirectTarget;
                     setAuthRedirectTarget(null);
@@ -594,17 +967,14 @@ function App() {
               ) : (
                 <>
                   <AddFriend onFriendAdded={handleFriendAdded} />
+                  <FriendRequests onChanged={handleFriendAdded} />
                   <div className="flex-1 overflow-y-auto scrollbar-hide">
                     <Leaderboard
                       friends={friendsList}
                       myData={myData}
                       myUsername={myUsername}
-                      onRefresh={handleRefresh}
                       presenceMap={presenceMap}
-                      onRequireAuth={(target = 'leaderboard') => {
-                        setAuthRedirectTarget(target);
-                        setView('battle');
-                      }}
+                      onRequireAuth={handleRequireAuth}
                     />
                   </div>
                 </>
@@ -613,11 +983,19 @@ function App() {
           </>
         )}
 
-        {/* Notification Toast */}
-        <NotificationToast 
-          notifications={notifications} 
-          onDismiss={handleDismissNotifications} 
-        />
+        {/* Notification Center Modal */}
+        {showNotificationCenter && (
+          <NotificationCenter 
+            notifications={notifications} 
+            onDismiss={handleDismissNotifications}
+            onMarkAllRead={handleMarkAllRead}
+            onClearAll={handleMarkAllRead}
+            onClose={() => setShowNotificationCenter(false)}
+            onNavigateView={(targetView) => setView(targetView)}
+            myUsername={myUsername}
+            onChallengeFromRoast={handleChallengeFromRoast}
+          />
+        )}
 
         {/* Footer */}
         <Footer onSettingsClick={() => {

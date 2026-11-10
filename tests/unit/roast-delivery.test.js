@@ -65,6 +65,13 @@ class MockRoastStore {
     }
     return count;
   }
+
+  deleteRoasts(messageIds) {
+    const idSet = new Set(messageIds);
+    const initialLen = this.messages.length;
+    this.messages = this.messages.filter(m => !idSet.has(m.id));
+    return initialLen - this.messages.length;
+  }
 }
 
 describe('Roast Delivery Lifecycle & Persistence', () => {
@@ -120,8 +127,6 @@ describe('Roast Delivery Lifecycle & Persistence', () => {
   it('5. Idempotent acknowledgement operations prevent duplicate side effects', () => {
     const roast = store.send('alice', 'bob', 'Idempotency test');
     store.markRead([roast.id]);
-    const originalReadTime = roast.read_at;
-
     // Second read acknowledgement call
     store.markRead([roast.id]);
     expect(roast.status).toBe('read');
@@ -131,6 +136,16 @@ describe('Roast Delivery Lifecycle & Persistence', () => {
   it('6. Rejects messages exceeding maximum allowed character limit', () => {
     const giantMessage = 'x'.repeat(501);
     expect(() => store.send('alice', 'bob', giantMessage)).toThrow('Invalid content length');
+  });
+
+  it('7. Ephemeral roast deletion clears message from store with zero trace', () => {
+    const roast = store.send('alice', 'bob', 'One-time burn 🔥');
+    expect(store.messages.find(m => m.id === roast.id)).toBeDefined();
+
+    const deletedCount = store.deleteRoasts([roast.id]);
+    expect(deletedCount).toBe(1);
+    expect(store.messages.find(m => m.id === roast.id)).toBeUndefined();
+    expect(store.fetchUnread('bob')).toHaveLength(0);
   });
 });
 

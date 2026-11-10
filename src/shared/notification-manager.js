@@ -11,6 +11,7 @@
  */
 
 const NOTIFICATION_STORAGE_KEY = 'leetfriends_notifications';
+let notificationQueue = Promise.resolve();
 
 export const DELIVERY_STATES = {
   QUEUED: 'QUEUED',
@@ -120,8 +121,14 @@ export async function setSnooze(hours = 1) {
  * Centralized batch notification dispatcher
  * @param {Array<Object>} events - Array of notification event objects
  */
-export async function batchNotify(events) {
-  if (!Array.isArray(events) || events.length === 0) return;
+export function batchNotify(events) {
+  const result = notificationQueue.then(() => dispatchNotificationBatch(events));
+  notificationQueue = result.catch(() => false);
+  return result;
+}
+
+async function dispatchNotificationBatch(events) {
+  if (!Array.isArray(events) || events.length === 0) return false;
 
   try {
     const muted = await isNotificationMuted();
@@ -131,9 +138,17 @@ export async function batchNotify(events) {
     const stored = await chrome.storage.local.get('unread_notifications');
     const existing = stored.unread_notifications || [];
 
-    const notificationsWithMeta = events.map((event, idx) => ({
+    const knownIds = new Set(existing.map(notification => notification.id));
+    const freshEvents = [];
+    events.forEach((event, idx) => {
+      const id = event.id || `${timestamp}-${idx}`;
+      if (knownIds.has(id)) return;
+      knownIds.add(id);
+      freshEvents.push({ ...event, id });
+    });
+    if (freshEvents.length === 0) return true;
+    const notificationsWithMeta = freshEvents.map(event => ({
       ...event,
-      id: `${timestamp}-${idx}`,
       timestamp,
       deliveryState: muted ? DELIVERY_STATES.IN_APP_ONLY : DELIVERY_STATES.DISPLAY_REQUESTED
     }));
@@ -148,11 +163,11 @@ export async function batchNotify(events) {
     // If notifications are muted by user preference, skip native desktop popups
     if (muted) {
       console.log('[NotificationManager] Notifications muted; recorded for in-app display only.');
-      return;
+      return true;
     }
 
     // 2. Dispatch native Chrome desktop notifications
-    for (const event of events) {
+    for (const event of freshEvents) {
       try {
         let title = 'LeetStreak';
         if (event.type === 'new_submission') title = '🎯 Friend Solved a Problem!';
@@ -161,8 +176,9 @@ export async function batchNotify(events) {
         else if (event.type === 'battle_invite') title = '⚔️ 1v1 Battle Challenge!';
         else if (event.type === 'battle_opponent_solved') title = '⚔️ Opponent Solved a Problem!';
         else if (event.type === 'roast') title = '🔥 Motivation Roast Received!';
+        else if (event.type === 'daily_problem_reminder') title = 'ENO: DSA Check-in ☕';
 
-        const notifId = `leetstreak-${event.type}-${timestamp}-${Math.floor(Math.random() * 1000)}`;
+        const notifId = event.nativeNotificationId || `leetstreak-${event.type}-${timestamp}-${Math.floor(Math.random() * 1000)}`;
 
         await chrome.notifications.create(notifId, {
           type: 'basic',
@@ -176,7 +192,9 @@ export async function batchNotify(events) {
         console.warn('[NotificationManager] chrome.notifications.create failed:', dispErr);
       }
     }
+    return true;
   } catch (error) {
     console.error('[NotificationManager] Error in batchNotify:', error);
+    return false;
   }
 }

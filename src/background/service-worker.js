@@ -38,21 +38,22 @@ import {
   getOnlineFriends,
   setPresenceOffline,
   syncFriendship,
-  syncFriendships,
+  getFriendRequests,
+  respondToFriendRequest,
   removeFriendship,
   restoreAccountSocialData,
-  upsertProfile
+  upsertProfile,
+  getUserSettings as getSupabaseUserSettings,
+  upsertUserSettings
 } from '../shared/supabase-client.js';
 import {
   createBattle,
   getActiveBattle,
-  getBattleResults,
   getBattleHistory,
+  getBattleHistoryScoreboard,
+  getBattleHistoryDetails,
   respondToBattle,
   submitProblemPick,
-  confirmReady,
-  submitBattleResult,
-  forfeitBattle,
   cancelBattle,
   validateLeetCodeProblem,
   updatePresence,
@@ -65,7 +66,13 @@ import {
   forfeitBattleV2
 } from '../shared/battle-manager.js';
 import { validateUsername } from '../shared/validation.js';
-import { calculateStreak, getProblemsSolved, needsRefresh, timestampToDateString, hasSolvedToday } from '../shared/streak-calculator.js';
+import {
+  calculateStreak,
+  getProblemsSolved,
+  needsRefresh,
+  timestampToDateString,
+  getConfirmedAcceptedSolveToday
+} from '../shared/streak-calculator.js';
 import {
   getNotificationState,
   batchNotify,
@@ -73,10 +80,12 @@ import {
   setNotificationMuted
 } from '../shared/notification-manager.js';
 import {
-  detectMilestone,
-  isStreakAtRisk,
-  buildNotificationMessage
+  isStreakAtRisk
 } from '../shared/activity-detector.js';
+import {
+  canDeliverStreakAtRisk,
+  recordStreakAtRiskDelivery
+} from '../shared/streak-at-risk-policy.js';
 import {
   getCurrentInterval,
   getNextAlarmConfig,
@@ -84,8 +93,24 @@ import {
 } from '../shared/schedule-manager.js';
 import { initializeTabMonitor } from './tab-monitor.js';
 import { syncBlockerRules, isBlockerActive } from './blocker-manager.js';
+import {
+  canDeliverDailyReminder,
+  getDueReminderSlot,
+  getCompletedLocalDays,
+  getDeliveredReminderSlots,
+  getLocalDateKey,
+  getNextReminderTime,
+  normalizeReminderFrequency,
+  recordDailyReminderSlot,
+  selectDailyReminderQuote
+} from '../shared/daily-reminders.js';
 
 const ALARM_NAME = 'leetfriends_sync';
+const ROAST_DELIVERY_ALARM = 'leetstreak_roast_delivery';
+const DAILY_REMINDER_ALARM = 'leetstreak_daily_problem_reminder';
+let roastDeliveryInProgress = false;
+let dailyReminderInProgress = false;
+let friendSyncInProgress = false;
 const SCHEDULE_CHECK_ALARM = 'schedule_transition_check';
 const PRESENCE_HEARTBEAT_ALARM = 'presence_heartbeat_alarm';
 const REQUEST_DELAY_MS = 500;
@@ -106,11 +131,19 @@ initializeTabMonitor();
 restoreSession().catch(err => {
   console.warn('[ServiceWorker] Session restoration (non-blocking):', err.message);
 });
+setupDailyReminderAlarm();
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && ['notification_frequency', 'notifications_enabled', 'my_leetcode_username', 'daily_problem_completed_date'].some(key => key in changes)) {
+    setupDailyReminderAlarm();
+  }
+});
 
 // Install listener - set up dynamic alarms & storage cleanup
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[ServiceWorker] Installed - setting up sync alarm and cleaning legacy keys');
   setupDynamicAlarm();
+  setupRoastDeliveryAlarm();
   cleanupLegacyData();
   await syncBlockerRules();
   // Register recurring presence heartbeat alarm (MV3 compliant)
@@ -128,6 +161,7 @@ chrome.runtime.onStartup.addListener(async () => {
   console.log('[ServiceWorker] Browser startup - reconciling blocker rules & presence');
   await syncBlockerRules();
   try {
+    setupRoastDeliveryAlarm();
     await chrome.alarms.clear(PRESENCE_HEARTBEAT_ALARM);
     chrome.alarms.create(PRESENCE_HEARTBEAT_ALARM, {
       delayInMinutes: 0.1,
@@ -186,6 +220,50 @@ async function setupDynamicAlarm() {
   }
 }
 
+function setupRoastDeliveryAlarm() {
+  chrome.alarms.create(ROAST_DELIVERY_ALARM, { delayInMinutes: 1, periodInMinutes: 1 });
+}
+
+async function deliverPendingRoasts() {
+  if (roastDeliveryInProgress) return { success: true, delivered: 0 };
+  roastDeliveryInProgress = true;
+  try {
+    const stored = await chrome.storage.local.get(['my_leetcode_username', 'delivered_roast_ids']);
+    const myUsername = stored.my_leetcode_username;
+    if (!myUsername) return { success: false, error: 'No LeetCode username configured' };
+
+    const roasts = await fetchUnreadRoasts(myUsername);
+    const alreadyDelivered = new Set(stored.delivered_roast_ids || []);
+    const pending = roasts.filter(roast => !alreadyDelivered.has(roast.id));
+    if (!pending.length) return { success: true, delivered: 0 };
+
+    const events = pending.map(roast => ({
+      id: `roast-${roast.id}`,
+      type: 'roast',
+      roastId: roast.id,
+      username: roast.sender_username,
+      senderUsername: roast.sender_username,
+      roastContent: roast.content,
+      message: `${roast.sender_username} roasted you: "${roast.content}" 🔥`,
+      timestamp: roast.created_at ? new Date(roast.created_at).getTime() : Date.now(),
+      priority: 2
+    }));
+    if (!await batchNotify(events)) return { success: false, error: 'Could not save roast notifications' };
+
+    const deliveredIds = pending.map(roast => roast.id);
+    await chrome.storage.local.set({
+      delivered_roast_ids: [...alreadyDelivered, ...deliveredIds].slice(-200)
+    });
+    await markRoastsDelivered(deliveredIds);
+    return { success: true, delivered: deliveredIds.length };
+  } catch (error) {
+    console.warn('[ServiceWorker] Roast delivery check failed:', error);
+    return { success: false, error: error.message };
+  } finally {
+    roastDeliveryInProgress = false;
+  }
+}
+
 /**
  * Check if schedule needs transition (active vs quiet hours)
  */
@@ -214,8 +292,112 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await syncBlockerRules();
   } else if (alarm.name === PRESENCE_HEARTBEAT_ALARM) {
     await handlePresenceHeartbeat();
+  } else if (alarm.name === ROAST_DELIVERY_ALARM) {
+    await deliverPendingRoasts();
+  } else if (alarm.name === DAILY_REMINDER_ALARM) {
+    await deliverDailyProblemReminder(alarm.scheduledTime);
+  } else if (alarm.name && alarm.name.startsWith('battle_start_')) {
+    const battleId = alarm.name.replace('battle_start_', '');
+    await startBattleAndRedirect(battleId);
   }
 });
+
+async function setupDailyReminderAlarm() {
+  try {
+    const settings = await chrome.storage.local.get(['notification_frequency', 'notifications_enabled', 'my_leetcode_username', 'daily_problem_completed_date', 'daily_problem_completed_dates']);
+    await chrome.alarms.clear(DAILY_REMINDER_ALARM);
+    if (settings.notifications_enabled === false || !settings.my_leetcode_username) return;
+    let now = new Date();
+    if (getCompletedLocalDays(settings.daily_problem_completed_dates, settings.daily_problem_completed_date).includes(getLocalDateKey(now))) {
+      now = new Date(now);
+      now.setDate(now.getDate() + 1);
+      now.setHours(0, 0, 0, 0);
+    }
+    const when = getNextReminderTime(now, normalizeReminderFrequency(settings.notification_frequency));
+    if (when) chrome.alarms.create(DAILY_REMINDER_ALARM, { when: when.getTime() });
+  } catch (error) {
+    console.error('[ServiceWorker] Could not schedule daily reminder:', error);
+  }
+}
+
+async function deliverDailyProblemReminder(scheduledTime) {
+  if (dailyReminderInProgress) return;
+  dailyReminderInProgress = true;
+  try {
+    const now = new Date();
+    const scheduledDate = new Date(scheduledTime || now);
+    const dayKey = getLocalDateKey(scheduledDate);
+    const currentDay = getLocalDateKey(now);
+    const slot = getDueReminderSlot(scheduledDate);
+    const settings = await chrome.storage.local.get([
+      'my_leetcode_username', 'notification_frequency', 'notifications_enabled',
+      'daily_problem_completed_date', 'daily_problem_completed_dates', 'daily_problem_reminder_state'
+    ]);
+    const priorState = settings.daily_problem_reminder_state || {};
+    const deliveredSlots = getDeliveredReminderSlots(priorState, dayKey);
+    const completedDates = getCompletedLocalDays(settings.daily_problem_completed_dates, settings.daily_problem_completed_date);
+    const frequency = normalizeReminderFrequency(settings.notification_frequency);
+    if (dayKey !== currentDay || !canDeliverDailyReminder({
+      date: now,
+      slot,
+      frequency,
+      enabled: settings.notifications_enabled !== false,
+      solved: completedDates.includes(currentDay),
+      deliveredSlots
+    })) return;
+
+    const username = settings.my_leetcode_username;
+    if (!username) return;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const profile = await fetchUserData(username);
+    const solved = getConfirmedAcceptedSolveToday(profile, timezone);
+    // LeetCode's activity calendar includes attempts, so it cannot substitute
+    // for a verified Accepted submission. When that query is unavailable,
+    // skip this reminder rather than risk a false nag after a successful solve.
+    if (solved === null) return;
+    if (solved) {
+      await chrome.storage.local.set({ daily_problem_completed_dates: getCompletedLocalDays([...completedDates, currentDay]) });
+      return;
+    }
+
+    const latestSettings = await chrome.storage.local.get([
+      'notification_frequency', 'notifications_enabled', 'daily_problem_completed_date',
+      'daily_problem_completed_dates', 'daily_problem_reminder_state'
+    ]);
+    const latestState = latestSettings.daily_problem_reminder_state || {};
+    const latestDeliveredSlots = getDeliveredReminderSlots(latestState, dayKey);
+    const latestCompletedDates = getCompletedLocalDays(latestSettings.daily_problem_completed_dates, latestSettings.daily_problem_completed_date);
+    if (!canDeliverDailyReminder({
+      date: new Date(),
+      slot,
+      frequency: normalizeReminderFrequency(latestSettings.notification_frequency),
+      enabled: latestSettings.notifications_enabled !== false,
+      solved: latestCompletedDates.includes(currentDay),
+      deliveredSlots: latestDeliveredSlots
+    })) return;
+
+    const quote = selectDailyReminderQuote(latestState.lastQuoteId || priorState.lastQuoteId);
+    const eventId = `daily-problem-${dayKey}-${slot}`;
+    const saved = await batchNotify([{
+      id: eventId,
+      nativeNotificationId: `leetstreak-${eventId}`,
+      type: 'daily_problem_reminder',
+      quoteId: quote.id,
+      message: quote.text,
+      priority: 1
+    }]);
+    if (saved) {
+      await chrome.storage.local.set({
+        daily_problem_reminder_state: recordDailyReminderSlot(latestState, dayKey, slot, quote.id)
+      });
+    }
+  } catch (error) {
+    console.error('[ServiceWorker] Daily reminder delivery failed:', error);
+  } finally {
+    dailyReminderInProgress = false;
+    await setupDailyReminderAlarm();
+  }
+}
 
 // Central message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -231,6 +413,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'ADD_FRIEND':
       handleAddFriend(message.username).then(sendResponse);
+      return true;
+
+    case 'SET_OWN_USERNAME':
+      handleSetOwnUsername(message.username).then(sendResponse);
       return true;
 
     case 'REMOVE_FRIEND':
@@ -286,7 +472,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ===== 1v1 Battle System =====
     case 'BATTLE_GET_STATUS':
-      handleBattleGetStatus(message.username).then(sendResponse);
+      handleBattleGetStatus(message.username, message.includeHistory).then(sendResponse);
+      return true;
+
+    case 'BATTLE_GET_HISTORY_SCOREBOARD':
+      getBattleHistoryScoreboard(message.filters || {}, message.limit || 12, message.offset || 0).then(sendResponse);
+      return true;
+
+    case 'BATTLE_GET_HISTORY_DETAILS':
+      getBattleHistoryDetails(message.opponentId, message.filters || {}, message.limit || 10, message.offset || 0).then(sendResponse);
       return true;
 
     case 'BATTLE_CHALLENGE_V2':
@@ -312,6 +506,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'BATTLE_FORFEIT_V2':
       handleBattleForfeitV2(message.battleId, message.username).then(sendResponse);
+      return true;
+
+    case 'BATTLE_OPEN_PROBLEM':
+      redirectToBattleProblem(message.url).then(sendResponse);
       return true;
 
     case 'BATTLE_CHALLENGE':
@@ -360,16 +558,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(err => sendResponse({ success: false, error: err.message, friends: [] }));
       return true;
 
-    case 'SYNC_FRIENDSHIPS':
-      (async () => {
-        if (!Array.isArray(message.usernames)) {
-          return sendResponse({ success: true, count: 0 });
-        }
-        const results = await Promise.all(
-          message.usernames.map(u => syncFriendship(u).catch(() => ({ success: false })))
-        );
-        sendResponse({ success: true, count: results.filter(r => r?.success).length });
-      })().catch(err => sendResponse({ success: false, error: err.message }));
+    case 'GET_FRIEND_REQUESTS':
+      getFriendRequests().then(requests => sendResponse({ success: true, requests }))
+        .catch(err => sendResponse({ success: false, error: err.message, requests: [] }));
+      return true;
+
+    case 'RESPOND_FRIEND_REQUEST':
+      respondToFriendRequest(message.friendshipId, message.accept).then(async result => {
+        if (result?.success) await restoreAccountSocialData();
+        sendResponse(result);
+      }).catch(err => sendResponse({ success: false, error: err.message }));
       return true;
 
     case 'GET_LOGGED_IN_USER':
@@ -455,6 +653,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           try {
             await setPresenceOffline();
           } catch {}
+          await chrome.storage.local.remove(['friends_cache', 'friends_list', 'friends_account_id']);
           sendResponse(res);
         })
         .catch(err => sendResponse({ success: false, error: err.message }));
@@ -476,6 +675,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })().then(sendResponse);
       return true;
 
+    case 'MARK_ROAST_READ':
+      (async () => {
+        if (message.roastId) {
+          await markRoastsRead([message.roastId]);
+        }
+        return { success: true };
+      })().then(sendResponse);
+      return true;
+
+    case 'POLL_ROASTS':
+      deliverPendingRoasts().then(sendResponse);
+      return true;
+
     default:
       sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
   }
@@ -483,7 +695,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Notification click router
 chrome.notifications.onClicked.addListener((notifId) => {
-  if (notifId.includes('streak') || notifId.includes('roast') || notifId.includes('solve')) {
+  if (notifId.includes('battle')) {
+    try {
+      chrome.action?.openPopup?.().catch(() => {});
+    } catch {}
+    chrome.notifications.clear(notifId);
+  } else if (notifId.includes('streak') || notifId.includes('roast') || notifId.includes('solve')) {
     chrome.tabs.create({ url: 'https://leetcode.com/problemset/' });
     chrome.notifications.clear(notifId);
   }
@@ -496,11 +713,22 @@ chrome.notifications.onClicked.addListener((notifId) => {
  */
 async function handleFetchStats(forceRefresh = false) {
   try {
-    const storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone']);
-    const myUsername = storageData.my_leetcode_username;
+    let storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone', 'friends_account_id']);
+    let myUsername = storageData.my_leetcode_username;
 
     if (!myUsername) {
       return { success: false, error: 'No LeetCode username configured. Please enter your username.' };
+    }
+
+    const session = await getAuthSession();
+    if (session?.user_id && storageData.friends_account_id !== session.user_id) {
+      const restored = await restoreAccountSocialData();
+      if (restored?.success) {
+        storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone', 'friends_account_id']);
+        myUsername = storageData.my_leetcode_username || myUsername;
+      } else {
+        await chrome.storage.local.remove(['friends_cache', 'friends_list', 'friends_account_id']);
+      }
     }
 
     // 1. Fetch / Retrieve Own Profile Independently
@@ -532,11 +760,12 @@ async function handleFetchStats(forceRefresh = false) {
     let friends = await getAllFriends();
     const friendUsernames = await getFriendsList();
 
-    // Check if any friends need refresh
+    // Check if any friends need refresh (stale or missing rich LeetCode profile data)
     let friendsNeedSync = forceRefresh;
     if (!friendsNeedSync && friendUsernames.length > 0) {
       for (const u of friendUsernames) {
-        if (!friends[u] || needsRefresh(friends[u]?.lastUpdated)) {
+        const f = friends[u];
+        if (!f || needsRefresh(f?.lastUpdated) || !f.submissionCalendar || !f.profile?.ranking) {
           friendsNeedSync = true;
           break;
         }
@@ -547,6 +776,9 @@ async function handleFetchStats(forceRefresh = false) {
       console.log('[ServiceWorker] Syncing friends data...');
       for (const friendUser of friendUsernames) {
         if (friendUser.toLowerCase() === myUsername.toLowerCase()) continue;
+        const currentFriend = friends[friendUser];
+        const needsThisFriend = forceRefresh || !currentFriend || needsRefresh(currentFriend?.lastUpdated) || !currentFriend.submissionCalendar || !currentFriend.profile?.ranking;
+        if (!needsThisFriend) continue;
         try {
           const rawFriendData = await fetchUserData(friendUser);
           const processedFriend = await processUserData(rawFriendData, storageData.user_timezone);
@@ -617,20 +849,41 @@ async function handleAddFriend(username) {
       return { success: false, error: valErr.message };
     }
 
-    const existing = await getFriend(normalized);
-    if (existing) {
-      return { success: false, error: `${original} is already in your friends list` };
-    }
-
+    // 1. Fetch fresh LeetCode stats for this friend
     const rawData = await fetchUserData(original);
     const processed = await processUserData(rawData);
+
+    // 2. Save locally so friend is immediately visible in the active Friends section
     await saveFriend(normalized, processed);
 
-    // If authenticated in Supabase, sync friendship permanently to server
-    if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
-      syncFriendship(normalized).catch(err => {
-        console.warn('[ServiceWorker] Cloud syncFriendship failed:', err);
-      });
+    // 3. If authenticated, persist to user's permanent cloud account!
+    const session = await getAuthSession();
+    if (session?.user_id) {
+      // Save to user_settings.saved_friends so friendships survive reinstallation
+      try {
+        const userSettings = await getSupabaseUserSettings();
+        const currentSaved = Array.isArray(userSettings?.saved_friends) ? userSettings.saved_friends : [];
+        if (!currentSaved.map(s => s.toLowerCase()).includes(normalized.toLowerCase())) {
+          await upsertUserSettings({
+            saved_friends: [...currentSaved, normalized]
+          });
+        }
+      } catch (settingsErr) {
+        console.warn('[ServiceWorker] Cloud settings save friend warning:', settingsErr);
+      }
+
+      // If friend is also registered on LeetStreak, send mutual friendship request
+      try {
+        const result = await syncFriendship(normalized);
+        if (result?.status === 'accepted') {
+          await restoreAccountSocialData();
+        }
+      } catch (syncErr) {
+        console.warn('[ServiceWorker] Cloud friendship sync warning:', syncErr);
+      }
+
+      // Re-hydrate the isolated user friend section
+      await getAllFriends();
     }
 
     return { success: true, message: `${original} added successfully`, data: processed };
@@ -640,17 +893,51 @@ async function handleAddFriend(username) {
   }
 }
 
+async function handleSetOwnUsername(username) {
+  try {
+    const normalized = validateUsername(username);
+    const rawData = await fetchUserData(normalized);
+    const profile = await processUserData(rawData);
+    const session = await getAuthSession();
+    if (session?.user_id) {
+      const saved = await upsertProfile(normalized, profile);
+      if (!saved) return { success: false, error: 'Could not link this LeetCode profile to your signed-in account' };
+    }
+    await saveOwnProfile(profile);
+    await chrome.storage.local.set({ my_leetcode_username: normalized, hardcore_mode_enabled: false });
+    return { success: true, username: normalized, data: profile };
+  } catch (error) {
+    console.error('[ServiceWorker] handleSetOwnUsername error:', error);
+    return { success: false, error: error.message || 'Could not verify LeetCode username' };
+  }
+}
+
 /**
  * Handle REMOVE_FRIEND request
  */
 async function handleRemoveFriend(username) {
   try {
-    await removeFriend(username);
-    if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
-      removeFriendship(username).catch(err => {
-        console.warn('[ServiceWorker] Cloud removeFriendship failed:', err);
-      });
+    const normalized = username.toLowerCase();
+    const session = await getAuthSession();
+    if (session?.user_id) {
+      // Remove from cloud settings
+      try {
+        const userSettings = await getSupabaseUserSettings();
+        if (Array.isArray(userSettings?.saved_friends) && userSettings.saved_friends.length > 0) {
+          const updated = userSettings.saved_friends.filter(f => f.toLowerCase() !== normalized);
+          await upsertUserSettings({ saved_friends: updated });
+        }
+      } catch (err) {
+        console.warn('[ServiceWorker] Could not remove friend from cloud settings:', err);
+      }
+
+      try {
+        await removeFriendship(username);
+      } catch (err) {
+        console.warn('[ServiceWorker] Cloud friendship remove warning:', err);
+      }
     }
+    await removeFriend(username);
     return { success: true, message: `${username} removed` };
   } catch (error) {
     return { success: false, error: error.message };
@@ -662,14 +949,38 @@ async function handleRemoveFriend(username) {
  */
 async function handleGetFriends() {
   try {
+    const session = await getAuthSession();
+    const accountId = session?.user_id || null;
     let friends = await getAllFriends();
-    // If user is authenticated and local friend cache is empty (e.g. after reinstall),
-    // restore permanent friendships from Supabase
-    if (getAuthState() === AUTH_STATES.AUTHENTICATED && (!friends || Object.keys(friends).length === 0)) {
-      await restoreAccountSocialData();
-      friends = await getAllFriends();
+
+    if (accountId && (typeof chrome !== 'undefined' && chrome.storage?.local)) {
+      const userStore = await chrome.storage.local.get(`user_friends_${accountId}`);
+      const userSection = userStore[`user_friends_${accountId}`];
+      if (userSection?.friends && Object.keys(userSection.friends).length > 0) {
+        friends = { ...friends, ...userSection.friends };
+      } else {
+        const ownership = await chrome.storage.local.get('friends_account_id');
+        if (ownership.friends_account_id !== accountId || !friends || Object.keys(friends).length === 0) {
+          const restored = await restoreAccountSocialData();
+          if (!restored?.success) {
+            await chrome.storage.local.remove(['friends_cache', 'friends_list', 'friends_account_id']);
+          }
+          friends = await getAllFriends();
+        }
+      }
     }
-    return { success: true, friends };
+
+    const friendIds = Object.values(friends || {})
+      .map(f => f.friend_id || f.username)
+      .filter(Boolean);
+
+    return {
+      success: true,
+      accountId,
+      friendIds,
+      friends: friends || {},
+      count: Object.keys(friends || {}).length
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -715,7 +1026,15 @@ async function handleSubmissionAccepted(problemSlug, title) {
     const todayStr = timestampToDateString(Math.floor(Date.now() / 1000), settings.user_timezone);
 
     // 1. Lift Hardcore Mode restriction for today
-    await chrome.storage.local.set({ last_solve_date: todayStr });
+    await chrome.storage.local.set({
+      last_solve_date: todayStr,
+      daily_problem_completed_date: getLocalDateKey(new Date()),
+      daily_problem_completed_dates: getCompletedLocalDays([
+        ...(settings.daily_problem_completed_dates || []),
+        settings.daily_problem_completed_date,
+        getLocalDateKey(new Date())
+      ])
+    });
     console.log(`[ServiceWorker] Solve recorded today (${todayStr}) — Hardcore Mode unlocked!`);
     await syncBlockerRules();
 
@@ -765,8 +1084,16 @@ async function handleGetLoggedInUser() {
  * Sync all friends and self sequentially
  */
 async function syncAllFriends() {
+  if (friendSyncInProgress) return;
+  friendSyncInProgress = true;
   try {
-    const storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone']);
+    let storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone', 'friends_account_id']);
+    const session = await getAuthSession();
+    if (session?.user_id && storageData.friends_account_id !== session.user_id) {
+      const restored = await restoreAccountSocialData();
+      if (!restored?.success) await chrome.storage.local.remove(['friends_cache', 'friends_list', 'friends_account_id']);
+      storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone', 'friends_account_id']);
+    }
     const myUsername = storageData.my_leetcode_username;
     const timezone = storageData.user_timezone;
 
@@ -779,29 +1106,11 @@ async function syncAllFriends() {
 
     const notificationEvents = [];
 
-    // Check for received roasts for current user via durable messages
+    await deliverPendingRoasts();
+
+    // Retain migration support for legacy local pending roasts.
     if (myUsername) {
       try {
-        const unreadRoasts = await fetchUnreadRoasts(myUsername);
-        if (unreadRoasts && unreadRoasts.length > 0) {
-          const idsToDeliver = [];
-          for (const roast of unreadRoasts) {
-            notificationEvents.push({
-              type: 'roast',
-              username: roast.sender_username,
-              message: `${roast.sender_username} roasted you: "${roast.content}" 🔥`,
-              priority: 2
-            });
-            if (roast.status === 'sent') {
-              idsToDeliver.push(roast.id);
-            }
-          }
-          if (idsToDeliver.length > 0) {
-            await markRoastsDelivered(idsToDeliver);
-          }
-        }
-
-        // Also check local pending roasts as fallback
         const mySettings = await getUserSettings(myUsername);
         if (mySettings?.pending_roasts && mySettings.pending_roasts.length > 0) {
           for (const roast of mySettings.pending_roasts) {
@@ -828,7 +1137,7 @@ async function syncAllFriends() {
         if (myUsername && username.toLowerCase() === myUsername.toLowerCase()) {
           await saveOwnProfile(processed);
           // Check if user solved today to unlock blocker
-          if (hasSolvedToday(processed.allAcceptedSubmissions, processed.submissionCalendar, timezone)) {
+          if (getConfirmedAcceptedSolveToday(processed, timezone) === true) {
             const todayStr = timestampToDateString(Math.floor(Date.now() / 1000), timezone);
             await chrome.storage.local.set({ last_solve_date: todayStr });
           }
@@ -839,15 +1148,36 @@ async function syncAllFriends() {
           const events = await detectEvents(username, oldData, processed, myUsername);
           notificationEvents.push(...events);
 
-          // Check if current user streak is at risk
+          // Check if current user streak is at risk (strict policy: max 2/day, <12pm and 9pm-3am)
           if (myUsername && username.toLowerCase() === myUsername.toLowerCase()) {
-            if (isStreakAtRisk(processed.allAcceptedSubmissions, processed.stats.streak)) {
-              notificationEvents.push({
-                username: 'You',
-                type: 'streak_at_risk',
-                message: buildNotificationMessage('You', 'streak_at_risk', { streak: processed.stats.streak }),
-                priority: 3
+            const hasRisk = isStreakAtRisk(processed.allAcceptedSubmissions, processed.stats.streak);
+            if (hasRisk && processed.stats.streak > 0) {
+              const streakStorage = await chrome.storage.local.get('streak_at_risk_delivered_state');
+              const streakCheck = canDeliverStreakAtRisk({
+                now: new Date(),
+                deliveredState: streakStorage.streak_at_risk_delivered_state,
+                hasSolvedToday: false,
+                streak: processed.stats.streak
               });
+
+              if (streakCheck.allowed) {
+                const updatedState = recordStreakAtRiskDelivery(
+                  streakStorage.streak_at_risk_delivered_state,
+                  streakCheck.dayKey,
+                  streakCheck.slot
+                );
+                await chrome.storage.local.set({ streak_at_risk_delivered_state: updatedState });
+
+                notificationEvents.push({
+                  id: `streak-at-risk-${myUsername.toLowerCase()}-${streakCheck.dayKey}-${streakCheck.slot}`,
+                  username: 'You',
+                  type: 'streak_at_risk',
+                  title: '🔥 Streak at Risk!',
+                  message: `Your ${processed.stats.streak}-day streak will reset at midnight.`,
+                  streak: processed.stats.streak,
+                  priority: 3
+                });
+              }
             }
           }
         }
@@ -863,11 +1193,13 @@ async function syncAllFriends() {
     }
   } catch (err) {
     console.error('[ServiceWorker] syncAllFriends error:', err);
+  } finally {
+    friendSyncInProgress = false;
   }
 }
 
 /**
- * Detect significant social events for a friend
+ * Detect significant social events for a friend (streak milestones removed per user spec)
  */
 async function detectEvents(username, oldData, newData, myUsername) {
   const events = [];
@@ -882,28 +1214,19 @@ async function detectEvents(username, oldData, newData, myUsername) {
     if (newTotal > oldTotal) {
       const count = newTotal - oldTotal;
       let problemTitle = 'a problem';
+      let problemSlug = null;
       if (newData.recentSubmissions && newData.recentSubmissions.length > 0) {
         problemTitle = newData.recentSubmissions[0].title || problemTitle;
+        problemSlug = newData.recentSubmissions[0].titleSlug || null;
       }
 
       events.push({
+        id: `friend-solved-${username.toLowerCase()}-${newTotal}`,
         username,
         type: 'new_submission',
+        problemSlug,
         message: `${username} just solved ${count === 1 ? `"${problemTitle}"` : `${count} problems`}! 🎯`,
         priority: 1
-      });
-    }
-  }
-
-  // Milestones
-  if (newData.stats?.streak && detectMilestone(newData.stats.streak)) {
-    const oldStreak = oldData?.stats?.streak || 0;
-    if (newData.stats.streak > oldStreak) {
-      events.push({
-        username,
-        type: 'milestone',
-        message: `${username} reached a ${newData.stats.streak}-day streak! 🔥`,
-        priority: 2
       });
     }
   }
@@ -946,6 +1269,7 @@ async function processUserData(data, timezone = null) {
     badges: profile.badges || [],
     recentSubmissions: profile.recentSubmissions || [],
     allAcceptedSubmissions: allAcceptedSubmissions || [],
+    acceptedSubmissionsAvailable: data.acceptedSubmissionsAvailable === true,
     submissionCalendar: submissionCalendar || {},
     lastUpdated: Date.now()
   };
@@ -953,20 +1277,46 @@ async function processUserData(data, timezone = null) {
 
 // ===== 1v1 Battle Handlers =====
 
-async function handleBattleGetStatus(usernameOverride) {
+async function handleBattleGetStatus(usernameOverride, includeHistory = false) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
     if (!username) return { success: false, error: 'No username configured' };
 
-    const [battle, history] = await Promise.all([
-      getActiveBattle(username),
-      getBattleHistory(username, 10)
-    ]);
+    const battle = await getActiveBattle(username);
+    if (!battle) {
+      await chrome.storage.local.remove('active_battle_data');
+      const history = includeHistory ? await getBattleHistory(username, 1) : [];
+      return { success: true, battle: null, history };
+    }
 
-    if (!battle) return { success: true, battle: null, history };
-    const results = await getBattleResults(battle.id);
-    return { success: true, battle, results, history };
+    const state = await getBattleStateV2(battle.id);
+
+    // Sync active_battle_data to local storage so content scripts have immediate access
+    if (['countdown', 'ready_check', 'in_progress'].includes(battle.status)) {
+      await chrome.storage.local.set({
+        active_battle_data: {
+          battleId: battle.id,
+          status: battle.status,
+          match_starts_at: battle.match_starts_at || battle.start_at,
+          match_deadline: battle.match_deadline || battle.end_at,
+          duration_minutes: battle.duration_minutes || 30,
+          problems: state?.problems || [],
+          participants: state?.participants || [],
+          results: state?.results || [],
+          updated_at: Date.now()
+        }
+      });
+
+      // Ensure both players have the countdown alarm scheduled
+      if (battle.status === 'countdown') {
+        scheduleBattleStart(battle.id, battle.match_starts_at || battle.start_at);
+      }
+    } else {
+      await chrome.storage.local.remove('active_battle_data');
+    }
+
+    return { success: true, battle, results: state?.results || [], state, history: [] };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -974,11 +1324,9 @@ async function handleBattleGetStatus(usernameOverride) {
 
 async function handleBattleChallengeV2(message) {
   try {
-    const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
-    const challenger = message.challenger || stored.my_leetcode_username;
-    if (challenger && stored.own_profile) {
-      upsertProfile(challenger, stored.own_profile).catch(() => {});
-    }
+    const stored = await chrome.storage.local.get(['my_leetcode_username']);
+    const challenger = stored.my_leetcode_username;
+    if (!challenger) return { success: false, error: 'Set up your LeetCode username before creating a battle' };
     return await createBattleV2(challenger, message.challenged, {
       topics: message.topics,
       difficulty: message.difficulty,
@@ -1005,8 +1353,9 @@ async function handleBattleReadyV2(battleId, usernameOverride) {
     const username = usernameOverride || stored.my_leetcode_username;
     const res = await confirmReadyV2(battleId, username);
 
-    if (res?.bothReady) {
-      scheduleBattleStart(battleId);
+    if (res?.bothReady || res?.status === 'countdown') {
+      const startsAt = res.battle?.match_starts_at || res.battle?.start_at;
+      scheduleBattleStart(battleId, startsAt);
     }
     return res;
   } catch (err) {
@@ -1044,52 +1393,105 @@ async function handleBattleForfeitV2(battleId, usernameOverride) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
+    await chrome.storage.local.remove('active_battle_data');
     return await forfeitBattleV2(battleId, username);
   } catch (err) {
     return { success: false, error: err.message };
   }
 }
 
-function scheduleBattleStart(battleId) {
-  setTimeout(async () => {
-    try {
-      const state = await getBattleStateV2(battleId);
-      if (!state?.problems?.length) return;
-      const firstProblem = state.problems[0];
-      const targetUrl = firstProblem.problem_url || `https://leetcode.com/problems/${firstProblem.problem_slug}/`;
-
-      const tabs = await chrome.tabs.query({ url: '*://leetcode.com/*' });
-      if (tabs.length > 0) {
-        await chrome.tabs.update(tabs[0].id, { url: targetUrl, active: true });
-        if (tabs[0].windowId) {
-          await chrome.windows.update(tabs[0].windowId, { focused: true });
-        }
-      } else {
-        await chrome.tabs.create({ url: targetUrl, active: true });
+async function redirectToBattleProblem(targetUrl) {
+  try {
+    const url = targetUrl || 'https://leetcode.com/problemset/';
+    const tabs = await chrome.tabs.query({ url: ['*://*.leetcode.com/*', '*://leetcode.com/*'] });
+    if (tabs && tabs.length > 0) {
+      const targetTab = tabs.find(t => t.active) || tabs[0];
+      await chrome.tabs.update(targetTab.id, { url, active: true });
+      if (targetTab.windowId) {
+        try {
+          await chrome.windows.update(targetTab.windowId, { focused: true });
+        } catch {}
       }
-
-      if (chrome.notifications) {
-        chrome.notifications.create(`battle_start_${battleId}`, {
-          type: 'basic',
-          iconUrl: 'icons/icon128.png',
-          title: '⚔️ Battle Started!',
-          message: `Duel is live! First problem: ${firstProblem.problem_title}`,
-          priority: 2
-        });
-      }
-    } catch (e) {
-      console.warn('[ServiceWorker] scheduleBattleStart error:', e);
+      return { success: true, updated: true, tabId: targetTab.id };
+    } else {
+      const newTab = await chrome.tabs.create({ url, active: true });
+      return { success: true, created: true, tabId: newTab.id };
     }
-  }, 10000);
+  } catch (err) {
+    console.warn('[ServiceWorker] redirectToBattleProblem error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function startBattleAndRedirect(battleId) {
+  try {
+    const state = await getBattleStateV2(battleId);
+    if (!state?.problems?.length) return { success: false, error: 'No problems in battle' };
+    const firstProblem = state.problems[0];
+    const targetUrl = firstProblem.problem_url || `https://leetcode.com/problems/${firstProblem.problem_slug}/`;
+
+    // Persist live battle state so all tabs pick it up immediately
+    await chrome.storage.local.set({
+      active_battle_data: {
+        battleId,
+        status: 'in_progress',
+        match_starts_at: state.battle?.match_starts_at || state.battle?.start_at,
+        match_deadline: state.battle?.match_deadline || state.battle?.end_at,
+        duration_minutes: state.battle?.duration_minutes || 30,
+        problems: state.problems,
+        participants: state.participants || [],
+        results: state.results || [],
+        updated_at: Date.now()
+      }
+    });
+
+    const redirectResult = await redirectToBattleProblem(targetUrl);
+
+    if (chrome.notifications) {
+      chrome.notifications.create(`battle_start_${battleId}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: '⚔️ Battle Started!',
+        message: `Duel is live! First problem: ${firstProblem.problem_title}`,
+        priority: 2
+      });
+    }
+
+    return { success: true, targetUrl, redirectResult };
+  } catch (e) {
+    console.warn('[ServiceWorker] startBattleAndRedirect error:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+function scheduleBattleStart(battleId, matchStartsAtIso) {
+  if (!battleId) return;
+  const when = matchStartsAtIso ? Date.parse(matchStartsAtIso) : Date.now() + 10000;
+  const now = Date.now();
+  const delayMs = Math.max(0, when - now);
+
+  if (delayMs <= 500) {
+    startBattleAndRedirect(battleId).catch(console.warn);
+    return;
+  }
+
+  // 1. Alarm scheduling (reliable across service worker sleep in Chrome, Brave, Edge)
+  try {
+    chrome.alarms.create(`battle_start_${battleId}`, { when });
+  } catch (err) {
+    console.warn('[ServiceWorker] Could not create battle_start alarm:', err);
+  }
+
+  // 2. In-memory timer fallback
+  setTimeout(() => {
+    startBattleAndRedirect(battleId).catch(console.warn);
+  }, delayMs);
 }
 
 async function handleBattleChallenge(challengerOverride, challenged, language) {
   try {
-    const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
-    const challenger = challengerOverride || stored.my_leetcode_username;
-    if (challenger && stored.own_profile) {
-      upsertProfile(challenger, stored.own_profile).catch(() => {});
-    }
+    const stored = await chrome.storage.local.get(['my_leetcode_username']);
+    const challenger = stored.my_leetcode_username;
     return await createBattle(challenger, challenged, language);
   } catch (err) {
     return { success: false, error: err.message };
@@ -1100,10 +1502,7 @@ async function handleBattleRespond(battleId, usernameOverride, accept) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
-    if (accept) {
-      const v2Res = await handleBattleAcceptV2(battleId);
-      if (v2Res && v2Res.success !== false) return v2Res;
-    }
+    if (accept) return await handleBattleAcceptV2(battleId);
     return await respondToBattle(battleId, username, accept);
   } catch (err) {
     return { success: false, error: err.message };
@@ -1124,9 +1523,7 @@ async function handleBattleReady(battleId, usernameOverride) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
-    const v2Res = await handleBattleReadyV2(battleId, username);
-    if (v2Res && v2Res.success !== false) return v2Res;
-    return await confirmReady(battleId, username);
+    return await handleBattleReadyV2(battleId, username);
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -1137,18 +1534,18 @@ async function handleBattleSubmission(message) {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = stored.my_leetcode_username;
     if (!username) return { success: false, error: 'No username configured' };
+    if (message.accepted !== true || typeof message.problemSlug !== 'string') {
+      return { success: false, error: 'Only a confirmed Accepted result can be recorded' };
+    }
 
     const battle = await getActiveBattle(username);
     if (!battle) return { success: false, error: 'No active battle in progress' };
 
-    return await submitBattleResult(battle.id, username, {
+    return await submitBattleSolveV2(battle.id, message.problemSlug, {
       submissionId: message.submissionId,
-      accepted: message.accepted,
-      runtime_ms: message.runtime_ms,
-      memory_mb: message.memory_mb,
-      language: message.language,
-      attempts: message.attempts,
-      problemSlug: message.problemSlug
+      runtimeMs: message.runtime_ms,
+      memoryMb: message.memory_mb,
+      language: message.language
     });
   } catch (err) {
     return { success: false, error: err.message };
@@ -1159,7 +1556,7 @@ async function handleBattleForfeit(battleId, usernameOverride) {
   try {
     const stored = await chrome.storage.local.get('my_leetcode_username');
     const username = usernameOverride || stored.my_leetcode_username;
-    return await forfeitBattle(battleId, username);
+    return await forfeitBattleV2(battleId, username);
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -1179,23 +1576,47 @@ async function handlePresenceHeartbeat() {
   try {
     const session = await getAuthSession();
     if (!session?.user_id) return;
-    const stored = await chrome.storage.local.get('my_leetcode_username');
+    const stored = await chrome.storage.local.get(['my_leetcode_username', 'notified_battle_invites']);
     const username = stored.my_leetcode_username;
     if (username) {
       await updatePresence(username, 'online');
+
+      // Check for incoming battle challenge requests
+      const battle = await getActiveBattle(username);
+      if (battle && battle.status === 'pending' && battle.challenged_username?.toLowerCase() === username.toLowerCase()) {
+        const notified = new Set(stored.notified_battle_invites || []);
+        if (!notified.has(battle.id)) {
+          notified.add(battle.id);
+          await chrome.storage.local.set({ notified_battle_invites: [...notified].slice(-50) });
+          await batchNotify([{
+            id: `battle_invite_${battle.id}`,
+            type: 'battle_invite',
+            battleId: battle.id,
+            challenger: battle.challenger_username,
+            title: `⚔️ Battle Request from @${battle.challenger_username}`,
+            message: `Ranked 1v1 • ${battle.duration_minutes || 15} min • ${battle.difficulty || 'Medium'}${battle.topics?.length ? ` • ${battle.topics.join(', ')}` : ''}`,
+            priority: 3,
+            data: {
+              battleId: battle.id,
+              challenger: battle.challenger_username,
+              difficulty: battle.difficulty || 'Medium',
+              durationMinutes: battle.duration_minutes || 15,
+              topics: battle.topics || []
+            }
+          }]);
+        }
+      }
     }
   } catch (err) {
     console.warn('[ServiceWorker] handlePresenceHeartbeat error:', err);
   }
 }
 
-async function handleBattlePingPresence(usernameOverride) {
+async function handleBattlePingPresence(_usernameOverride) {
   try {
-    const stored = await chrome.storage.local.get(['my_leetcode_username', 'own_profile']);
-    const username = usernameOverride || stored.my_leetcode_username;
+    const stored = await chrome.storage.local.get(['my_leetcode_username']);
+    const username = stored.my_leetcode_username;
     if (username) {
-      // Proactively ensure profile is populated on Supabase whenever battle presence is pinged
-      upsertProfile(username, stored.own_profile || { profile: { realName: username } }).catch(() => {});
       await updatePresence(username);
     }
     return { success: true };

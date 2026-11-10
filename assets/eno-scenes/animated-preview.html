@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ENO — 19 fps Animation Preview</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;overflow:hidden;background:#f4f6f9;color:#263044;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+  .viewport{position:relative;isolation:isolate;width:100vw;height:100vh;min-height:480px;overflow:hidden;background:linear-gradient(180deg,#f8faff,#edf3fa)}
+  .browser-bar{height:42px;background:#fff;border-bottom:1px solid #e5e9ef;display:flex;align-items:center;padding:0 16px;gap:8px;color:#778094;font-size:12px}
+  .dot{width:9px;height:9px;border-radius:50%;background:#d9dee7}.url{margin-left:14px;border-radius:99px;background:#f3f5f8;padding:5px 16px;min-width:240px}
+  .page{position:absolute;inset:42px 0 0;padding:6vh 8vw;opacity:.78;z-index:0}.brand{font-size:14px;font-weight:750;letter-spacing:.04em;color:#33405c}
+  .card{margin-top:8vh;padding:28px;border:1px solid #e1e7f0;border-radius:18px;background:#fff;max-width:560px;box-shadow:0 12px 30px #18243a0b}.card h1{margin:0 0 8px;font-size:clamp(22px,3vw,34px)}.card p{color:#68738a;margin:0}.stats{display:flex;gap:12px;margin-top:20px}.stat{background:#f7f9fc;border-radius:12px;padding:14px 18px;color:#536078}.stat strong{display:block;color:#263044;font-size:20px}
+  .actor{position:absolute;z-index:3;bottom:clamp(12px,2.4vh,28px);left:50%;width:min(320px,36vh,52vw);aspect-ratio:8/9;transform:translateX(-50%);transform-origin:50% 86%;clip-path:inset(0);will-change:left,transform;pointer-events:none}
+  .art{position:absolute;inset:0;background-repeat:no-repeat;opacity:0;will-change:opacity,background-position}.pose-art{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity 80ms linear;pointer-events:none}.laptop{position:absolute;left:31%;bottom:11%;width:46%;opacity:0;transform-origin:50% 85%;will-change:opacity,transform}.laptop svg{display:block;width:100%;height:auto}
+  .mark{position:absolute;z-index:4;left:50%;bottom:calc(min(360px,40.5vh,58.5vw) + clamp(12px,2.4vh,28px) + 8px);color:#e59a20;font:900 clamp(40px,6vh,64px)/1 system-ui,sans-serif;text-shadow:0 3px 0 #fff,2px 4px 0 #302a32;opacity:0;transform:translate(-50%,10px) scale(.4) rotate(-12deg);pointer-events:none}
+  .mark.visible{opacity:1;animation:pop .42s cubic-bezier(.18,.9,.25,1.4) both,float 900ms ease-in-out .42s infinite alternate}@keyframes pop{to{transform:translate(-50%,0) scale(1) rotate(0)}}@keyframes float{to{translate:0 -5px}}
+  .bubble{position:absolute;z-index:5;left:50%;bottom:calc(min(360px,40.5vh,58.5vw) + clamp(12px,2.4vh,28px) + 16px);width:min(440px,calc(100vw - 32px));padding:15px 20px;border:3px solid #302a32;border-radius:20px;background:#fffdf9;color:#25212a;box-shadow:0 5px 0 #302a32;font:700 clamp(16px,2vw,23px)/1.28 system-ui,sans-serif;text-align:center;opacity:0;transform:translate(-50%,12px) scale(.92);transform-origin:50% 100%;transition:opacity 220ms ease,transform 260ms cubic-bezier(.2,.8,.2,1);pointer-events:none}
+  .bubble::after{content:'';position:absolute;left:50%;bottom:-15px;width:20px;height:20px;background:#fffdf9;border-right:3px solid #302a32;border-bottom:3px solid #302a32;transform:translateX(-50%) rotate(45deg)}.bubble.visible{opacity:1;transform:translate(-50%,0) scale(1)}
+  .panel{position:absolute;z-index:6;top:58px;left:22px;display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:12px;background:#ffffffdf;border:1px solid #e5e9ef;box-shadow:0 4px 16px #17243a0a}.label{font-weight:750}.time{color:#778094;font-size:12px}
+  .controls{position:absolute;z-index:6;top:58px;right:22px;display:flex;gap:8px}.controls button{border:1px solid #d7deea;background:#fff;color:#263044;border-radius:999px;padding:9px 15px;font:650 13px system-ui;cursor:pointer;box-shadow:0 4px 14px #17243a0a}.controls button:hover{background:#fff6df}
+  .fps{position:absolute;z-index:6;right:22px;bottom:17px;color:#758096;font-size:12px;background:#ffffffcf;border:1px solid #e5e9ef;border-radius:999px;padding:5px 10px}
+  .progress{position:absolute;z-index:7;left:0;right:0;bottom:0;height:4px;background:#dce3ee}.bar{height:100%;width:0;background:#6a8bdb}
+  @media(max-width:600px){.page{padding:12vh 6vw}.card{padding:20px}.stats{gap:7px}.stat{padding:10px}.actor{width:min(280px,42vh,70vw)}.panel{left:12px;top:54px}.controls{right:12px;top:54px}.controls button{padding:8px 11px}.fps{right:12px}}
+  @media(prefers-reduced-motion:reduce){.bubble{transition:none}.mark.visible{animation:none;opacity:1;transform:translate(-50%,0) scale(1)}}
+</style>
+</head>
+<body>
+<div class="viewport">
+  <div class="browser-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">leetcode.com</span></div>
+  <div class="page"><div class="brand">LEETSTREAK</div><div class="card"><h1>Daily problem</h1><p>Keep your streak going. ENO is here with a friendly reminder.</p><div class="stats"><div class="stat"><strong>12 days</strong>current streak</div><div class="stat"><strong>1 / day</strong>daily goal</div></div></div></div>
+  <div class="panel"><span class="label" id="scene">Scene 1 · First peek</span><span class="time" id="time">0.0s / 31.0s</span></div>
+  <div class="controls"><button id="toggle" type="button">Pause</button><button id="restart" type="button">Restart</button></div>
+  <div class="actor" id="actor"><div class="art left"></div><div class="art front"></div><div class="art bow"></div><div class="art right"></div><div class="art seat"></div><div class="art typing"></div>
+    <div class="laptop" id="laptop" aria-hidden="true"><svg viewBox="0 0 150 92"><path d="M27 8h96a8 8 0 0 1 8 8v54H19V16a8 8 0 0 1 8-8Z" fill="#16151b" stroke="#08080a" stroke-width="4"/><path d="M26 15h98v48H26z" fill="#252832"/><path d="M11 73h128l8 9q1 4-7 5H10q-7-1-6-5z" fill="#34333a" stroke="#08080a" stroke-width="3"/><path d="M48 29h17m-17 10h28m-28 10h12" stroke="#b7dcff" stroke-width="3" stroke-linecap="round"/><path d="m90 29 5 5-5 5" fill="none" stroke="#b8e986" stroke-width="3"/></svg></div>
+  </div>
+  <div class="mark" id="mark" aria-hidden="true">!</div><div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+  <div class="fps">19 fps · 589 frames · 31 sec</div><div class="progress"><div class="bar" id="bar"></div></div>
+</div>
+<script>
+const FPS=19,SEGMENTS=[38,57,10,66,95,133,95,95],TOTAL=SEGMENTS.reduce((sum,value)=>sum+value,0);
+const assets={left:'../../public/eno/walk-left.png',front:'../../public/eno/front-wave.png',bow:'../../public/eno/bow.png',right:'../../public/eno/walk-right.png',seat:'../../public/eno/seat.png',typing:'../../public/eno/typing.png'};
+const actor=document.querySelector('#actor'),laptop=document.querySelector('#laptop'),mark=document.querySelector('#mark'),bubble=document.querySelector('#bubble'),sceneLabel=document.querySelector('#scene'),timeLabel=document.querySelector('#time'),bar=document.querySelector('#bar'),toggle=document.querySelector('#toggle');
+const layers=Object.fromEntries(Object.keys(assets).map(name=>[name,document.querySelector('.'+name)]));
+for(const [name,url] of Object.entries(assets)){const image=new Image();image.src=url;layers[name].style.backgroundImage=`url("${url}")`;const count=name==='left'||name==='right'?6:name==='front'||name==='typing'?2:1;layers[name].style.backgroundSize=`${count*100}% 100%`;layers[name].style.backgroundPosition='0 0'}
+const cumulative=SEGMENTS.map((_,index)=>SEGMENTS.slice(0,index+1).reduce((sum,value)=>sum+value,0));
+const ease=value=>value*value*(3-2*value),lerp=(a,b,p)=>a+(b-a)*p;
+let frameIndex=0,playing=true,raf=0,startAt=performance.now(),lastRendered=-1;
+function setLayer(name,opacity,frame=0,count=1){const layer=layers[name];layer.style.opacity=String(opacity);layer.style.backgroundPosition=count>1?`${frame/(count-1)*100}% 0`:'0 0'}
+function showMessage(text){if(bubble.textContent===text)return;bubble.classList.remove('visible');bubble.textContent=text;if(text)requestAnimationFrame(()=>bubble.classList.add('visible'))}
+function draw(index){const [peekEnd,walkEnd,turnEnd,greetEnd,judgeEnd,codeEnd,smugEnd]=cumulative;let x=.5,bob=0,tilt=0,spriteFrame=0,message='',left=0,front=0,bow=0,right=0,seat=0,typing=0,markVisible=false,laptopProgress=0,laptopVisible=false,clipPeek=false,scene='';
+  if(index<peekEnd){const local=index;x=lerp(1.16,1.01,ease(local/(peekEnd-1)));left=1;spriteFrame=local<12?3:local<27?1:3;clipPeek=true;bob=Math.sin(local*.35)*1.2;tilt=Math.sin(local*.14)*.6;markVisible=local>=30;scene='Scene 1 · First peek'}
+  else if(index<walkEnd){const local=index-peekEnd;x=lerp(1.0,.5,ease(local/(walkEnd-peekEnd-1)));left=1;spriteFrame=local%6;bob=[0,-2,1,0,-2,1][spriteFrame];markVisible=local<8;scene='Scene 2 · Walk to center'}
+  else if(index<turnEnd){const p=ease((index-walkEnd)/(turnEnd-walkEnd-1));left=1-p;front=p;scene='Scene 3 · Turn to greet'}
+  else if(index<greetEnd){const local=index-turnEnd;const bowIn=ease(Math.min(1,local/10)),bowOut=ease(Math.max(0,Math.min(1,(local-12)/10)));bow=Math.min(bowIn,1-bowOut);front=1-bow;if(local>=32){front=1;spriteFrame=Math.floor((local-32)/4)%2}message=local>=31?'Hi! I am ENO!':'';scene='Scene 3 · Greeting and bow'}
+  else if(index<judgeEnd){const local=index-greetEnd;front=1;spriteFrame=Math.floor(local/4)%2;tilt=local<42?-2.5:0;message='I see you have other important things to do than LeetCode.';scene='Scene 4 · Judging look'}
+  else if(index<codeEnd){const local=index-judgeEnd;if(local<22)seat=1;else if(local<32){const p=ease((local-22)/10);seat=1-p;typing=p}else if(local<101){typing=1;spriteFrame=Math.floor((local-32)/3)%2}else if(local<111){const p=ease((local-101)/10);typing=1-p;seat=p}else if(local<122)seat=1;else{const p=ease((local-122)/11);seat=1-p;front=p}scene='Scene 5 · Coding laptop'}
+  else if(index<smugEnd){const local=index-codeEnd;front=1;spriteFrame=Math.floor(local/4)%2;tilt=local<25?0:-1;message='I have done my LeetCode, but you have not!';scene='Scene 6 · Smug statement'}
+  else{const local=index-smugEnd;message=local<22?'Bye!':'';if(local<10)front=1;else if(local<20){const p=ease((local-10)/10);front=1-p;right=p}else{const walkFrame=(local-20)%6;right=1;spriteFrame=walkFrame;x=lerp(.5,1.18,ease((local-20)/(SEGMENTS[7]-21)));bob=[0,-2,1,0,-2,1][walkFrame]}scene='Scene 7 · Goodbye and exit'}
+  actor.style.left=`${x*100}%`;mark.style.left=`${Math.max(28,Math.min(innerWidth-28,x*innerWidth-actor.clientWidth*.18))}px`;actor.style.transform=`translateX(-50%) translateY(${bob}px) rotate(${tilt}deg)`;actor.style.clipPath=clipPeek?'inset(0 0 52% 0)':'inset(0)';setLayer('left',left,spriteFrame,6);setLayer('front',front,spriteFrame%2,2);setLayer('bow',bow);setLayer('right',right,spriteFrame,6);setLayer('seat',seat);setLayer('typing',typing,spriteFrame,2);laptop.style.opacity=laptopVisible?String(laptopProgress):'0';laptop.style.transform=`translate(${lerp(-42,0,laptopProgress)}px,${lerp(-34,0,laptopProgress)}px) rotate(${lerp(-18,0,laptopProgress)}deg)`;mark.classList.toggle('visible',markVisible);showMessage(message);sceneLabel.textContent=scene;timeLabel.textContent=`${(index/FPS).toFixed(1)}s / ${(TOTAL/FPS).toFixed(1)}s`;bar.style.width=`${index/(TOTAL-1)*100}%`}
+function tick(now){if(!playing)return;const next=Math.min(TOTAL-1,Math.floor((now-startAt)*FPS/1000));if(next!==lastRendered){frameIndex=next;draw(next);lastRendered=next}if(next>=TOTAL-1){playing=false;toggle.textContent='Play';return}raf=requestAnimationFrame(tick)}
+function play(){if(playing)return;if(frameIndex>=TOTAL-1){frameIndex=0;lastRendered=-1;draw(0)}playing=true;toggle.textContent='Pause';startAt=performance.now()-frameIndex*1000/FPS;raf=requestAnimationFrame(tick)}
+toggle.addEventListener('click',()=>{if(playing){playing=false;cancelAnimationFrame(raf);toggle.textContent='Play'}else play()});document.querySelector('#restart').addEventListener('click',()=>{cancelAnimationFrame(raf);playing=false;frameIndex=0;lastRendered=-1;draw(0);play()});
+draw(0);raf=requestAnimationFrame(tick);
+</script>
+</body>
+</html>
+

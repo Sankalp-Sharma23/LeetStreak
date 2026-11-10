@@ -4,7 +4,14 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { calculateStreak, needsRefresh, getAcceptedSolveDates, timestampToDateString } from '../../src/shared/streak-calculator.js';
+import {
+  calculateStreak,
+  getConfirmedAcceptedSolveToday,
+  hasSolvedToday,
+  needsRefresh,
+  getAcceptedSolveDates,
+  timestampToDateString
+} from '../../src/shared/streak-calculator.js';
 
 describe('Streak Calculation Logic', () => {
   beforeEach(() => {
@@ -72,6 +79,28 @@ describe('Streak Calculation Logic', () => {
       const result = calculateStreak(acceptedList);
       expect(result.currentStreak).toBe(1);
       expect(result.solveDates.length).toBe(1);
+    });
+
+    test('does not treat calendar activity as proof of an accepted solve when accepted history is unavailable', () => {
+      const today = Math.floor(Date.UTC(2023, 0, 3, 0, 0, 0) / 1000);
+      expect(hasSolvedToday([], { [today]: 1 }, 'UTC')).toBe(true);
+      expect(getConfirmedAcceptedSolveToday({
+        acceptedSubmissionsAvailable: false,
+        allAcceptedSubmissions: [],
+        submissionCalendar: { [today]: 1 }
+      }, 'UTC')).toBeNull();
+    });
+
+    test('confirms today only from a verified accepted-submissions response', () => {
+      const acceptedToday = [{ timestamp: Math.floor(Date.UTC(2023, 0, 3, 8, 0, 0) / 1000) }];
+      expect(getConfirmedAcceptedSolveToday({
+        acceptedSubmissionsAvailable: true,
+        allAcceptedSubmissions: acceptedToday
+      }, 'UTC')).toBe(true);
+      expect(getConfirmedAcceptedSolveToday({
+        acceptedSubmissionsAvailable: true,
+        allAcceptedSubmissions: []
+      }, 'UTC')).toBe(false);
     });
 
     test('should preserve longest streak even when current streak breaks', () => {

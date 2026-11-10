@@ -1,5 +1,6 @@
 # Dependencies - INTENTIONALLY TRACKED for users to run extension immediately
 # node_modules/ is tracked so users don't need to run npm install
+node_modules/.vite/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

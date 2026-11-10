@@ -17,11 +17,10 @@ import {
   SUPABASE_URL,
   getAuthHeaders,
   getAuthSession,
+  callEdgeFunction,
   callRpc,
-  upsertProfile,
   getOnlineFriends as clientGetOnlineFriends
 } from './supabase-client.js';
-import { getOwnProfile } from './storage.js';
 import { PROBLEMS } from '../data/problems.js';
 
 const BASE_URL = SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
@@ -87,8 +86,9 @@ async function supabaseFetch(path, options = {}) {
 /**
  * Deterministically or randomly select `count` problems matching filters.
  */
-export function generateBattleProblems({ topics = [], difficulty = 'Medium', count = 5 }) {
-  const all = PROBLEMS || [];
+export function generateBattleProblems({ topics = [], difficulty = 'Medium', count = 5, excludeSlugs = [] }) {
+  const excluded = new Set(excludeSlugs.map(slug => slug.toLowerCase()));
+  const all = (PROBLEMS || []).filter(problem => !excluded.has(problem.slug.toLowerCase()));
   if (!all.length) return [];
 
   const normalizedTopics = Array.isArray(topics) && topics.length > 0
@@ -182,96 +182,21 @@ export async function createBattleV2(challenger, challenged, options = {}) {
     return { success: false, error: 'Cannot challenge yourself' };
   }
 
-  // Proactively ensure challenger's profile is in Supabase profiles
-  try {
-    const ownData = await getOwnProfile();
-    if (challenger && ownData) {
-      await upsertProfile(challenger, ownData);
-    }
-  } catch {}
+  // The JWT identifies the challenger. Profile setup is an explicit auth
+  // lifecycle operation; the battle payload must not create or relink it.
 
-  // 1. Attempt atomic create_battle_v2 RPC
-  try {
-    const rpcRes = await callRpc('create_battle_v2', {
+  // Battle writes must go through the transactional RPCs; REST fallbacks bypass
+  // the participant and active-match checks enforced by the database.
+  const rpcRes = await callRpc('create_battle_v2', {
       p_challenged_username: challenged.toLowerCase(),
       p_topics: topics,
       p_difficulty: difficulty,
       p_duration_minutes: durationMinutes,
       p_problem_count: problemCount,
-      p_language: language.toLowerCase(),
-      p_challenger_username: challenger.toLowerCase()
+      p_language: language.toLowerCase()
     });
-
-    if (rpcRes && rpcRes.success && rpcRes.battle) {
-      return { success: true, battle: rpcRes.battle };
-    }
-
-    const isMissingFunction = rpcRes?.code === 'PGRST202' || (
-      typeof rpcRes?.error === 'string' && rpcRes.error.includes('PGRST202')
-    );
-
-    if (!isMissingFunction && rpcRes?.error) {
-      let cleanMsg = rpcRes.error;
-      try {
-        const parsed = JSON.parse(rpcRes.error);
-        cleanMsg = parsed.message || parsed.error || cleanMsg;
-      } catch {}
-      return { success: false, error: cleanMsg };
-    }
-  } catch (rpcErr) {
-    console.warn('[BattleManager] create_battle_v2 RPC error, falling back to REST:', rpcErr);
-  }
-
-  // 2. Direct REST fallback
-  const [existingChallenger, existingChallenged] = await Promise.all([
-    getActiveBattle(challenger),
-    getActiveBattle(challenged)
-  ]);
-
-  if (existingChallenger) return { success: false, error: 'You already have an active battle in progress' };
-  if (existingChallenged) return { success: false, error: `${challenged} is currently in an active battle` };
-
-  const session = await getAuthSession();
-  const profiles = await supabaseFetch(
-    `profiles?leetcode_username=in.("${challenger.toLowerCase()}","${challenged.toLowerCase()}")&select=id,leetcode_username`
-  );
-  let challengerProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenger.toLowerCase());
-  let challengedProfile = profiles?.find(p => p.leetcode_username.toLowerCase() === challenged.toLowerCase());
-
-  if (!challengerProfile && session?.user_id) {
-    const ownData = await getOwnProfile();
-    await upsertProfile(challenger, ownData || { profile: { realName: challenger } });
-    challengerProfile = { id: session.user_id, leetcode_username: challenger.toLowerCase() };
-  }
-
-  const challengerId = session?.user_id || challengerProfile?.id;
-  const challengedId = challengedProfile?.id;
-  if (!challengedId) return { success: false, error: `${challenged} does not have a LeetStreak account.` };
-
-  const now = Date.now();
-  const expiresAt = new Date(now + CHALLENGE_EXPIRY_SECONDS * 1000).toISOString();
-
-  const payload = {
-    challenger_id: challengerId,
-    challenged_id: challengedId,
-    challenger_username: challenger,
-    challenged_username: challenged,
-    language: language.toLowerCase(),
-    status: BATTLE_STATUS.PENDING,
-    topics,
-    difficulty,
-    duration_minutes: durationMinutes,
-    problem_count: problemCount,
-    expires_at: expiresAt
-  };
-
-  const data = await supabaseFetch('battles', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-
-  if (!data || data.length === 0) return { success: false, error: 'Failed to create battle room' };
-  return { success: true, battle: data[0] };
+  if (rpcRes?.success && rpcRes.battle) return { success: true, battle: rpcRes.battle };
+  return { success: false, error: rpcRes?.error || 'Battle service unavailable.' };
 }
 
 /**
@@ -280,55 +205,56 @@ export async function createBattleV2(challenger, challenged, options = {}) {
 export async function acceptBattleV2(battleId) {
   if (!battleId) return { success: false, error: 'Battle ID required' };
 
-  // 1. Try atomic accept_battle_v2 RPC
+  // Accepting is an authoritative state transition; never emulate it with REST writes.
   const rpcRes = await callRpc('accept_battle_v2', { p_battle_id: battleId });
   if (rpcRes && rpcRes.success && rpcRes.battle) {
     return { success: true, battle: rpcRes.battle };
   }
-
-  // 2. Direct REST fallback
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-
-  const updated = await supabaseFetch(`battles?id=eq.${battleId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      status: BATTLE_STATUS.ACCEPTED,
-      accepted_at: new Date().toISOString()
-    })
-  });
-
-  // Create participant rows
-  if (battle.challenger_id && battle.challenged_id) {
-    await supabaseFetch('battle_participants', {
-      method: 'POST',
-      headers: { 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify([
-        { battle_id: battleId, user_id: battle.challenger_id, username: battle.challenger_username, is_ready: false },
-        { battle_id: battleId, user_id: battle.challenged_id, username: battle.challenged_username, is_ready: false }
-      ])
-    }).catch(() => {});
-  }
-
-  return { success: true, battle: updated?.[0] || battle };
+  return { success: false, error: rpcRes?.error || 'Battle service unavailable.' };
 }
 
 /**
  * Confirm readiness v2:
  * Passes generated problem sequence to backend so both players get identical sequence.
  */
-export async function confirmReadyV2(battleId, username) {
+export async function confirmReadyV2(battleId, _username) {
   if (!battleId) return { success: false, error: 'Battle ID required' };
 
   const battle = await getBattle(battleId);
   if (!battle) return { success: false, error: 'Battle not found' };
 
   // Generate sequence matching battle configuration
-  const problems = generateBattleProblems({
+  const selection = {
     topics: battle.topics || ['Arrays', 'Strings'],
     difficulty: battle.difficulty || 'Medium',
     count: battle.problem_count || 5
-  });
+  };
+  const requestedCount = selection.count;
+  const problems = [];
+  const checkedSlugs = new Set();
+  while (problems.length < requestedCount && checkedSlugs.size < PROBLEMS.length) {
+    const candidates = generateBattleProblems({
+      ...selection,
+      count: requestedCount - problems.length,
+      excludeSlugs: [...checkedSlugs]
+    });
+    if (!candidates.length) break;
+
+    for (const candidate of candidates) {
+      checkedSlugs.add(candidate.slug);
+      const validation = await validateLeetCodeProblem(candidate.slug);
+      if (!validation.valid) {
+        if (/premium/i.test(validation.error || '')) continue;
+        return { success: false, error: `Could not verify ${candidate.title} with LeetCode. Please try again.` };
+      }
+      problems.push({ ...candidate, title: validation.title, difficulty: validation.difficulty });
+      if (problems.length === requestedCount) break;
+    }
+  }
+
+  if (problems.length < requestedCount) {
+    return { success: false, error: 'Not enough verified free problems are available for this battle.' };
+  }
 
   // 1. Try atomic confirm_ready_v2 RPC
   const rpcRes = await callRpc('confirm_ready_v2', {
@@ -346,8 +272,7 @@ export async function confirmReadyV2(battleId, username) {
     };
   }
 
-  // 2. Fallback to confirmReady
-  return await confirmReady(battleId, username);
+  return { success: false, error: rpcRes?.error || 'Battle service unavailable.' };
 }
 
 /**
@@ -359,42 +284,51 @@ export async function submitBattleSolveV2(battleId, problemSlug, solveData = {})
     timeTakenMs = 0,
     runtimeMs = null,
     memoryMb = null,
-    language = 'javascript',
-    username = 'user'
+    language = 'javascript'
   } = solveData;
 
-  // 1. Try atomic record_battle_solve RPC
-  const rpcRes = await callRpc('record_battle_solve', {
+  const validSubmissionId = submissionId && String(submissionId).trim()
+    ? String(submissionId).trim()
+    : `sub_${Date.now()}`;
+
+  const params = {
     p_battle_id: battleId,
     p_problem_slug: problemSlug,
-    p_submission_id: submissionId || `sub_${Date.now()}`,
+    p_submission_id: validSubmissionId,
     p_time_taken_ms: timeTakenMs,
     p_runtime_ms: runtimeMs,
     p_memory_mb: memoryMb,
     p_language: language
-  });
+  };
 
-  if (rpcRes && rpcRes.success) {
-    return rpcRes;
+  // 1. Try Edge Function if configured and deployed
+  try {
+    const edgeRes = await callEdgeFunction('record-battle-solve', params);
+    if (edgeRes && edgeRes.success) {
+      return edgeRes;
+    }
+    // If it's a definitive terminal rejection from the server, return it
+    if (edgeRes?.error && /already finalized|deadline has passed|not in this battle/i.test(edgeRes.error)) {
+      return edgeRes;
+    }
+  } catch (err) {
+    console.warn('[BattleManager] Edge function record-battle-solve unavailable, falling back to direct RPC:', err);
   }
 
-  // 2. Fallback to submitBattleResult
-  const res = await submitBattleResult(battleId, username, {
-    problemSlug,
-    submissionId,
-    accepted: true,
-    runtime_ms: runtimeMs,
-    memory_mb: memoryMb,
-    language,
-    timeTakenSeconds: Math.floor(timeTakenMs / 1000)
-  });
+  // 2. Fallback to direct Postgres RPC record_battle_solve
+  try {
+    const rpcRes = await callRpc('record_battle_solve', params);
+    if (rpcRes && rpcRes.success) {
+      return rpcRes;
+    }
+    if (rpcRes?.error) {
+      return { success: false, error: rpcRes.error };
+    }
+  } catch (err) {
+    console.warn('[BattleManager] record_battle_solve RPC call failed:', err);
+  }
 
-  return {
-    success: res?.success || false,
-    solved_count: 1,
-    next_problem_slug: null,
-    battle_complete: false
-  };
+  return { success: false, error: 'Battle service unavailable.' };
 }
 
 /**
@@ -431,12 +365,12 @@ export async function getBattleStateV2(battleId) {
 /**
  * Forfeit active battle v2
  */
-export async function forfeitBattleV2(battleId, username) {
+export async function forfeitBattleV2(battleId, _username) {
   const rpcRes = await callRpc('forfeit_battle_v2', { p_battle_id: battleId });
   if (rpcRes && rpcRes.success) {
     return rpcRes;
   }
-  return await forfeitBattle(battleId, username);
+  return { success: false, error: rpcRes?.error || 'Battle service unavailable.' };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -455,27 +389,10 @@ export async function createBattle(challenger, challenged, language = 'javascrip
  */
 export async function getActiveBattle(username) {
   if (!username) return null;
-  const terminalList = Array.from(TERMINAL_STATES).join(',');
-  const normalized = username.toLowerCase();
-  const data = await supabaseFetch(
-    `battles?or=(challenger_username.ilike.${normalized},challenged_username.ilike.${normalized})&status=not.in.(${terminalList})&order=created_at.desc&limit=1`
-  );
-  if (!data || data.length === 0) return null;
-  const b = data[0];
-
+  const response = await callRpc('get_my_active_battle');
+  if (!response?.success || !response.battle) return null;
+  const b = response.battle;
   const now = Date.now();
-
-  // Auto-advance COUNTDOWN -> IN_PROGRESS when countdown completes
-  const startsAt = b.start_at || b.match_starts_at;
-  if (b.status === BATTLE_STATUS.COUNTDOWN && startsAt && new Date(startsAt).getTime() <= now) {
-    b.status = BATTLE_STATUS.IN_PROGRESS;
-    supabaseFetch(`battles?id=eq.${b.id}&status=eq.countdown`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: BATTLE_STATUS.IN_PROGRESS })
-    }).catch(() => {});
-  }
-
-  // Auto-finalize if match deadline has passed
   const endsAt = b.end_at || b.match_deadline;
   if (b.status === BATTLE_STATUS.IN_PROGRESS && endsAt && new Date(endsAt).getTime() <= now) {
     checkAndFinalizeBattle(b.id).catch(() => {});
@@ -506,111 +423,36 @@ export async function getBattleResults(battleId) {
  * Accept or decline a battle invitation
  */
 export async function respondToBattle(battleId, username, accept) {
-  if (!accept) {
-    await updateBattleStatus(battleId, BATTLE_STATUS.DECLINED);
-    return { success: true };
-  }
-  return await acceptBattleV2(battleId);
+  const result = await callRpc('respond_battle_v2', {
+    p_battle_id: battleId,
+    p_accept: Boolean(accept)
+  });
+  return result?.success ? result : { success: false, error: result?.error || 'Battle service unavailable.' };
 }
 
 /**
  * Submit a problem pick (Legacy v1)
  */
-export async function submitProblemPick(battleId, username, problemSlug, problemTitle) {
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-
-  const validated = await validateLeetCodeProblem(problemSlug);
-  if (!validated.valid) {
-    return { success: false, error: validated.error || 'Invalid LeetCode problem' };
-  }
-
-  const challengerName = battle.challenger_username || battle.challenger;
-  const isChallenger = challengerName.toLowerCase() === username.toLowerCase();
-  const pickSlugField = isChallenger ? 'challenger_pick' : 'challenged_pick';
-  const pickTitleField = isChallenger ? 'challenger_pick_title' : 'challenged_pick_title';
-  const otherPick = isChallenger ? battle.challenged_pick : battle.challenger_pick;
-  const otherTitle = isChallenger ? battle.challenged_pick_title : battle.challenger_pick_title;
-
-  const patchData = {
-    [pickSlugField]: validated.slug,
-    [pickTitleField]: validated.title || problemTitle || validated.slug
-  };
-
-  if (otherPick) {
-    Object.assign(patchData, {
-      problem_1: validated.slug,
-      problem_1_title: validated.title,
-      problem_2: otherPick,
-      problem_2_title: otherTitle || otherPick,
-      status: BATTLE_STATUS.READY_CHECK,
-      challenger_ready: false,
-      challenged_ready: false
-    });
-  }
-
-  const data = await supabaseFetch(`battles?id=eq.${battleId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(patchData)
-  });
-
-  if (!data || data.length === 0) return { success: false, error: 'Failed to save problem selection' };
-
-  return {
-    success: true,
-    battle: data[0],
-    bothPicked: !!otherPick
-  };
+export async function submitProblemPick(_battleId, _username, _problemSlug, _problemTitle) {
+  return { success: false, error: 'Manual problem picks are not supported by the current battle flow' };
 }
 
 /**
  * Confirm readiness (Legacy v1 fallback)
  */
-export async function confirmReady(battleId, username) {
+export async function confirmReady(battleId, _username) {
   const rpcRes = await callRpc('confirm_battle_ready', { p_battle_id: battleId });
   if (rpcRes && rpcRes.success) {
     const updated = await getBattle(battleId);
     return { success: true, battle: updated, bothReady: rpcRes.status === BATTLE_STATUS.COUNTDOWN };
   }
-
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-
-  const challengerName = battle.challenger_username || battle.challenger;
-  const isChallenger = challengerName.toLowerCase() === username.toLowerCase();
-  const patchData = isChallenger ? { challenger_ready: true } : { challenged_ready: true };
-  const otherIsReady = isChallenger ? battle.challenged_ready : battle.challenger_ready;
-
-  if (otherIsReady) {
-    const now = Date.now();
-    const duration = (battle.duration_minutes || 30) * 60;
-    const countdownStarts = new Date(now).toISOString();
-    const matchStartsAt = new Date(now + REVEAL_COUNTDOWN_SECONDS * 1000).toISOString();
-    const matchDeadline = new Date(now + (REVEAL_COUNTDOWN_SECONDS + duration) * 1000).toISOString();
-
-    Object.assign(patchData, {
-      status: BATTLE_STATUS.COUNTDOWN,
-      countdown_starts: countdownStarts,
-      match_starts_at: matchStartsAt,
-      match_deadline: matchDeadline,
-      start_at: matchStartsAt,
-      end_at: matchDeadline
-    });
-  }
-
-  const data = await supabaseFetch(`battles?id=eq.${battleId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(patchData)
-  });
-
-  if (!data || data.length === 0) return { success: false, error: 'Failed to record readiness' };
-  return { success: true, battle: data[0], bothReady: !!otherIsReady };
+  return { success: false, error: rpcRes?.error || 'Battle service unavailable.' };
 }
 
 /**
  * Submit battle result (Legacy v1)
  */
-export async function submitBattleResult(battleId, username, resultData) {
+export async function submitBattleResult(battleId, _username, resultData) {
   const {
     problemSlug,
     submissionId,
@@ -621,40 +463,14 @@ export async function submitBattleResult(battleId, username, resultData) {
     timeTakenSeconds
   } = resultData;
 
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-
-  if (TERMINAL_STATES.has(battle.status)) {
-    return { success: false, error: `Battle is already closed (${battle.status})` };
-  }
-
-  const startTimestamp = (battle.start_at || battle.match_starts_at)
-    ? new Date(battle.start_at || battle.match_starts_at).getTime()
-    : Date.now();
-  const elapsed = timeTakenSeconds != null
-    ? timeTakenSeconds
-    : Math.max(0, Math.floor((Date.now() - startTimestamp) / 1000));
-
-  const insertData = await supabaseFetch('battle_results', {
-    method: 'POST',
-    body: JSON.stringify({
-      battle_id: battleId,
-      username,
-      problem_slug: problemSlug,
-      leetcode_submission_id: submissionId || `sub_${Date.now()}`,
-      accepted: !!accepted,
-      submitted_at: new Date().toISOString(),
-      time_taken_seconds: elapsed,
-      runtime_ms: runtime_ms || null,
-      memory_mb: memory_mb || null,
-      language: language || battle.language || 'javascript',
-      attempts: 1,
-      points: accepted ? 1 : 0
-    })
+  if (accepted !== true) return { success: false, error: 'Only a confirmed Accepted result can be recorded' };
+  return submitBattleSolveV2(battleId, problemSlug, {
+    submissionId,
+    timeTakenMs: timeTakenSeconds == null ? 0 : Math.max(0, timeTakenSeconds) * 1000,
+    runtimeMs: runtime_ms,
+    memoryMb: memory_mb,
+    language
   });
-
-  await checkAndFinalizeBattle(battleId);
-  return { success: true, result: insertData?.[0] };
 }
 
 /**
@@ -666,110 +482,23 @@ export async function checkAndFinalizeBattle(battleId) {
     return rpcRes;
   }
 
-  const battle = await getBattle(battleId);
-  if (!battle || TERMINAL_STATES.has(battle.status)) return null;
-
-  const results = await getBattleResults(battleId);
-  const challenger = battle.challenger_username;
-  const challenged = battle.challenged_username;
-
-  let scoreA = 0, scoreB = 0, timeA = 0, timeB = 0;
-
-  for (const r of results) {
-    if (r.accepted) {
-      if (r.username.toLowerCase() === challenger.toLowerCase()) {
-        scoreA += (r.points || 1);
-        timeA += (r.time_taken_seconds || 0);
-      } else if (r.username.toLowerCase() === challenged.toLowerCase()) {
-        scoreB += (r.points || 1);
-        timeB += (r.time_taken_seconds || 0);
-      }
-    }
-  }
-
-  const deadline = battle.end_at || battle.match_deadline;
-  const timedOut = deadline && Date.now() >= new Date(deadline).getTime();
-  const problemCount = battle.problem_count || 2;
-  const bothFinished = (scoreA >= problemCount && scoreB >= problemCount);
-
-  if (bothFinished || timedOut) {
-    let winner = 'draw';
-    let winReason = 'draw';
-
-    if (scoreA > scoreB) {
-      winner = challenger;
-      winReason = 'points';
-    } else if (scoreB > scoreA) {
-      winner = challenged;
-      winReason = 'points';
-    } else {
-      if (scoreA > 0) {
-        if (timeA < timeB) { winner = challenger; winReason = 'tiebreaker_time'; }
-        else if (timeB < timeA) { winner = challenged; winReason = 'tiebreaker_time'; }
-        else { winner = 'draw'; winReason = 'draw'; }
-      } else {
-        winner = 'draw';
-        winReason = 'draw';
-      }
-    }
-
-    await updateBattleStatus(battleId, BATTLE_STATUS.COMPLETED, {
-      winner_username: winner,
-      win_reason: winReason,
-      completed_at: new Date().toISOString()
-    });
-
-    return { finalized: true, winner, winReason };
-  }
-
+  // Scores and finalization must remain server-owned; never patch a winner from a client.
   return null;
 }
 
 /**
  * Forfeit active battle
  */
-export async function forfeitBattle(battleId, username) {
-  const rpcRes = await callRpc('forfeit_battle', { p_battle_id: battleId });
-  if (rpcRes && rpcRes.success) {
-    return rpcRes;
-  }
-
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-
-  const challengerName = battle.challenger_username;
-  const challengedName = battle.challenged_username;
-
-  const winner = challengerName.toLowerCase() === username.toLowerCase()
-    ? challengedName
-    : challengerName;
-
-  await updateBattleStatus(battleId, BATTLE_STATUS.FORFEITED, {
-    winner_username: winner,
-    win_reason: 'forfeit',
-    completed_at: new Date().toISOString()
-  });
-
-  return { success: true, winner };
+export async function forfeitBattle(battleId, _username) {
+  return forfeitBattleV2(battleId);
 }
 
 /**
  * Cancel a pending challenge
  */
-export async function cancelBattle(battleId, username) {
-  const battle = await getBattle(battleId);
-  if (!battle) return { success: false, error: 'Battle not found' };
-
-  const challengerName = battle.challenger_username;
-  if (challengerName.toLowerCase() !== username.toLowerCase()) {
-    return { success: false, error: 'Only the challenger can cancel a pending match' };
-  }
-  if (battle.status !== BATTLE_STATUS.PENDING) {
-    return { success: false, error: 'Can only cancel pending challenges' };
-  }
-
-  await updateBattleStatus(battleId, BATTLE_STATUS.CANCELLED);
-  return { success: true };
+export async function cancelBattle(battleId, _username) {
+  const result = await callRpc('cancel_battle_v2', { p_battle_id: battleId });
+  return result?.success ? result : { success: false, error: result?.error || 'Battle service unavailable.' };
 }
 
 /**
@@ -777,99 +506,219 @@ export async function cancelBattle(battleId, username) {
  */
 export async function getBattleHistory(username, limit = 10) {
   if (!username) return [];
-  const normalized = username.toLowerCase();
-  const data = await supabaseFetch(
-    `battles?or=(challenger_username.ilike.${normalized},challenged_username.ilike.${normalized})&status=in.(completed,forfeited)&order=created_at.desc&limit=${limit}`
-  );
-  if (!data || data.length === 0) return [];
-
-  const enriched = await Promise.all(data.map(async (battle) => {
-    const results = await getBattleResults(battle.id);
-    const challengerName = battle.challenger_username;
-    const challengedName = battle.challenged_username;
-    const opponent = challengerName.toLowerCase() === username.toLowerCase()
-      ? challengedName
-      : challengerName;
-
-    const winnerName = battle.winner_username;
-    let outcome = 'draw';
-    if (winnerName) {
-      if (winnerName === 'draw') outcome = 'draw';
-      else if (winnerName.toLowerCase() === username.toLowerCase()) outcome = 'win';
-      else outcome = 'loss';
-    }
-
-    return {
-      ...battle,
-      opponent,
-      outcome,
-      results
-    };
-  }));
-
-  return enriched;
+  const response = await callRpc('get_my_recent_battles', { p_limit: limit });
+  return response?.success && Array.isArray(response.rows) ? response.rows : [];
 }
 
-/**
- * Deterministic battle scoring calculation (used by unit tests)
- */
+export async function getBattleHistoryScoreboard(filters = {}, limit = 12, offset = 0) {
+  const rpcRes = await callRpc('get_battle_history_scoreboard', {
+    p_result_filter: filters.result || 'all',
+    p_topic_filter: filters.topic && filters.topic !== 'all' ? filters.topic : null,
+    p_difficulty_filter: filters.difficulty || 'all',
+    p_opponent_id: filters.opponentId && filters.opponentId !== 'all' ? filters.opponentId : null,
+    p_from: filters.from || null,
+    p_to: filters.to || null,
+    p_limit: limit,
+    p_offset: offset
+  });
+
+  if (rpcRes && rpcRes.success) {
+    return rpcRes;
+  }
+
+  // Fallback: Group completed battles per opponent in JS
+  try {
+    const session = await getAuthSession();
+    const myId = session?.user_id || null;
+    let storedUsername = '';
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get('my_leetcode_username');
+      storedUsername = (stored?.my_leetcode_username || '').toLowerCase();
+    }
+
+    const battles = await getBattleHistory(storedUsername, 50);
+    if (!Array.isArray(battles) || battles.length === 0) {
+      return { success: true, rows: [], opponents: [], total_opponents: 0, total_matches: 0, has_more: false };
+    }
+
+    const groupedMap = new Map();
+    for (const b of battles) {
+      if (!['completed', 'forfeited'].includes(b.status)) continue;
+      const challenger = (b.challenger_username || '').toLowerCase();
+      const challenged = (b.challenged_username || '').toLowerCase();
+      // Exclude test self-battles
+      if (challenger && challenged && challenger === challenged) continue;
+      if (myId && b.challenger_id && b.challenged_id && b.challenger_id === b.challenged_id) continue;
+
+      const isChallenger = storedUsername ? challenger === storedUsername : (myId && b.challenger_id === myId);
+      const oppUsername = isChallenger ? (b.challenged_username || challenged) : (b.challenger_username || challenger);
+      const oppId = isChallenger ? (b.challenged_id || oppUsername) : (b.challenger_id || oppUsername);
+      if (!oppUsername) continue;
+      if (storedUsername && oppUsername.toLowerCase() === storedUsername) continue;
+      if (myId && oppId === myId) continue;
+
+      const winner = (b.winner_username || '').toLowerCase();
+      const iWon = winner && winner !== 'draw' && (winner === storedUsername || b.winner_id === myId);
+      const oppWon = winner && winner !== 'draw' && !iWon;
+      const isDraw = winner === 'draw' || !winner;
+
+      const key = oppUsername.toLowerCase();
+      if (!groupedMap.has(key)) {
+        groupedMap.set(key, {
+          opponent_id: oppId,
+          opponent_username: oppUsername,
+          my_username: storedUsername || 'you',
+          my_wins: 0,
+          opponent_wins: 0,
+          draws: 0,
+          completed_battles: 0,
+          last_battle_at: b.completed_at || b.created_at
+        });
+      }
+
+      const rec = groupedMap.get(key);
+      if (iWon) rec.my_wins++;
+      else if (oppWon) rec.opponent_wins++;
+      else if (isDraw) rec.draws++;
+      rec.completed_battles++;
+    }
+
+    const allRows = Array.from(groupedMap.values());
+    const rows = allRows.slice(offset, offset + limit);
+    return {
+      success: true,
+      rows,
+      opponents: allRows.map(r => ({ opponent_id: r.opponent_id, opponent_username: r.opponent_username })),
+      total_opponents: allRows.length,
+      total_matches: battles.length,
+      has_more: offset + limit < allRows.length
+    };
+  } catch {
+    return rpcRes || { success: false, error: 'Could not load battle history.' };
+  }
+}
+
+export async function getBattleHistoryDetails(opponentId, filters = {}, limit = 10, offset = 0) {
+  return await callRpc('get_battle_history_details_v2', {
+    p_opponent_id: opponentId,
+    p_result_filter: filters.result || 'all',
+    p_topic_filter: filters.topic && filters.topic !== 'all' ? filters.topic : null,
+    p_difficulty_filter: filters.difficulty || 'all',
+    p_from: filters.from || null,
+    p_to: filters.to || null,
+    p_limit: limit,
+    p_offset: offset
+  });
+}
+
+const PERFORMANCE_WINDOW_MS = 2000;
+
+function metricEfficiencyScore(value1, value2) {
+  if (value1 === value2) return [50, 50];
+  return value1 < value2 ? [100, 0] : [0, 100];
+}
+
+export function compareBattlePerformance(result1, result2) {
+  if (!result1?.accepted || !result2?.accepted || result1.problem_slug !== result2.problem_slug) {
+    return { eligible: false, reason: 'different_problem_or_not_accepted' };
+  }
+
+  const submitted1 = Date.parse(result1.submitted_at);
+  const submitted2 = Date.parse(result2.submitted_at);
+  if (!Number.isFinite(submitted1) || !Number.isFinite(submitted2) || Math.abs(submitted1 - submitted2) > PERFORMANCE_WINDOW_MS) {
+    return { eligible: false, reason: 'not_simultaneous' };
+  }
+
+  const memory1 = Number(result1.memory_mb);
+  const memory2 = Number(result2.memory_mb);
+  const runtime1 = Number(result1.runtime_ms);
+  const runtime2 = Number(result2.runtime_ms);
+  if (result1.memory_mb == null || result2.memory_mb == null || result1.runtime_ms == null || result2.runtime_ms == null ||
+      ![memory1, memory2, runtime1, runtime2].every(Number.isFinite) || memory1 <= 0 || memory2 <= 0 || runtime1 < 0 || runtime2 < 0) {
+    return { eligible: false, reason: 'performance_unavailable' };
+  }
+
+  const [spaceScore1, spaceScore2] = metricEfficiencyScore(memory1, memory2);
+  const [timeScore1, timeScore2] = metricEfficiencyScore(runtime1, runtime2);
+  const finalScore1 = Number((spaceScore1 * 0.7 + timeScore1 * 0.3).toFixed(6));
+  const finalScore2 = Number((spaceScore2 * 0.7 + timeScore2 * 0.3).toFixed(6));
+
+  return {
+    eligible: true,
+    reason: 'performance',
+    memory1,
+    memory2,
+    runtime1,
+    runtime2,
+    spaceScore1,
+    spaceScore2,
+    timeScore1,
+    timeScore2,
+    finalScore1,
+    finalScore2,
+    winner: finalScore1 > finalScore2 ? 'p1' : finalScore2 > finalScore1 ? 'p2' : 'draw'
+  };
+}
+
+/** Points decide first; server elapsed time breaks ordinary ties, with a
+ * normalized 70/30 efficiency comparison for same-problem accepts within 2s. */
 export function calculateScores(r1, r2, allResults1 = [], allResults2 = []) {
-  let score1 = 0;
-  let score2 = 0;
-  let time1 = 0;
-  let time2 = 0;
-
-  if (Array.isArray(allResults1) && allResults1.length > 0) {
-    for (const r of allResults1) {
-      if (r?.accepted) {
-        score1 += (r.points || 1);
-        time1 += (r.time_taken_seconds || 0);
-      }
-    }
-  } else if (r1?.accepted) {
-    score1 = 1;
-    time1 = r1.time_taken_seconds || 0;
-  }
-
-  if (Array.isArray(allResults2) && allResults2.length > 0) {
-    for (const r of allResults2) {
-      if (r?.accepted) {
-        score2 += (r.points || 1);
-        time2 += (r.time_taken_seconds || 0);
-      }
-    }
-  } else if (r2?.accepted) {
-    score2 = 1;
-    time2 = r2.time_taken_seconds || 0;
-  }
+  const uniqueAccepted = (rows, single) => {
+    const accepted = rows.length ? rows.filter(r => r?.accepted) : single?.accepted ? [single] : [];
+    const unique = new Map();
+    accepted.forEach((row, index) => {
+      const key = row.problem_slug || row.leetcode_submission_id || `row-${index}`;
+      const previous = unique.get(key);
+      if (!previous || Date.parse(row.submitted_at) < Date.parse(previous.submitted_at)) unique.set(key, row);
+    });
+    return [...unique.values()];
+  };
+  const results1 = uniqueAccepted(allResults1, r1);
+  const results2 = uniqueAccepted(allResults2, r2);
+  const score1 = results1.length;
+  const score2 = results2.length;
+  const totalMs = rows => rows.reduce((sum, row) => sum + (row.time_taken_ms != null && Number.isFinite(Number(row.time_taken_ms))
+    ? Number(row.time_taken_ms)
+    : Math.max(0, Number(row.time_taken_seconds) || 0) * 1000), 0);
+  const time1 = totalMs(results1);
+  const time2 = totalMs(results2);
+  const byProblem2 = new Map(results2.map(row => [row.problem_slug, row]));
+  const performanceComparisons = results1
+    .map(row => byProblem2.has(row.problem_slug) ? compareBattlePerformance(row, byProblem2.get(row.problem_slug)) : null)
+    .filter(result => result?.eligible);
+  const hasUnavailableSimultaneousPair = results1.some(row => {
+    const other = byProblem2.get(row.problem_slug);
+    return other && compareBattlePerformance(row, other).reason === 'performance_unavailable';
+  });
 
   let winner = 'draw';
-  if (score1 > score2) winner = 'p1';
-  else if (score2 > score1) winner = 'p2';
-  else {
-    if (score1 > 0) {
-      if (time1 < time2) winner = 'p1';
-      else if (time2 < time1) winner = 'p2';
-      else winner = 'draw';
-    } else {
-      winner = 'draw';
-    }
+  let reason = 'draw';
+  if (score1 > score2) { winner = 'p1'; reason = 'points'; }
+  else if (score2 > score1) { winner = 'p2'; reason = 'points'; }
+  else if (score1 > 0 && performanceComparisons.length) {
+    const finalScore1 = performanceComparisons.reduce((sum, result) => sum + result.finalScore1, 0);
+    const finalScore2 = performanceComparisons.reduce((sum, result) => sum + result.finalScore2, 0);
+    winner = finalScore1 > finalScore2 ? 'p1' : finalScore2 > finalScore1 ? 'p2' : 'draw';
+    reason = winner === 'draw' ? 'draw' : 'performance';
+  } else if (score1 > 0 && time1 !== time2) {
+    winner = time1 < time2 ? 'p1' : 'p2';
+    reason = hasUnavailableSimultaneousPair ? 'performance_unavailable' : 'tiebreaker_time';
+  } else if (score1 > 0 && hasUnavailableSimultaneousPair) {
+    reason = 'performance_unavailable';
   }
-
-  const breakdown = {
-    solved: score1 > score2 ? 'r1' : score2 > score1 ? 'r2' : 'tie',
-    speed: (time1 > 0 && time2 > 0)
-      ? (time1 < time2 ? 'r1' : time2 < time1 ? 'r2' : 'tie')
-      : (score1 > 0 ? 'r1' : score2 > 0 ? 'r2' : 'tie')
-  };
 
   return {
     score1,
     score2,
-    time1,
-    time2,
+    time1: time1 / 1000,
+    time2: time2 / 1000,
     winner,
-    breakdown
+    reason,
+    performanceComparisons,
+    breakdown: {
+      solved: score1 > score2 ? 'r1' : score2 > score1 ? 'r2' : 'tie',
+      speed: time1 < time2 ? 'r1' : time2 < time1 ? 'r2' : 'tie'
+    }
   };
 }
 
@@ -994,10 +843,3 @@ export async function getPresence(usernames) {
 }
 
 export { clientGetOnlineFriends as getOnlineFriends };
-
-async function updateBattleStatus(battleId, status, extra = {}) {
-  await supabaseFetch(`battles?id=eq.${battleId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status, ...extra })
-  });
-}

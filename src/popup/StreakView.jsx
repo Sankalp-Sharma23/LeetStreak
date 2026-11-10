@@ -1,26 +1,29 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import MilestoneCelebration from './MilestoneCelebration';
 import GoalsPanel from './GoalsPanel';
 import DailyQuestion from './DailyQuestion';
 import ProblemQueue from './ProblemQueue';
 import { AvatarWithPresence } from './PresenceIndicator';
+import RoastAlertBanner from './RoastAlertBanner';
 
 
-function StreakView({ friends, currentStreak, onRefresh, refreshing, presenceMap = {} }) {
+function StreakView({
+  friends,
+  currentStreak,
+  onRefresh,
+  refreshing,
+  presenceMap = {},
+  roastNotifications = [],
+  myUsername = '',
+  onDismissRoast = null,
+  onChallengeBattle = null
+}) {
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0);
   const [hoveredCell, setHoveredCell] = useState(null);
-  const [showMilestone, setShowMilestone] = useState(false);
   const [celebratedMilestones, setCelebratedMilestones] = useState(new Set());
   const [dismissedStreakWarning, setDismissedStreakWarning] = useState(false);
 
-  // Check for milestone and show celebration
-  useEffect(() => {
-    const milestones = [7, 30, 100, 365];
-    if (milestones.includes(currentStreak) && !celebratedMilestones.has(currentStreak)) {
-      setShowMilestone(true);
-      setCelebratedMilestones(prev => new Set([...prev, currentStreak]));
-    }
-  }, [currentStreak, celebratedMilestones]);
+  const showMilestone = [7, 30, 100, 365].includes(currentStreak) && !celebratedMilestones.has(currentStreak);
 
   // Compute streak warning: check allAcceptedSubmissions for a solve today (UTC).
   // We do NOT use submissionCalendar here because it counts all attempts
@@ -231,7 +234,17 @@ function StreakView({ friends, currentStreak, onRefresh, refreshing, presenceMap
       {showMilestone && (
         <MilestoneCelebration 
           streak={currentStreak} 
-          onClose={() => setShowMilestone(false)} 
+          onClose={() => setCelebratedMilestones(prev => new Set([...prev, currentStreak]))}
+        />
+      )}
+
+      {/* Active Friend Roasts Banner */}
+      {roastNotifications && roastNotifications.length > 0 && (
+        <RoastAlertBanner
+          roasts={roastNotifications}
+          myUsername={myUsername}
+          onDismiss={onDismissRoast}
+          onChallengeBattle={onChallengeBattle}
         />
       )}
 

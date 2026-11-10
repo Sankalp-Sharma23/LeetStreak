@@ -241,6 +241,7 @@ export async function fetchUserData(username) {
 
     // Fetch ALL accepted submissions (non-critical, comprehensive coverage of all solved problems)
     let allAcceptedSubmissions = [];
+    let acceptedSubmissionsAvailable = false;
     try {
       const allSubmissionsResponse = await fetch(LEETCODE_API, {
         method: 'POST',
@@ -258,7 +259,11 @@ export async function fetchUserData(username) {
         if (allSubmissionsData.errors) {
           console.warn('[API] All submissions query error:', allSubmissionsData.errors);
         } else {
-          allAcceptedSubmissions = allSubmissionsData.data?.matchedUser?.recentAcSubmissions || [];
+          const fetchedAcceptedSubmissions = allSubmissionsData.data?.matchedUser?.recentAcSubmissions;
+          if (Array.isArray(fetchedAcceptedSubmissions)) {
+            allAcceptedSubmissions = fetchedAcceptedSubmissions;
+            acceptedSubmissionsAvailable = true;
+          }
           console.log(`[API] Fetched ${allAcceptedSubmissions.length} all-time accepted submissions (limit 1000)`);
           if (allAcceptedSubmissions.length > 0) {
             console.log('[API] Sample submissions:', allAcceptedSubmissions.slice(0, 5).map(s => s.titleSlug));
@@ -278,6 +283,7 @@ export async function fetchUserData(username) {
         recentSubmissions: recentSubmissions
       },
       allAcceptedSubmissions: allAcceptedSubmissions,
+      acceptedSubmissionsAvailable,
       contestRanking: profileData.data.userContestRanking,
       submissionCalendar: submissionCalendar
     };

@@ -24,6 +24,7 @@ export const AUTH_STATES = {
 
 // In-memory state tracking
 let cachedSession = null;
+let sessionRefreshPromise = null;
 let currentAuthState = AUTH_STATES.SESSION_LOADING;
 let lastAuthError = null;
 let authCooldownUntil = 0;
@@ -72,6 +73,7 @@ export function getAuthState() {
  */
 export function resetAuthState() {
   cachedSession = null;
+  sessionRefreshPromise = null;
   currentAuthState = AUTH_STATES.SESSION_LOADING;
   lastAuthError = null;
   authCooldownUntil = 0;
@@ -106,21 +108,32 @@ export function setAuthCooldown(seconds = 60) {
  * Get the current authenticated user session from memory or storage
  */
 export async function getAuthSession() {
-  if (cachedSession && cachedSession.expires_at > Date.now()) {
-    return cachedSession;
-  }
-
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  let session = cachedSession;
+  if (!session && typeof chrome !== 'undefined' && chrome.storage?.local) {
     try {
       const stored = await chrome.storage.local.get(['supabase_auth_session']);
-      if (stored.supabase_auth_session && stored.supabase_auth_session.expires_at > Date.now()) {
-        cachedSession = stored.supabase_auth_session;
-        return cachedSession;
-      }
-    } catch {}
+      session = stored.supabase_auth_session || null;
+    } catch (error) {
+      console.warn('[SupabaseClient] Could not read stored session:', error);
+      return null;
+    }
   }
 
-  return null;
+  if (!session) return null;
+  if (session.expires_at > Date.now() + 60_000) {
+    cachedSession = session;
+    return session;
+  }
+  if (!session.refresh_token) return null;
+
+  // Supabase rotates refresh tokens. Share one refresh across concurrent
+  // requests so only one request can consume the stored refresh token.
+  if (!sessionRefreshPromise) {
+    sessionRefreshPromise = refreshSession(session.refresh_token).finally(() => {
+      sessionRefreshPromise = null;
+    });
+  }
+  return await sessionRefreshPromise;
 }
 
 /**
@@ -163,24 +176,18 @@ export async function restoreSession() {
       return null;
     }
 
-    // Check if session is still valid (give 60-second grace window)
-    if (storedSession.expires_at && storedSession.expires_at > Date.now() + 60000) {
-      cachedSession = storedSession;
+    // Reuse the shared refresh path so startup and concurrent cloud requests
+    // cannot race Supabase's single-use rotating refresh token.
+    const activeSession = await getAuthSession();
+    if (activeSession) {
       setAuthState(AUTH_STATES.AUTHENTICATED);
-      return cachedSession;
+      return activeSession;
     }
 
-    // Session has expired — try refreshing if refresh_token exists
-    if (storedSession.refresh_token) {
-      if (isAuthRateLimited()) {
-        setAuthState(AUTH_STATES.AUTH_ERROR, 'Authentication temporarily rate-limited. Please wait.');
-        return null;
-      }
-
-      const refreshed = await refreshSession(storedSession.refresh_token);
-      if (refreshed) {
-        return refreshed;
-      }
+    // A network failure or rate limit is temporary: keep the stored refresh
+    // token so a later request can restore the session when service returns.
+    if (getAuthState() === AUTH_STATES.AUTH_ERROR) {
+      return null;
     }
 
     // Refresh failed or no refresh token — session is dead
@@ -454,6 +461,41 @@ export async function callRpc(functionName, params = {}) {
   }
 }
 
+/** Call an authenticated Supabase Edge Function using the current user JWT. */
+export async function callEdgeFunction(functionName, params = {}) {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') {
+    return { success: false, error: 'Supabase is not configured.' };
+  }
+
+  const session = await getAuthSession();
+  if (!session?.access_token) {
+    return { success: false, error: 'Sign in to submit battle progress.' };
+  }
+
+  try {
+    const response = await fetch(`${BASE_URL}/functions/v1/${encodeURIComponent(functionName)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify(params)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        success: false,
+        error: body.error || body.message || `Battle verification failed (${response.status}).`
+      };
+    }
+    return body;
+  } catch (error) {
+    console.error('[SupabaseClient] Edge Function request failed:', error);
+    return { success: false, error: 'Battle verification service is unavailable.' };
+  }
+}
+
 // ============================================================================
 // PROFILES API
 // ============================================================================
@@ -634,7 +676,12 @@ export async function getOnlineFriends() {
   if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return [];
   try {
     const res = await callRpc('get_online_friends');
-    return Array.isArray(res) ? res : [];
+    if (Array.isArray(res)) return res;
+    // Graceful fallback when RPC is not yet created or returns error object
+    if (res && res.error) {
+      return [];
+    }
+    return [];
   } catch (err) {
     console.warn('[SupabaseClient] getOnlineFriends error:', err);
     return [];
@@ -655,16 +702,31 @@ export async function getFriendsPresence(usernames = null) {
 }
 
 /**
- * Synchronize friendship between authenticated user and target friend
+ * Send a friendship request from the authenticated user to the target user.
  */
 export async function syncFriendship(targetUsername) {
   if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE' || !targetUsername) return { success: false };
   try {
-    const res = await callRpc('sync_friendship', { p_target_username: targetUsername.toLowerCase() });
+    const res = await callRpc('request_friendship', { p_target_username: targetUsername.toLowerCase() });
     return res || { success: false };
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+export async function getFriendRequests() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return [];
+  const result = await callRpc('get_friend_requests');
+  return Array.isArray(result) ? result : [];
+}
+
+export async function respondToFriendRequest(friendshipId, accept) {
+  if (!friendshipId) return { success: false, error: 'Friend request id is required' };
+  const result = await callRpc('respond_to_friend_request', {
+    p_friendship_id: friendshipId,
+    p_accept: Boolean(accept)
+  });
+  return result || { success: false, error: 'Could not update friend request' };
 }
 
 /**
@@ -697,7 +759,7 @@ export async function removeFriendship(targetUsername) {
  * Retrieve all permanent accepted friends from Supabase (survives reinstall / storage wipe)
  * Does NOT return private email addresses.
  */
-export async function getAcceptedFriends() {
+export async function getAcceptedFriends({ throwOnError = false } = {}) {
   if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return [];
   try {
     const res = await callRpc('get_accepted_friends');
@@ -706,6 +768,7 @@ export async function getAcceptedFriends() {
     return [];
   } catch (err) {
     console.error('[SupabaseClient] getAcceptedFriends error:', err);
+    if (throwOnError) throw err;
     return [];
   }
 }
@@ -741,8 +804,8 @@ export async function getOwnProfile() {
  * Restore complete social account data (survives reinstall, browser change, or storage wipe)
  * 1. Fetches own profile and stores to local storage.
  * 2. Fetches all permanent accepted friends from Supabase.
- * 3. Hydrates friends_cache and friends_list in local storage.
- * 4. Syncs any pre-existing local friends to Supabase.
+ * 3. Replaces the account-scoped local friend cache with accepted server
+ *    relationships. Local-only entries are never promoted to friends.
  */
 export async function restoreAccountSocialData() {
   if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return { success: false };
@@ -785,56 +848,100 @@ export async function restoreAccountSocialData() {
     const acceptedFriends = await getAcceptedFriends();
     
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const stored = await chrome.storage.local.get(['friends_cache', 'friends_list']);
-      const currentCache = stored.friends_cache || {};
-      const currentList = stored.friends_list || [];
+      const stored = await chrome.storage.local.get(['friends_cache', 'friends_account_id']);
+      const isSameAccount = stored?.friends_account_id === session.user_id;
+      const priorCache = isSameAccount && stored?.friends_cache ? stored.friends_cache : {};
 
-      const updatedCache = { ...currentCache };
-      const friendUsernames = new Set(currentList);
+      const updatedCache = {};
+      const friendUsernames = new Set();
 
       for (const f of acceptedFriends) {
         const uName = (f.leetcode_username || '').toLowerCase();
         if (!uName) continue;
 
         friendUsernames.add(uName);
+        const existing = priorCache[uName] || {};
+        const existingProfile = existing.profile || {};
+        const hasRichData = !!(existing.submissionCalendar && (existingProfile.ranking || existingProfile.ranking === 0));
+
         updatedCache[uName] = {
+          ...existing,
           username: uName,
           profile: {
+            ...existingProfile,
             username: uName,
-            realName: f.display_name || uName,
-            avatar: f.avatar_url || ''
+            realName: existingProfile.realName || f.display_name || uName,
+            avatar: existingProfile.avatar || f.avatar_url || '',
+            ranking: existingProfile.ranking || 0
           },
           stats: {
-            total: f.total_solved || 0,
-            easy: f.easy_solved || 0,
-            medium: f.medium_solved || 0,
-            hard: f.hard_solved || 0,
-            streak: f.current_streak || 0,
-            longestStreak: f.longest_streak || 0
+            ...(existing.stats || {}),
+            total: existing.stats?.total ?? f.total_solved ?? 0,
+            easy: existing.stats?.easy ?? f.easy_solved ?? 0,
+            medium: existing.stats?.medium ?? f.medium_solved ?? 0,
+            hard: existing.stats?.hard ?? f.hard_solved ?? 0,
+            streak: existing.stats?.streak ?? f.current_streak ?? 0,
+            longestStreak: existing.stats?.longestStreak ?? f.longest_streak ?? 0
           },
           contest: {
-            rating: f.contest_rating || 0
+            rating: existing.contest?.rating ?? f.contest_rating ?? 0
           },
           friend_id: f.friend_id,
           friendship_id: f.friendship_id,
-          lastUpdated: f.last_synced_at ? new Date(f.last_synced_at).getTime() : Date.now()
+          submissionCalendar: existing.submissionCalendar || null,
+          lastUpdated: hasRichData
+            ? (existing.lastUpdated || (f.last_synced_at ? new Date(f.last_synced_at).getTime() : Date.now()))
+            : 0
         };
       }
 
+      // Also restore any tracked friends stored in user_settings.saved_friends
+      try {
+        const userSettings = await getUserSettings();
+        const savedFriends = Array.isArray(userSettings?.saved_friends) ? userSettings.saved_friends : [];
+        for (const name of savedFriends) {
+          const lower = (name || '').toLowerCase().trim();
+          if (lower && !updatedCache[lower]) {
+            const existing = priorCache[lower] || {};
+            const existingProfile = existing.profile || {};
+            const hasRichData = !!(existing.submissionCalendar && (existingProfile.ranking || existingProfile.ranking === 0));
+
+            friendUsernames.add(lower);
+            updatedCache[lower] = {
+              ...existing,
+              username: lower,
+              profile: {
+                ...existingProfile,
+                username: lower,
+                realName: existingProfile.realName || lower,
+                avatar: existingProfile.avatar || ''
+              },
+              stats: existing.stats || { total: 0, easy: 0, medium: 0, hard: 0, streak: 0, longestStreak: 0 },
+              contest: existing.contest || { rating: 0 },
+              friend_id: existing.friend_id || null,
+              submissionCalendar: existing.submissionCalendar || null,
+              lastUpdated: hasRichData ? (existing.lastUpdated || Date.now()) : 0
+            };
+          }
+        }
+      } catch (settingsErr) {
+        console.warn('[SupabaseClient] Could not restore saved_friends from user_settings:', settingsErr);
+      }
+
+      const userFriendsSection = {
+        accountId: session.user_id,
+        friendIds: acceptedFriends.map(f => f.friend_id || f.leetcode_username).filter(Boolean),
+        friendUsernames: Array.from(friendUsernames),
+        friends: updatedCache,
+        updatedAt: Date.now()
+      };
+
       await chrome.storage.local.set({
         friends_cache: updatedCache,
-        friends_list: Array.from(friendUsernames)
+        friends_list: Array.from(friendUsernames),
+        friends_account_id: session.user_id,
+        [`user_friends_${session.user_id}`]: userFriendsSection
       });
-
-      // 3. Sync any local-only friends added before login to Supabase
-      const localOnly = Object.keys(currentCache).filter(
-        name => !acceptedFriends.some(af => (af.leetcode_username || '').toLowerCase() === name.toLowerCase())
-      );
-      if (localOnly.length > 0) {
-        for (const localUser of localOnly) {
-          syncFriendship(localUser).catch(() => {});
-        }
-      }
     }
 
     return {
@@ -949,43 +1056,47 @@ export async function fetchUnreadRoasts(myUsername) {
 }
 
 /**
- * Mark roasts as delivered
+ * Mark roasts as delivered (ephemeral: deletes from cloud database once delivered and persisted locally)
  */
 export async function markRoastsDelivered(messageIds) {
   if (!messageIds?.length || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return;
 
   try {
+    const rpcRes = await callRpc('delete_roast_messages', { p_message_ids: messageIds });
+    if (rpcRes?.success) return;
+
+    // Fallback: direct REST DELETE
     const headers = await getAuthHeaders();
     const idList = messageIds.map(id => `"${id}"`).join(',');
     await fetch(`${BASE_URL}/rest/v1/roast_messages?id=in.(${idList})`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({
-        status: 'delivered',
-        delivered_at: new Date().toISOString()
-      })
+      method: 'DELETE',
+      headers
     });
-  } catch {}
+  } catch (err) {
+    console.warn('[SupabaseClient] markRoastsDelivered ephemeral delete error:', err);
+  }
 }
 
 /**
- * Mark roasts as read
+ * Mark roasts as read (ensures message is removed from database if still present)
  */
 export async function markRoastsRead(messageIds) {
   if (!messageIds?.length || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return;
 
   try {
+    const rpcRes = await callRpc('delete_roast_messages', { p_message_ids: messageIds });
+    if (rpcRes?.success) return;
+
+    // Fallback: direct REST DELETE
     const headers = await getAuthHeaders();
     const idList = messageIds.map(id => `"${id}"`).join(',');
     await fetch(`${BASE_URL}/rest/v1/roast_messages?id=in.(${idList})`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({
-        status: 'read',
-        read_at: new Date().toISOString()
-      })
+      method: 'DELETE',
+      headers
     });
-  } catch {}
+  } catch (err) {
+    console.warn('[SupabaseClient] markRoastsRead ephemeral delete error:', err);
+  }
 }
 
 /**
@@ -995,14 +1106,14 @@ export async function clearRoasts(myUsername) {
   if (!myUsername || SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL_HERE') return true;
 
   try {
-    const unread = await fetchUnreadRoasts(myUsername);
-    if (!unread || unread.length === 0) return true;
-
-    const ids = unread.map(r => r.id);
-    await markRoastsRead(ids);
+    const headers = await getAuthHeaders();
+    await fetch(`${BASE_URL}/rest/v1/roast_messages?recipient_username=eq.${encodeURIComponent(myUsername.toLowerCase())}`, {
+      method: 'DELETE',
+      headers
+    });
     return true;
   } catch (error) {
-    console.error('Error clearing roasts:', error);
+    console.warn('Error clearing roasts:', error);
     return false;
   }
 }

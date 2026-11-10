@@ -8,7 +8,6 @@
 
 import {
   getProfile,
-  getProfiles,
   getAcceptedFriends,
   removeFriendship,
   upsertProfile,
@@ -17,6 +16,7 @@ import {
   sendRoast as supabaseSendRoast,
   clearRoasts as supabaseClearRoasts,
   getAuthState,
+  getAuthSession,
   AUTH_STATES
 } from './supabase-client.js';
 
@@ -79,13 +79,17 @@ export async function getAllFriends() {
   try {
     const myUsername = await getMyUsername();
     const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
-      ? await chrome.storage.local.get(['friends_cache', 'own_profile', 'friends_list'])
+      ? await chrome.storage.local.get(['friends_cache', 'own_profile', 'friends_account_id'])
       : {};
 
-    const localCache = stored.friends_cache || {};
+    const authenticated = getAuthState() === AUTH_STATES.AUTHENTICATED;
+    const session = authenticated ? await getAuthSession() : null;
+    const accountId = session?.user_id || null;
+    const cacheBelongsToCurrentUser = accountId
+      ? stored.friends_account_id === accountId
+      : !stored.friends_account_id;
+    const localCache = cacheBelongsToCurrentUser ? (stored.friends_cache || {}) : {};
     const ownData = stored.own_profile || null;
-    const localFriendsList = stored.friends_list || [];
-
     const result = { ...localCache };
 
     // Always include own profile if available
@@ -94,44 +98,89 @@ export async function getAllFriends() {
     }
 
     // If unauthenticated or no cloud connection, return local cache immediately
-    if (getAuthState() !== AUTH_STATES.AUTHENTICATED) {
+    if (!authenticated || !accountId) {
       return result;
     }
 
     // Opportunistically restore and refresh friend profiles from Supabase if authenticated
     try {
-      const accepted = await getAcceptedFriends();
-      if (Array.isArray(accepted) && accepted.length > 0) {
-        let hasNew = false;
-        accepted.forEach(f => {
-          const uName = (f.leetcode_username || '').toLowerCase();
-          if (uName && !result[uName]) {
-            result[uName] = {
-              username: uName,
-              profile: {
-                username: uName,
-                realName: f.display_name || uName,
-                avatar: f.avatar_url || ''
-              },
-              stats: {
-                total: f.total_solved || 0,
-                easy: f.easy_solved || 0,
-                medium: f.medium_solved || 0,
-                hard: f.hard_solved || 0,
-                streak: f.current_streak || 0,
-                longestStreak: f.longest_streak || 0
-              },
-              contest: { rating: f.contest_rating || 0 },
-              friend_id: f.friend_id,
-              friendship_id: f.friendship_id,
-              lastUpdated: f.last_synced_at ? new Date(f.last_synced_at).getTime() : Date.now()
-            };
-            hasNew = true;
+      const accepted = await getAcceptedFriends({ throwOnError: true });
+      if (Array.isArray(accepted)) {
+        const acceptedNames = new Set(
+          accepted.map(friend => (friend.leetcode_username || '').toLowerCase()).filter(Boolean)
+        );
+
+        // Tracked friends in user_settings.saved_friends are also valid friends for this account
+        try {
+          const userSettings = await getUserSettings();
+          if (Array.isArray(userSettings?.saved_friends)) {
+            userSettings.saved_friends.forEach(name => {
+              const lower = (name || '').toLowerCase().trim();
+              if (lower) acceptedNames.add(lower);
+            });
           }
+        } catch {}
+
+        // A user's accepted cloud relationships and saved friends define their friend set. Keep
+        // cached profile details only for that set, never entries left by a
+        // previous account or a friendship that is no longer accepted.
+        for (const username of Object.keys(result)) {
+          if (username.toLowerCase() !== myUsername?.toLowerCase() && !acceptedNames.has(username.toLowerCase())) {
+            delete result[username];
+          }
+        }
+
+        accepted.forEach(friend => {
+          const username = (friend.leetcode_username || '').toLowerCase();
+          if (!username) return;
+          const existing = result[username] || {};
+          const existingProfile = existing.profile || {};
+          const hasRichData = !!(existing.submissionCalendar && (existingProfile.ranking || existingProfile.ranking === 0));
+
+          result[username] = {
+            ...existing,
+            username,
+            profile: {
+              ...existingProfile,
+              username,
+              realName: existingProfile.realName || friend.display_name || username,
+              avatar: existingProfile.avatar || friend.avatar_url || '',
+              ranking: existingProfile.ranking || 0
+            },
+            stats: {
+              ...(existing.stats || {}),
+              total: existing.stats?.total ?? friend.total_solved ?? 0,
+              easy: existing.stats?.easy ?? friend.easy_solved ?? 0,
+              medium: existing.stats?.medium ?? friend.medium_solved ?? 0,
+              hard: existing.stats?.hard ?? friend.hard_solved ?? 0,
+              streak: existing.stats?.streak ?? friend.current_streak ?? 0,
+              longestStreak: existing.stats?.longestStreak ?? friend.longest_streak ?? 0
+            },
+            contest: { rating: existing.contest?.rating ?? friend.contest_rating ?? 0 },
+            friend_id: friend.friend_id,
+            friendship_id: friend.friendship_id,
+            submissionCalendar: existing.submissionCalendar || null,
+            lastUpdated: hasRichData
+              ? (existing.lastUpdated || (friend.last_synced_at ? new Date(friend.last_synced_at).getTime() : Date.now()))
+              : 0
+          };
         });
 
-        if (hasNew && typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({ friends_cache: result }).catch(() => {});
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          const finalFriendList = Object.keys(result).filter(name => name.toLowerCase() !== myUsername?.toLowerCase());
+          const userSection = {
+            accountId,
+            friendIds: finalFriendList,
+            friendUsernames: finalFriendList,
+            friends: result,
+            updatedAt: Date.now()
+          };
+          await chrome.storage.local.set({
+            friends_cache: result,
+            friends_list: finalFriendList,
+            friends_account_id: accountId,
+            [`user_friends_${accountId}`]: userSection
+          });
         }
       }
     } catch (cloudErr) {
@@ -157,9 +206,18 @@ export async function getFriend(username) {
     }
 
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const stored = await chrome.storage.local.get(['friends_cache']);
-      if (stored.friends_cache && stored.friends_cache[username]) {
-        return stored.friends_cache[username];
+      const stored = await chrome.storage.local.get(['friends_cache', 'friends_account_id']);
+      const authenticated = getAuthState() === AUTH_STATES.AUTHENTICATED;
+      const session = authenticated ? await getAuthSession() : null;
+      const accountId = session?.user_id || null;
+      const cacheBelongsToCurrentUser = accountId
+        ? stored.friends_account_id === accountId
+        : !stored.friends_account_id;
+      const cached = cacheBelongsToCurrentUser
+        ? Object.entries(stored.friends_cache || {}).find(([key]) => key.toLowerCase() === username.toLowerCase())?.[1]
+        : null;
+      if (cached) {
+        return cached;
       }
     }
 
@@ -189,32 +247,53 @@ export async function saveFriend(username, data) {
       return { success: true };
     }
 
+    const session = await getAuthSession();
+    const accountId = session?.user_id || null;
+
     // Save to local storage
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const stored = await chrome.storage.local.get(['friends_cache', 'friends_list']);
       const cache = stored.friends_cache || {};
       const list = stored.friends_list || [];
 
-      cache[username] = data;
-      const updatedList = list.includes(username) ? list : [...list, username];
+      const prior = cache[username] || {};
+      cache[username] = {
+        ...data,
+        friend_id: data.friend_id || prior.friend_id || null,
+        friendship_id: data.friendship_id || prior.friendship_id || null
+      };
+      const updatedList = list.some(u => u.toLowerCase() === username.toLowerCase())
+        ? list
+        : [...list, username];
 
-      await chrome.storage.local.set({
+      const toSet = {
         friends_cache: cache,
         friends_list: updatedList
-      });
+      };
+
+      if (accountId) {
+        toSet.friends_account_id = accountId;
+        toSet[`user_friends_${accountId}`] = {
+          accountId,
+          friendIds: updatedList,
+          friendUsernames: updatedList,
+          friends: cache,
+          updatedAt: Date.now()
+        };
+      }
+
+      await chrome.storage.local.set(toSet);
     }
 
     // Sync to Supabase if authenticated
-    if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
+    if (getAuthState() === AUTH_STATES.AUTHENTICATED && accountId) {
       upsertProfile(username, data).catch(() => {});
-      if (myUsername) {
-        getUserSettings().then(settings => {
-          const currentList = settings?.friends_list || [];
-          if (!currentList.includes(username)) {
-            upsertUserSettings({ friends_list: [...currentList, username] }).catch(() => {});
-          }
-        }).catch(() => {});
-      }
+      getUserSettings().then(settings => {
+        const currentSaved = Array.isArray(settings?.saved_friends) ? settings.saved_friends : [];
+        if (!currentSaved.map(s => (s || '').toLowerCase()).includes(username.toLowerCase())) {
+          upsertUserSettings({ saved_friends: [...currentSaved, username] }).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     return { success: true };
@@ -230,6 +309,9 @@ export async function saveFriend(username, data) {
 export async function removeFriend(username) {
   if (!username) return false;
   try {
+    const session = await getAuthSession();
+    const accountId = session?.user_id || null;
+
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const stored = await chrome.storage.local.get(['friends_cache', 'friends_list']);
       const cache = stored.friends_cache || {};
@@ -238,18 +320,31 @@ export async function removeFriend(username) {
       delete cache[username];
       const updatedList = list.filter(u => u.toLowerCase() !== username.toLowerCase());
 
-      await chrome.storage.local.set({
+      const toSet = {
         friends_cache: cache,
         friends_list: updatedList
-      });
+      };
+
+      if (accountId) {
+        toSet.friends_account_id = accountId;
+        toSet[`user_friends_${accountId}`] = {
+          accountId,
+          friendIds: updatedList,
+          friendUsernames: updatedList,
+          friends: cache,
+          updatedAt: Date.now()
+        };
+      }
+
+      await chrome.storage.local.set(toSet);
     }
 
-    if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
+    if (getAuthState() === AUTH_STATES.AUTHENTICATED && accountId) {
       removeFriendship(username).catch(() => {});
       getUserSettings().then(settings => {
-        if (settings?.friends_list) {
-          const updated = settings.friends_list.filter(u => u.toLowerCase() !== username.toLowerCase());
-          upsertUserSettings({ friends_list: updated }).catch(() => {});
+        if (Array.isArray(settings?.saved_friends)) {
+          const updated = settings.saved_friends.filter(u => (u || '').toLowerCase() !== username.toLowerCase());
+          upsertUserSettings({ saved_friends: updated }).catch(() => {});
         }
       }).catch(() => {});
     }
@@ -267,26 +362,72 @@ export async function removeFriend(username) {
 export async function getFriendsList() {
   try {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const stored = await chrome.storage.local.get(['friends_list']);
-      if (stored.friends_list && Array.isArray(stored.friends_list)) {
-        return stored.friends_list;
+      const stored = await chrome.storage.local.get(['friends_list', 'friends_account_id']);
+      const authenticated = getAuthState() === AUTH_STATES.AUTHENTICATED;
+      const session = authenticated ? await getAuthSession() : null;
+      const accountId = session?.user_id || null;
+      const cacheBelongsToCurrentUser = accountId
+        ? stored.friends_account_id === accountId
+        : !stored.friends_account_id;
+      if (cacheBelongsToCurrentUser && Array.isArray(stored.friends_list)) return stored.friends_list;
+
+      // Do not expose a prior account's locally cached list while signed into
+      // another account or while an account-owned cache cannot be identified.
+      if (stored.friends_account_id && !accountId) return [];
+
+      if (authenticated && accountId) {
+        const all = await getAllFriends();
+        const myUsername = await getMyUsername();
+        return Object.keys(all).filter(u => u.toLowerCase() !== myUsername?.toLowerCase());
       }
     }
 
     if (getAuthState() === AUTH_STATES.AUTHENTICATED) {
-      const settings = await getUserSettings();
-      if (settings?.friends_list) {
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({ friends_list: settings.friends_list }).catch(() => {});
-        }
-        return settings.friends_list;
-      }
+      const all = await getAllFriends();
+      const myUsername = await getMyUsername();
+      return Object.keys(all).filter(u => u.toLowerCase() !== myUsername?.toLowerCase());
     }
 
     return [];
   } catch (error) {
     console.error('Error getting friends list:', error);
     return [];
+  }
+}
+
+/**
+ * Get the distinct friend section for a specific user ID
+ * @param {string} [userId]
+ * @returns {Promise<{ accountId: string|null, friendIds: string[], friends: Object }>}
+ */
+export async function getUserFriendSection(userId = null) {
+  try {
+    let targetId = userId;
+    if (!targetId) {
+      const session = await getAuthSession();
+      targetId = session?.user_id || null;
+    }
+
+    if (targetId && typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get(`user_friends_${targetId}`);
+      if (stored[`user_friends_${targetId}`]) {
+        return stored[`user_friends_${targetId}`];
+      }
+    }
+
+    const all = await getAllFriends();
+    const friendIds = Object.values(all)
+      .map(f => f.friend_id || f.username)
+      .filter(Boolean);
+
+    return {
+      accountId: targetId,
+      friendIds,
+      friends: all
+    };
+  } catch (err) {
+    console.error('Error in getUserFriendSection:', err);
+    return { accountId: null, friendIds: [], friends: {} };
   }
 }
 

@@ -14,6 +14,7 @@ export default defineConfig(() => {
   if (isServiceWorker) {
     // Separate config for service worker
     return {
+      publicDir: false,
       build: {
         lib: {
           entry: path.resolve(__dirname, 'src/background/service-worker.js'),
@@ -42,6 +43,7 @@ export default defineConfig(() => {
   if (isContentScript) {
     // Separate config for content script
     return {
+      publicDir: false,
       build: {
         lib: {
           entry: path.resolve(__dirname, 'src/content/leetcode-integration.js'),

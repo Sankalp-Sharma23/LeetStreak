@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Swords, Trophy, Clock, ChevronRight, X, Check, AlertCircle,
+  Swords, Trophy, Clock, ChevronRight, ChevronDown, Filter, X, Check, AlertCircle,
   ExternalLink, Flag, RefreshCw, Loader2, Sparkles, Zap,
   Target, Timer, Hash
 } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   forfeitBattleV2,
   getBattleStateV2,
   getActiveBattle,
+  getBattle,
   respondToBattle,
   cancelBattle
 } from '../shared/battle-manager.js';
@@ -44,6 +45,8 @@ const DURATION_OPTIONS = [
 const PROBLEM_COUNT_OPTIONS = [3, 5, 7, 10];
 
 const REVEAL_COUNTDOWN_SECONDS = 10;
+const HISTORY_PAGE_SIZE = 12;
+const HISTORY_FILTER_CLASS = 'min-w-0 rounded-md border border-surfaceHover/50 bg-surface px-2 py-1.5 text-[9px] text-text-main outline-none focus:border-primary/50';
 
 // ─────────────────────────────────────────────────────────────
 // HELPERS
@@ -62,13 +65,113 @@ function formatMins(minutes) {
   return `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
 }
 
-function formatTimeAgo(isoStr) {
-  if (!isoStr) return '';
-  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+function historyDateBounds(filters) {
+  const now = new Date();
+  if (filters.date === 'today') {
+    const from = new Date(now); from.setHours(0, 0, 0, 0);
+    const to = new Date(from); to.setDate(to.getDate() + 1);
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
+  if (filters.date === '7d' || filters.date === '30d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - (filters.date === '7d' ? 7 : 30));
+    return { from: from.toISOString(), to: now.toISOString() };
+  }
+  if (filters.date === 'custom') {
+    const from = filters.fromDate ? new Date(`${filters.fromDate}T00:00:00`) : null;
+    const to = filters.toDate ? new Date(`${filters.toDate}T00:00:00`) : null;
+    if (to) to.setDate(to.getDate() + 1);
+    return { from: from?.toISOString() || null, to: to?.toISOString() || null };
+  }
+  return { from: null, to: null };
+}
+
+function getHistoryApiFilters(filters) {
+  return {
+    result: filters.result,
+    topic: filters.topic,
+    difficulty: filters.difficulty,
+    opponentId: filters.opponentId,
+    ...historyDateBounds(filters)
+  };
+}
+
+function HistoryScoreboardCard({ row, myUsername }) {
+  const myName = row.my_username || myUsername || 'You';
+  const oppName = row.opponent_username || 'Opponent';
+
+  // Do not display invalid self-battles
+  if (oppName.trim().toLowerCase() === myName.trim().toLowerCase()) {
+    return null;
+  }
+  const myWins = Number(row.my_wins) || 0;
+  const oppWins = Number(row.opponent_wins) || 0;
+  const draws = Number(row.draws) || 0;
+  const total = Number(row.completed_battles) || (myWins + oppWins + draws);
+
+  const isLeading = myWins > oppWins;
+  const isTrailing = myWins < oppWins;
+
+  const initials = (value) => (value || '?').slice(0, 1).toUpperCase();
+
+  return (
+    <div className="w-full rounded-2xl border border-surfaceHover/70 bg-[#16181d] p-3.5 shadow-sm">
+      {/* Row 1: sankalp (you )    v/s     user1 */}
+      <div className="flex items-center justify-between gap-3 mb-2.5">
+        {/* Left: sankalp (you) */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="w-7 h-7 rounded-full bg-primary/20 text-primary border border-primary/30 flex items-center justify-center text-xs font-bold shrink-0">
+            {initials(myName)}
+          </div>
+          <span className="truncate text-xs font-bold text-text-main">
+            {myName} <span className="text-[10px] font-semibold text-primary">(you)</span>
+          </span>
+        </div>
+
+        {/* Center: v/s */}
+        <div className="shrink-0 px-2.5 py-0.5 rounded-full bg-[#1e2128] border border-[#2d313a] text-[10px] font-extrabold uppercase tracking-wider text-text-muted">
+          v/s
+        </div>
+
+        {/* Right: user1 */}
+        <div className="flex items-center justify-end gap-2 min-w-0 flex-1 text-right">
+          <span className="truncate text-xs font-bold text-text-main">
+            {oppName}
+          </span>
+          <div className="w-7 h-7 rounded-full bg-[#272b34] text-text-muted border border-[#333844] flex items-center justify-center text-xs font-bold shrink-0">
+            {initials(oppName)}
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: score      5    :    3 */}
+      <div className="flex items-center justify-between pt-2.5 border-t border-[#22252b]">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+            score
+          </span>
+          <div className="flex items-center gap-1.5 font-mono">
+            <span className={`text-sm font-black ${isLeading ? 'text-emerald-400' : isTrailing ? 'text-text-muted' : 'text-text-main'}`}>
+              {myWins}
+            </span>
+            <span className="text-xs font-bold text-text-muted">:</span>
+            <span className={`text-sm font-black ${isTrailing ? 'text-red-400' : isLeading ? 'text-text-muted' : 'text-text-main'}`}>
+              {oppWins}
+            </span>
+          </div>
+          {draws > 0 && (
+            <span className="text-[9px] text-text-muted font-normal">
+              ({draws} {draws === 1 ? 'tie' : 'ties'})
+            </span>
+          )}
+        </div>
+
+        <div className="text-[10px] text-text-muted">
+          <span>{total} {total === 1 ? 'match' : 'matches'}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function useCountdown(targetIso) {
@@ -84,21 +187,6 @@ function useCountdown(targetIso) {
     return () => clearInterval(id);
   }, [targetIso]);
   return remaining;
-}
-
-function useElapsedTimer(startIso) {
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!startIso) return;
-    const tick = () => {
-      const secs = Math.max(0, Math.floor((Date.now() - new Date(startIso).getTime()) / 1000));
-      setElapsed(secs);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [startIso]);
-  return elapsed;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -135,42 +223,16 @@ function DifficultyBadge({ diff }) {
   );
 }
 
-function HistoryRow({ battle }) {
-  const { opponent, outcome, created_at, topics, difficulty } = battle;
-  const icon = outcome === 'win' ? '🏆' : outcome === 'loss' ? '💀' : '🤝';
-  const outcomeColor = {
-    win: 'text-amber-400',
-    loss: 'text-red-400',
-    draw: 'text-text-muted'
-  }[outcome] || 'text-text-muted';
-
-  return (
-    <div className="flex items-center gap-3 py-2 px-3 bg-surface/40 rounded-lg border border-surfaceHover/30 hover:border-surfaceHover/60 transition-all">
-      <span className="text-base">{icon}</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-semibold text-text-main truncate">vs {opponent}</p>
-        <p className="text-[10px] text-text-muted truncate">
-          {topics?.slice(0, 2).join(', ') || 'DSA Battle'}{difficulty ? ` · ${difficulty}` : ''}
-        </p>
-      </div>
-      <div className="flex flex-col items-end gap-0.5">
-        <span className={`text-[10px] font-bold uppercase ${outcomeColor}`}>{outcome}</span>
-        <span className="text-[9px] text-text-muted">{formatTimeAgo(created_at)}</span>
-      </div>
-    </div>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────
 // BATTLE CONFIG BUILDER (home screen)
 // ─────────────────────────────────────────────────────────────
 
-function BattleConfigBuilder({ friendsList, presenceMap, onlineFriendsServer, myUsername, onSendChallenge, loading, error }) {
+function BattleConfigBuilder({ friendsList, presenceMap, onlineFriendsServer, onSendChallenge, onClose, loading, error, initialOpponent = '' }) {
   const [selectedTopics, setSelectedTopics] = useState(['Arrays', 'Strings']);
   const [difficulty, setDifficulty] = useState('Medium');
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [problemCount, setProblemCount] = useState(5);
-  const [selectedFriend, setSelectedFriend] = useState('');
+  const [selectedFriend, setSelectedFriend] = useState(initialOpponent || '');
   const [step, setStep] = useState('topics'); // 'topics' | 'config' | 'confirm'
 
   const toggleTopic = (t) => {
@@ -211,6 +273,7 @@ function BattleConfigBuilder({ friendsList, presenceMap, onlineFriendsServer, my
     return (
       <div className="flex flex-col h-full px-4 pt-5 pb-4 overflow-y-auto scrollbar-hide">
         {/* Header */}
+        <button type="button" onClick={onClose} className="mb-3 self-start text-[10px] font-semibold text-text-muted hover:text-text-main">← Back to scoreboard</button>
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
             <Swords className="w-4.5 h-4.5 text-red-400" />
@@ -483,10 +546,28 @@ function BattleConfigBuilder({ friendsList, presenceMap, onlineFriendsServer, my
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 
-export default function BattleView({ myUsername, friends, returnTarget = null, onAuthSuccess = null, presenceMap: externalPresenceMap = null }) {
+export default function BattleView({
+  myUsername,
+  friends,
+  _returnTarget = null,
+  _onAuthSuccess = null,
+  onRequireAuth = null,
+  presenceMap: externalPresenceMap = null,
+  initialOpponent = null,
+  onClearInitialOpponent = null
+}) {
   const [battle, setBattle] = useState(null);
   const [battleState, setBattleState] = useState(null); // full v2 state: {problems, participants, results}
-  const [history, setHistory] = useState([]);
+  const [historyFilters, setHistoryFilters] = useState({ result: 'all', topic: 'all', difficulty: 'all', opponentId: 'all', date: 'all', fromDate: '', toDate: '' });
+  const [historyScoreboards, setHistoryScoreboards] = useState([]);
+  const [historyOpponentOptions, setHistoryOpponentOptions] = useState([]);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyTotalMatches, setHistoryTotalMatches] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false);
+  const [showCreateBattle, setShowCreateBattle] = useState(false);
+  const historyOffsetRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [friendsList, setFriendsList] = useState([]);
@@ -497,101 +578,61 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   const [actionLoading, setActionLoading] = useState(false);
   const [revealCountdown, setRevealCountdown] = useState(null);
 
-  // Auth form
-  const [authMode, setAuthMode] = useState('signin');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authUsername, setAuthUsername] = useState(myUsername || '');
-  const [authSubmitting, setAuthSubmitting] = useState(false);
-  const [authError, setAuthError] = useState('');
-  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
-  const [authCooldown, setAuthCooldown] = useState(0);
+  useEffect(() => {
+    if (initialOpponent) {
+      setShowCreateBattle(true);
+    }
+  }, [initialOpponent]);
 
   useEffect(() => {
-    if (!authUsername && myUsername) setAuthUsername(myUsername);
-  }, [myUsername]);
-
-  useEffect(() => {
+    let mounted = true;
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'GET_AUTH_STATE' }, (res) => {
-        if (res?.success) {
+        if (mounted && res?.state) {
           setAuthState(res.state);
-          if (res.cooldownSeconds > 0) setAuthCooldown(res.cooldownSeconds);
         }
       });
     }
+    return () => { mounted = false; };
   }, []);
-
-  useEffect(() => {
-    if (authCooldown <= 0) return;
-    const timer = setInterval(() => setAuthCooldown(prev => Math.max(0, prev - 1)), 1000);
-    return () => clearInterval(timer);
-  }, [authCooldown]);
-
-  const handleAuthSubmit = async (e) => {
-    e?.preventDefault();
-    if (authSubmitting) return;
-    setAuthError(''); setAuthSuccessMsg('');
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!authEmail.trim() || !emailRegex.test(authEmail.trim())) {
-      setAuthError('Please enter a valid email address.'); return;
-    }
-    if (!authPassword || authPassword.length < 6) {
-      setAuthError('Password must be at least 6 characters.'); return;
-    }
-    if (authCooldown > 0) {
-      setAuthError(`Rate limit active. Wait ${authCooldown}s.`); return;
-    }
-    if (authMode === 'signup' && !(authUsername || myUsername || '').trim()) {
-      setAuthError('Please enter your LeetCode username.'); return;
-    }
-
-    setAuthSubmitting(true);
-    const effectiveUsername = (authUsername || myUsername || '').trim();
-
-    try {
-      if (authMode === 'signin') {
-        const res = await new Promise(resolve =>
-          chrome.runtime.sendMessage({ type: 'SIGN_IN_EMAIL', email: authEmail.trim(), password: authPassword, username: effectiveUsername }, resolve)
-        );
-        if (res?.success) {
-          setAuthState('AUTHENTICATED');
-          setAuthPassword('');
-          if (onAuthSuccess) onAuthSuccess(returnTarget);
-        } else {
-          if (res?.isRateLimited) setAuthCooldown(60);
-          setAuthError(res?.error || 'Invalid email or password.');
-        }
-      } else {
-        const res = await new Promise(resolve =>
-          chrome.runtime.sendMessage({ type: 'SIGN_UP_EMAIL', email: authEmail.trim(), password: authPassword, username: effectiveUsername }, resolve)
-        );
-        if (res?.success) {
-          if (res.confirmationRequired) {
-            setAuthSuccessMsg('Account created! Check email to verify.');
-            setAuthMode('signin'); setAuthPassword('');
-          } else {
-            setAuthState('AUTHENTICATED'); setAuthPassword('');
-            if (onAuthSuccess) onAuthSuccess(returnTarget);
-          }
-        } else {
-          if (res?.isRateLimited) setAuthCooldown(60);
-          setAuthError(res?.error || 'Failed to create account.');
-        }
-      }
-    } catch (err) {
-      setAuthError(err.message || 'Network error.');
-    } finally {
-      setAuthSubmitting(false);
-    }
-  };
 
   // ─── Countdown hooks ─────────────────────────────────────
   const expiresIn = useCountdown(battle?.expires_at);
   const battleTimeLeft = useCountdown(battle?.end_at || battle?.match_deadline);
-  const timedOut = battleTimeLeft === 0 && battle?.status === 'in_progress';
-  const elapsedSeconds = useElapsedTimer(battle?.start_at || battle?.match_starts_at);
+
+  const loadHistoryScoreboard = useCallback(async (reset = false) => {
+    if (reset) historyOffsetRef.current = 0;
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'BATTLE_GET_HISTORY_SCOREBOARD',
+        filters: getHistoryApiFilters(historyFilters),
+        limit: HISTORY_PAGE_SIZE,
+        offset: historyOffsetRef.current
+      });
+      if (!response?.success) throw new Error(response?.error || 'Could not load battle history.');
+      const allRows = response.rows || [];
+      const myLower = (myUsername || '').trim().toLowerCase();
+      const rows = allRows.filter(r => {
+        const oppLower = (r.opponent_username || '').trim().toLowerCase();
+        const rowMyLower = (r.my_username || myLower).trim().toLowerCase();
+        return oppLower && oppLower !== rowMyLower && (!r.opponent_id || !r.my_id || r.opponent_id !== r.my_id);
+      });
+      setHistoryScoreboards(current => reset ? rows : [...current, ...rows]);
+      if (response.opponents) {
+        setHistoryOpponentOptions(response.opponents.filter(o => (o.opponent_username || '').trim().toLowerCase() !== myLower));
+      }
+      historyOffsetRef.current = reset ? allRows.length : historyOffsetRef.current + allRows.length;
+      setHistoryHasMore(!!response.has_more);
+      const filteredMatches = rows.reduce((sum, r) => sum + (Number(r.completed_battles) || 0), 0);
+      setHistoryTotalMatches(reset ? filteredMatches : (response.total_matches || filteredMatches));
+    } catch (err) {
+      setHistoryError(err.message || 'Could not load battle history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyFilters, myUsername]);
 
   // ─── Poll ref ────────────────────────────────────────────
   const pollRef = useRef(null);
@@ -607,10 +648,12 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   const opponent = battle ? (amChallenger ? challengedName : challengerName) : null;
 
   // Problems from v2 state or fall back to old schema
-  const problems = battleState?.problems || (battle ? [
-    battle.problem_1 ? { sequence_number: 1, problem_slug: battle.problem_1, problem_title: battle.problem_1_title || battle.problem_1, problem_url: `https://leetcode.com/problems/${battle.problem_1}/` } : null,
-    battle.problem_2 ? { sequence_number: 2, problem_slug: battle.problem_2, problem_title: battle.problem_2_title || battle.problem_2, problem_url: `https://leetcode.com/problems/${battle.problem_2}/` } : null,
-  ].filter(Boolean) : []);
+  const problems = useMemo(() => {
+    return battleState?.problems || (battle ? [
+      battle.problem_1 ? { sequence_number: 1, problem_slug: battle.problem_1, problem_title: battle.problem_1_title || battle.problem_1, problem_url: `https://leetcode.com/problems/${battle.problem_1}/` } : null,
+      battle.problem_2 ? { sequence_number: 2, problem_slug: battle.problem_2, problem_title: battle.problem_2_title || battle.problem_2, problem_url: `https://leetcode.com/problems/${battle.problem_2}/` } : null,
+    ].filter(Boolean) : []);
+  }, [battleState?.problems, battle]);
 
   const participants = battleState?.participants || [];
   const solveResults = battleState?.results || [];
@@ -642,7 +685,7 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
     try {
       let resp = null;
       try {
-        resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS', username: myUsername });
+        resp = await chrome.runtime.sendMessage({ type: 'BATTLE_GET_STATUS', username: myUsername, includeHistory: false });
       } catch (e) {
         console.warn('[BattleView] BATTLE_GET_STATUS error:', e);
       }
@@ -651,6 +694,17 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
       if (!currentBattle && (!resp || resp?.error?.includes('Unknown message type'))) {
         try {
           currentBattle = await getActiveBattle(myUsername);
+        } catch (e) {}
+      }
+
+      // If user was actively in a match that just finished, retrieve the finalized battle
+      const prevBattle = battleRef.current;
+      if (!currentBattle && prevBattle && ['in_progress', 'countdown', 'ready_check'].includes(prevBattle.status)) {
+        try {
+          const finished = await getBattle(prevBattle.id);
+          if (finished && ['completed', 'forfeited'].includes(finished.status)) {
+            currentBattle = finished;
+          }
         } catch (e) {}
       }
 
@@ -665,16 +719,22 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
 
         // Fetch full v2 state if we have a battle
         if (currentBattle.id) {
-          let stateResp = null;
-          try {
-            stateResp = await chrome.runtime.sendMessage({
-              type: 'BATTLE_GET_STATE_V2',
-              battleId: currentBattle.id
-            });
-          } catch (e) {}
+          let stateResp = resp?.state ? { success: true, state: resp.state } : null;
+          if (!stateResp) {
+            try {
+              stateResp = await chrome.runtime.sendMessage({
+                type: 'BATTLE_GET_STATE_V2',
+                battleId: currentBattle.id
+              });
+            } catch (e) {}
+          }
 
           if (stateResp?.success && stateResp.state) {
             setBattleState(stateResp.state);
+            if (stateResp.state.battle) {
+              currentBattle = stateResp.state.battle;
+              setBattle(currentBattle);
+            }
           } else {
             try {
               const directState = await getBattleStateV2(currentBattle.id);
@@ -686,7 +746,6 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
         setBattle(null);
         setBattleState(null);
       }
-      if (resp?.history) setHistory(resp.history);
     } catch (err) {
       console.error('[BattleView] Poll error:', err);
     } finally {
@@ -710,6 +769,10 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
     pollRef.current = setInterval(fetchBattleState, 5000);
     return () => clearInterval(pollRef.current);
   }, [fetchBattleState]);
+
+  useEffect(() => {
+    loadHistoryScoreboard(true);
+  }, [loadHistoryScoreboard]);
 
   // ─── Presence ────────────────────────────────────────────
   const fetchPresence = useCallback(async (isManual = false) => {
@@ -757,12 +820,38 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   }, [revealCountdown]);
 
   // ─── Auto-transition: countdown → in_progress ────────────
+  const hasRedirectedRef = useRef(false);
+
+  const redirectToProblem = useCallback(async (problemUrl) => {
+    const targetUrl = problemUrl || problems[0]?.problem_url || (problems[0]?.problem_slug ? `https://leetcode.com/problems/${problems[0].problem_slug}/` : null);
+    if (!targetUrl) return;
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        await chrome.runtime.sendMessage({
+          type: 'BATTLE_OPEN_PROBLEM',
+          url: targetUrl,
+          battleId: battle?.id
+        });
+      } else {
+        window.open(targetUrl, '_blank');
+      }
+    } catch {
+      window.open(targetUrl, '_blank');
+    }
+  }, [problems, battle?.id]);
+
   useEffect(() => {
     if (view === 'reveal' && revealCountdown === 0) {
-      // Transition will be detected by poll, but optimistically update
+      if (!hasRedirectedRef.current) {
+        hasRedirectedRef.current = true;
+        redirectToProblem();
+      }
       setTimeout(fetchBattleState, 500);
     }
-  }, [revealCountdown, view, fetchBattleState]);
+    if (view !== 'reveal' && view !== 'active') {
+      hasRedirectedRef.current = false;
+    }
+  }, [revealCountdown, view, fetchBattleState, redirectToProblem]);
 
   // ─── Actions ──────────────────────────────────────────────
   const sendChallenge = async ({ challenged, topics, difficulty, durationMinutes, problemCount }) => {
@@ -797,6 +886,7 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
       }
 
       if (resp?.success) {
+        setShowCreateBattle(false);
         setBattle(resp.battle);
         await fetchBattleState();
       } else {
@@ -874,9 +964,6 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
 
       if (resp?.success) {
         if (resp.battle) setBattle(resp.battle);
-        if (resp.bothReady) {
-          setBothReady(true);
-        }
         await fetchBattleState();
       } else if (resp?.error) {
         setError(resp.error);
@@ -928,7 +1015,9 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   };
 
   const startNewChallenge = () => {
-    setBattle(null); setBattleState(null); setError('');
+    setBattle(null);
+    setBattleState(null);
+    setError('');
     fetchBattleState();
   };
 
@@ -953,60 +1042,21 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   // ─── Auth gate ────────────────────────────────────────────
   if (authState !== 'AUTHENTICATED') {
     return (
-      <div className="flex flex-col items-center justify-center h-full px-6 py-4 text-center animate-fade-in overflow-y-auto scrollbar-hide">
-        <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-2.5">
+      <div className="flex flex-col items-center justify-center h-full px-6 py-4 text-center animate-fade-in">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-3">
           <Swords className="w-6 h-6 text-primary" />
         </div>
-        <h2 className="text-base font-bold text-text-main mb-1">1v1 Battle Arena</h2>
+        <h2 className="text-base font-bold text-text-main mb-1">Authentication Required</h2>
         <p className="text-xs text-text-muted leading-relaxed mb-4 max-w-xs">
-          Challenge friends, compete on shared problems, win glory.
+          Sign in to your cloud account to challenge friends, compete in real-time, and view battle scoreboards.
         </p>
-
-        <div className="flex w-full max-w-xs bg-surface/80 p-1 rounded-xl border border-surfaceHover/50 mb-3">
-          <button type="button" onClick={() => { setAuthMode('signin'); setAuthError(''); setAuthSuccessMsg(''); }}
-            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${authMode === 'signin' ? 'bg-primary text-inverted shadow-sm' : 'text-text-muted hover:text-text-main'}`}>
-            Sign In
-          </button>
-          <button type="button" onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccessMsg(''); }}
-            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${authMode === 'signup' ? 'bg-primary text-inverted shadow-sm' : 'text-text-muted hover:text-text-main'}`}>
-            Create Account
-          </button>
-        </div>
-
-        {authError && <div className="w-full max-w-xs p-2.5 bg-red-500/10 border border-red-500/25 rounded-xl text-xs text-red-400 mb-3 text-left">{authError}</div>}
-        {authSuccessMsg && <div className="w-full max-w-xs p-2.5 bg-green-500/10 border border-green-500/25 rounded-xl text-xs text-green-400 mb-3 text-left">{authSuccessMsg}</div>}
-        {authCooldown > 0 && <div className="w-full max-w-xs p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400 mb-3 text-center">Rate limited. Wait {authCooldown}s</div>}
-
-        <form onSubmit={handleAuthSubmit} className="w-full max-w-xs space-y-2.5 text-left">
-          {authMode === 'signup' && (
-            <div>
-              <label className="block text-[11px] font-semibold text-text-muted mb-1">LeetCode Username</label>
-              <input type="text" placeholder="e.g. tour_de_code" value={authUsername}
-                onChange={e => setAuthUsername(e.target.value)} disabled={authSubmitting} required
-                className="w-full px-3 py-2 bg-surface/80 border border-surfaceHover/60 rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all" />
-            </div>
-          )}
-          <div>
-            <label className="block text-[11px] font-semibold text-text-muted mb-1">Email</label>
-            <input type="email" placeholder="name@example.com" value={authEmail}
-              onChange={e => setAuthEmail(e.target.value)} disabled={authSubmitting} required
-              className="w-full px-3 py-2 bg-surface/80 border border-surfaceHover/60 rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all" />
-          </div>
-          <div>
-            <label className="block text-[11px] font-semibold text-text-muted mb-1">Password</label>
-            <input type="password" placeholder={authMode === 'signup' ? 'Min 6 characters' : 'Your password'} value={authPassword}
-              onChange={e => setAuthPassword(e.target.value)} disabled={authSubmitting} required
-              className="w-full px-3 py-2 bg-surface/80 border border-surfaceHover/60 rounded-xl text-xs text-text-main placeholder-text-muted/40 focus:outline-none focus:border-primary transition-all" />
-          </div>
-          <button type="submit" disabled={authSubmitting || authCooldown > 0}
-            className="w-full py-2.5 bg-primary hover:bg-primaryHover text-inverted text-xs font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 active:scale-95 mt-1">
-            {authSubmitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing…</> : authMode === 'signup' ? 'Create Account' : 'Sign In to Battle'}
-          </button>
-        </form>
-
-        <p className="mt-3.5 text-[11px] text-text-muted max-w-xs text-center leading-relaxed">
-          Streaks & progress are <span className="text-text-main font-semibold">100% offline</span>. Auth only needed for battles.
-        </p>
+        <button
+          type="button"
+          onClick={() => onRequireAuth?.('battle')}
+          className="px-5 py-2.5 bg-primary hover:bg-primaryHover text-inverted text-xs font-bold rounded-xl transition-all shadow-sm active:scale-95"
+        >
+          Sign In / Connect Account
+        </button>
       </div>
     );
   }
@@ -1026,10 +1076,30 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
   // HOME
   // ─────────────────────────────────────────────────────────
   if (view === 'home') {
+    if (showCreateBattle) {
+      return (
+        <div className="h-full overflow-hidden">
+          <BattleConfigBuilder
+            friendsList={friendsList}
+            presenceMap={presenceMap}
+            onlineFriendsServer={onlineFriendsServer}
+            onSendChallenge={sendChallenge}
+            onClose={() => {
+              setShowCreateBattle(false);
+              onClearInitialOpponent?.();
+            }}
+            loading={actionLoading}
+            error={error}
+            initialOpponent={initialOpponent}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col h-full overflow-y-auto scrollbar-hide">
-        {/* Presence refresh strip */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-surfaceHover/20">
+        <div className="px-4 pt-3 pb-2">
+          <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold text-text-main">Battle Arena</span>
             <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-bold ${
@@ -1049,30 +1119,70 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
             <RefreshCw className={`w-3 h-3 ${presenceRefreshing ? 'animate-spin text-primary' : ''}`} />
             {presenceRefreshing ? 'Syncing…' : 'Sync'}
           </button>
-        </div>
-
-        {/* Config builder (multi-step) */}
-        <div className="flex-1 overflow-hidden">
-          <BattleConfigBuilder
-            friendsList={friendsList}
-            presenceMap={presenceMap}
-            onlineFriendsServer={onlineFriendsServer}
-            myUsername={myUsername}
-            onSendChallenge={sendChallenge}
-            loading={actionLoading}
-            error={error}
-          />
-        </div>
-
-        {/* History */}
-        {history.length > 0 && (
-          <div className="border-t border-surfaceHover/20 px-4 py-3">
-            <p className="text-[9px] text-text-muted uppercase tracking-wider font-semibold mb-2">Recent Battles</p>
-            <div className="space-y-1.5">
-              {history.slice(0, 5).map(b => <HistoryRow key={b.id} battle={b} />)}
-            </div>
           </div>
-        )}
+          <button type="button" onClick={() => { setError(''); setShowCreateBattle(true); }}
+            className="w-full rounded-xl bg-red-600 hover:bg-red-700 px-3 py-2.5 text-xs font-bold text-white transition-colors flex items-center justify-center gap-2">
+            <Swords className="w-4 h-4" /> Create Battle
+          </button>
+          <button type="button" onClick={() => setHistoryFiltersOpen(open => !open)} aria-expanded={historyFiltersOpen}
+            className="mt-2 flex w-full items-center justify-between rounded-lg border border-surfaceHover/50 bg-surface/40 px-3 py-2 text-[10px] font-semibold text-text-muted hover:text-text-main">
+            <span className="flex items-center gap-2"><Filter className="w-3.5 h-3.5" /> Filters</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${historyFiltersOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {historyFiltersOpen && (
+            <div className="mt-2">
+              <div className="grid grid-cols-2 gap-1.5">
+                <select aria-label="Filter by result" value={historyFilters.result} onChange={e => setHistoryFilters(f => ({ ...f, result: e.target.value }))} className={HISTORY_FILTER_CLASS}>
+                  <option value="all">All results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="draw">Draws</option>
+                </select>
+                <select aria-label="Filter by topic" value={historyFilters.topic} onChange={e => setHistoryFilters(f => ({ ...f, topic: e.target.value }))} className={HISTORY_FILTER_CLASS}>
+                  <option value="all">All topics</option>{DSA_TOPICS.map(topic => <option key={topic} value={topic}>{topic}</option>)}<option value="__other__">Other topics</option>
+                </select>
+                <select aria-label="Filter by difficulty" value={historyFilters.difficulty} onChange={e => setHistoryFilters(f => ({ ...f, difficulty: e.target.value }))} className={HISTORY_FILTER_CLASS}>
+                  <option value="all">All difficulties</option><option value="Easy">Easy</option><option value="Medium">Medium</option><option value="Hard">Hard</option>
+                </select>
+                <select aria-label="Filter by opponent" value={historyFilters.opponentId} onChange={e => setHistoryFilters(f => ({ ...f, opponentId: e.target.value }))} className={HISTORY_FILTER_CLASS}>
+                  <option value="all">All opponents</option>{historyOpponentOptions.map(row => <option key={row.opponent_id} value={row.opponent_id}>{row.opponent_username}</option>)}
+                </select>
+                <select aria-label="Filter by date" value={historyFilters.date} onChange={e => setHistoryFilters(f => ({ ...f, date: e.target.value }))} className={`${HISTORY_FILTER_CLASS} col-span-2`}>
+                  <option value="all">All time</option><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="custom">Custom range</option>
+                </select>
+                {historyFilters.date === 'custom' && <>
+                  <input aria-label="Start date" type="date" value={historyFilters.fromDate} onChange={e => setHistoryFilters(f => ({ ...f, fromDate: e.target.value }))} className={HISTORY_FILTER_CLASS} />
+                  <input aria-label="End date" type="date" value={historyFilters.toDate} onChange={e => setHistoryFilters(f => ({ ...f, toDate: e.target.value }))} className={HISTORY_FILTER_CLASS} />
+                </>}
+              </div>
+              {Object.entries(historyFilters).some(([key, value]) => value && value !== 'all' && key !== 'fromDate' && key !== 'toDate') || historyFilters.fromDate || historyFilters.toDate ? (
+                <button type="button" onClick={() => setHistoryFilters({ result: 'all', topic: 'all', difficulty: 'all', opponentId: 'all', date: 'all', fromDate: '', toDate: '' })}
+                  className="mt-2 text-[9px] font-semibold text-primary hover:text-text-main">Clear filters</button>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        <section className="px-4 pb-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-[11px] font-bold text-text-main">Head-to-head scoreboard</h3>
+              <p className="text-[9px] text-text-muted">{historyTotalMatches} matching completed battles</p>
+            </div>
+            <button type="button" onClick={() => loadHistoryScoreboard(true)} disabled={historyLoading}
+              className="rounded-md border border-surfaceHover px-2 py-1 text-[9px] text-text-muted hover:text-text-main disabled:opacity-50">Refresh</button>
+          </div>
+
+          {historyError && <p className="rounded-lg border border-red-500/20 bg-red-500/5 p-2 text-[9px] text-red-300">{historyError}</p>}
+          {!historyError && !historyLoading && historyScoreboards.length === 0 && (
+            <p className="rounded-lg border border-surfaceHover/40 bg-surface/30 p-4 text-center text-[10px] text-text-muted">No battles match these filters.</p>
+          )}
+          <div className="space-y-2">
+            {historyScoreboards.map(row => (
+              <HistoryScoreboardCard key={row.opponent_id} row={row} myUsername={myUsername} />
+            ))}
+          </div>
+          {historyHasMore && <button type="button" onClick={() => loadHistoryScoreboard(false)} disabled={historyLoading}
+            className="mt-3 w-full rounded-lg border border-surfaceHover/50 py-2 text-[10px] font-semibold text-text-muted hover:border-primary/40 hover:text-text-main disabled:opacity-50">{historyLoading ? 'Loading…' : 'Load more opponents'}</button>}
+          {historyLoading && historyScoreboards.length === 0 && <p className="py-3 text-center text-[10px] text-text-muted">Loading scoreboard…</p>}
+        </section>
       </div>
     );
   }
@@ -1317,6 +1427,18 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
           </div>
         </div>
 
+        {/* Quick jump to current active problem */}
+        <button
+          onClick={() => {
+            const unsolved = problems.find(p => !solveResults.some(r => r.username?.toLowerCase() === myUsername?.toLowerCase() && r.problem_slug === p.problem_slug)) || problems[0];
+            if (unsolved) redirectToProblem(unsolved.problem_url);
+          }}
+          className="w-full py-2.5 px-3 mb-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          Solve Current Problem on LeetCode
+        </button>
+
         {/* Score bar */}
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div className="bg-surface border border-surfaceHover rounded-xl p-2.5 text-center">
@@ -1382,41 +1504,16 @@ export default function BattleView({ myUsername, friends, returnTarget = null, o
     const winner = battle?.winner_username;
     const iWon = winner && winner !== 'draw' && winner.toLowerCase() === myUsername?.toLowerCase();
     const isDraw = winner === 'draw' || !winner;
-    const winReason = battle?.win_reason;
-
     return (
       <div className="flex flex-col items-center justify-center h-full px-6 text-center overflow-y-auto scrollbar-hide py-6">
-        <div className="text-5xl mb-3">
-          {iWon ? '🏆' : isDraw ? '🤝' : '💀'}
-        </div>
-        <h2 className={`text-base font-bold mb-1 ${iWon ? 'text-amber-400' : isDraw ? 'text-text-main' : 'text-red-400'}`}>
-          {iWon ? 'Victory!' : isDraw ? 'Draw!' : 'Defeated'}
+        <div className="text-4xl mb-3">{iWon ? '🏆' : isDraw ? '🤝' : '⚔️'}</div>
+        <h2 className={`text-sm font-bold uppercase tracking-wider mb-5 ${iWon ? 'text-amber-400' : isDraw ? 'text-text-main' : 'text-red-400'}`}>
+          {iWon ? 'Victory' : isDraw ? 'Draw' : 'Battle complete'}
         </h2>
-        <p className="text-xs text-text-muted mb-4">
-          {iWon ? `You beat ${opponent}` : isDraw ? `Even match against ${opponent}` : `${winner} won this one`}
-          {winReason === 'tiebreaker_time' ? ' (by time)' : ''}
-          {winReason === 'forfeit' ? ' (forfeit)' : ''}
-        </p>
-
-        {/* Score */}
-        <div className="grid grid-cols-2 gap-3 w-full max-w-xs mb-5">
-          <div className={`p-3 rounded-xl border text-center ${iWon ? 'border-amber-500/30 bg-amber-500/5' : 'border-surfaceHover'}`}>
-            <span className="text-[10px] text-text-muted block mb-1">You</span>
-            <span className="text-2xl font-bold font-mono text-text-main">{mySolvedCount}</span>
-            <span className="text-[9px] text-text-muted block">problems solved</span>
-          </div>
-          <div className={`p-3 rounded-xl border text-center ${!iWon && !isDraw ? 'border-amber-500/30 bg-amber-500/5' : 'border-surfaceHover'}`}>
-            <span className="text-[10px] text-text-muted block mb-1 truncate">{opponent}</span>
-            <span className="text-2xl font-bold font-mono text-text-main">{oppSolvedCount}</span>
-            <span className="text-[9px] text-text-muted block">problems solved</span>
-          </div>
-        </div>
-
-        {/* Topics fought over */}
-        <div className="flex flex-wrap gap-1 justify-center mb-5">
-          {(battle?.topics || []).slice(0,5).map(t => (
-            <span key={t} className="px-1.5 py-0.5 bg-surface border border-surfaceHover rounded text-text-muted text-[9px]">{t}</span>
-          ))}
+        <div className="w-full max-w-xs flex items-center justify-center gap-4 rounded-xl border border-surfaceHover bg-surface/60 px-4 py-5 mb-6">
+          <span className="text-[10px] font-bold tracking-wider text-text-main">YOU</span>
+          <span className="text-2xl font-bold font-mono text-text-main">{mySolvedCount}:{oppSolvedCount}</span>
+          <span className="max-w-24 truncate text-[10px] font-bold tracking-wider text-text-main">{opponent?.toUpperCase()}</span>
         </div>
 
         <button

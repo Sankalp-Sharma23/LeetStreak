@@ -204,6 +204,15 @@ export function hasSolvedToday(allAcceptedSubmissions, submissionCalendar = null
 }
 
 /**
+ * Return whether accepted submissions confirm a solve today, or null when
+ * the accepted-submissions query failed and the result is unknown.
+ */
+export function getConfirmedAcceptedSolveToday(profile, timezone = null) {
+  if (profile?.acceptedSubmissionsAvailable !== true) return null;
+  return hasSolvedToday(profile.allAcceptedSubmissions || [], null, timezone);
+}
+
+/**
  * Extract canonical unique solved problem counts from submitStats.acSubmissionNum.
  * @param {Array} acSubmissionNum - Array of { difficulty, count }
  * @returns {{ easy: number, medium: number, hard: number, total: number }}

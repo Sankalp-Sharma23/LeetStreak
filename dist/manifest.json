@@ -46,7 +46,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*", "blocked.html", "assets/*"],
+      "resources": ["icons/*", "blocked.html", "assets/*", "eno/*"],
       "matches": ["<all_urls>"]
     }
   ]

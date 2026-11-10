@@ -1,0 +1,4 @@
+project_id = "leetstreak"
+
+[functions.record-battle-solve]
+verify_jwt = true

@@ -1,3 +1,11 @@
+import {
+  isAcceptedVerdict,
+  isFailedVerdict,
+  isFreshAcceptedResult,
+  parseLeetCodePerformance
+} from '../shared/battle-submission.js';
+import { maybeShowEnoReminder } from './eno-reminder.js';
+
 /**
  * LeetCode Page Content Script — LeetStreak Battle HUD
  *
@@ -23,11 +31,22 @@
   let myResults         = [];    // my accepted solves
   let oppResults        = [];    // opponent's accepted solves
   let myUsername        = null;
-  let battleAttemptCount = 0;
   let hudInjected       = false;
   let hudTimer          = null;
   let submissionObserving = false;
   let redirectPending   = false; // prevent double-redirect
+  let sidebarCollapsed  = null;
+  let sidebarTimer      = null;
+  let pendingSubmission = null;
+  let pendingSubmissionObserver = null;
+  let pendingSubmissionTimeout = null;
+  let pendingSubmissionPoll = null;
+  const reportedSubmissionIds = new Set();
+  let pendingBattleSolves = [];
+  let pendingBattleSolvesLoaded = false;
+  let flushingBattleSolves = false;
+  let battleStatusCheckInFlight = false;
+  let battleStatusPollTimeout = null;
 
   // ─────────────────────────────────────────────────────────
   // HELPERS
@@ -40,6 +59,26 @@
 
   function getCurrentSlug() {
     return window.location.pathname.split('/problems/')[1]?.split('/')[0] || null;
+  }
+
+  function redirectToNextUnsolvedBattleProblem() {
+    if (activeBattle?.status !== 'in_progress' || !battleProblems.length) return false;
+    // Never interrupt an active in-flight submission attempt
+    if (pendingSubmission) return false;
+
+    const currentSlug = getCurrentSlug();
+    const currentIsUnsolvedBattleProblem = battleProblems.some(problem =>
+      problem.problem_slug === currentSlug && !myResults.some(result => result.problem_slug === currentSlug)
+    );
+    if (currentIsUnsolvedBattleProblem) return false;
+
+    const nextProblem = battleProblems.find(problem =>
+      !myResults.some(result => result.problem_slug === problem.problem_slug)
+    );
+    if (!nextProblem || redirectPending) return false;
+    redirectPending = true;
+    window.location.href = nextProblem.problem_url || `https://leetcode.com/problems/${nextProblem.problem_slug}/`;
+    return true;
   }
 
   function normalizeLanguage(language) {
@@ -122,25 +161,8 @@
   }
 
   function extractPerformanceStats() {
-    const stats = { runtime: null, runtimePercentile: null, memory: null, memoryPercentile: null };
-    try {
-      const resultArea = document.querySelector('[data-e2e-locator="submission-result"], [class*="result"]');
-      if (resultArea) {
-        const text = resultArea.textContent;
-        const runtimeMatch = text.match(/(?:Runtime[:\s]*)?(\\d+)\\s*ms/i);
-        if (runtimeMatch) stats.runtime = parseInt(runtimeMatch[1]);
-        const allBeats = [...text.matchAll(/(?:Beats|less than)[\\s]+([\d.]+)[\\s]*%/gi)].map(m => parseFloat(m[1]));
-        if (allBeats.length >= 2) {
-          stats.runtimePercentile = allBeats[0];
-          stats.memoryPercentile = allBeats[1];
-        } else if (allBeats.length === 1) {
-          stats.runtimePercentile = allBeats[0];
-        }
-        const memMatch = text.match(/(?:Memory[:\s]*)?([\d.]+)\s*MB/i);
-        if (memMatch) stats.memory = parseFloat(memMatch[1]);
-      }
-    } catch {}
-    return stats;
+    const { runtimeMs, memoryMb } = parseLeetCodePerformance(getSubmissionResultText());
+    return { runtime: runtimeMs, memory: memoryMb };
   }
 
   // ─────────────────────────────────────────────────────────
@@ -148,36 +170,304 @@
   // ─────────────────────────────────────────────────────────
 
   function isSubmissionAccepted() {
-    const checks = [
-      () => {
-        const r = document.querySelector('[data-e2e-locator="submission-result"]');
-        return r && r.textContent.includes('Accepted');
-      },
-      () => {
-        const g = document.querySelector('.text-green-500, .text-green-600, [class*="text-green"]');
-        return g && g.textContent.includes('Accepted');
-      },
-      () => {
-        for (const el of document.querySelectorAll('[class*="success"]')) {
-          if (el.textContent.includes('Accepted')) return true;
-        }
-        return false;
-      },
-      () => {
-        for (const div of document.querySelectorAll('div')) {
-          if (div.textContent.trim() === 'Accepted' && div.className?.includes?.('text')) return true;
-        }
-        return false;
-      }
-    ];
-    return checks.some(fn => { try { return fn(); } catch { return false; } });
+    return isAcceptedVerdict(getSubmissionResultText());
   }
 
   function isSubmissionFailed() {
-    const failKeywords = ['Wrong Answer', 'Time Limit Exceeded', 'Runtime Error', 'Compile Error', 'Memory Limit'];
-    const result = document.querySelector('[data-e2e-locator="submission-result"]');
-    if (!result) return false;
-    return failKeywords.some(k => result.textContent.includes(k));
+    return isFailedVerdict(getSubmissionResultText());
+  }
+
+  function getLatestSubmissionId() {
+    // 1. Check detail links: /submissions/detail/123456/
+    const subLink = document.querySelector('a[href*="/submissions/detail/"]');
+    const fromDetail = subLink?.href?.match(/detail\/(?:[^/]+\/)?(\d+)/)?.[1];
+    if (fromDetail) return fromDetail;
+
+    // 2. Check problem submission links: /problems/<slug>/submissions/123456/
+    const probSubLinks = document.querySelectorAll('a[href*="/submissions/"]');
+    for (const a of probSubLinks) {
+      const match = a.href?.match(/\/submissions\/(?:detail\/)?(\d+)/);
+      if (match?.[1]) return match[1];
+    }
+
+    // 3. Check window.location pathname: /problems/<slug>/submissions/123456/
+    const fromLocation = window.location.pathname.match(/\/submissions\/(\d+)/)?.[1];
+    if (fromLocation) return fromLocation;
+
+    // 4. Check data-submission-id attributes
+    const dataEl = document.querySelector('[data-submission-id]');
+    if (dataEl?.getAttribute('data-submission-id')) {
+      return dataEl.getAttribute('data-submission-id');
+    }
+
+    return null;
+  }
+
+  function isExcludedFromVerdict(element) {
+    if (!element || !(element instanceof Element)) return true;
+    return !!element.closest('#ls-battle-sidebar, #ls-battle-hud, #ls-battle-toast, [data-track-load="description_content"], [class*="description"], [class*="question-content"], nav, aside, header');
+  }
+
+  function getSubmissionResultText() {
+    // Collect elements specifically from console and submission result regions
+    const selectors = [
+      '[data-e2e-locator="submission-result"]',
+      '[data-e2e-locator="console-result"]',
+      'div[class*="submission-result"]',
+      'div[class*="result-state"]',
+      'div[class*="result-container"]',
+      'div[data-layout-path] [class*="result"]',
+      '[role="tabpanel"] [class*="text-green"], [role="tabpanel"] [class*="text-red"], [role="tabpanel"] [class*="text-yellow"]',
+      '[role="status"], [aria-live="polite"], [aria-live="assertive"]'
+    ];
+
+    const candidates = [];
+    for (const sel of selectors) {
+      try {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+          if (!isExcludedFromVerdict(el)) candidates.push(el);
+        }
+      } catch {}
+    }
+
+    // Fallback if no specific container found: scoped colored text nodes that are NOT in the description/sidebar
+    if (!candidates.length) {
+      const allColored = document.querySelectorAll('[class*="text-green"], [class*="text-red"], [class*="text-yellow"]');
+      for (const el of allColored) {
+        if (!isExcludedFromVerdict(el)) candidates.push(el);
+      }
+    }
+
+    // 1. Check for FAILED verdicts FIRST to prevent Wrong Answer being treated as Accepted
+    for (const element of candidates) {
+      const text = element.textContent?.trim().replace(/\s+/g, ' ');
+      if (text && isFailedVerdict(text)) return text;
+    }
+
+    // 2. Only if no failure verdict found, check for ACCEPTED verdict
+    for (const element of candidates) {
+      const text = element.textContent?.trim().replace(/\s+/g, ' ');
+      if (text && isAcceptedVerdict(text)) return text;
+    }
+
+    return '';
+  }
+
+  function getVisitedProblems() {
+    // ponytail: visit markers stay per browser; use participant state if cross-device progress must sync.
+    try {
+      const value = JSON.parse(localStorage.getItem(`ls_battle_visited_${activeBattle?.id}`) || '[]');
+      return new Set(Array.isArray(value) ? value : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function rememberCurrentProblem() {
+    const slug = getCurrentSlug();
+    if (!slug || !battleProblems.some(problem => problem.problem_slug === slug)) return;
+    try {
+      const visited = getVisitedProblems();
+      visited.add(slug);
+      localStorage.setItem(`ls_battle_visited_${activeBattle.id}`, JSON.stringify([...visited]));
+    } catch {}
+  }
+
+  function formatBattleTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return [h, m, s].map(value => String(value).padStart(2, '0')).join(':');
+  }
+
+  function updateBattleSidebarTimer() {
+    const timer = document.getElementById('ls-battle-sidebar-timer');
+    if (!timer) return;
+
+    if (activeBattle?.status === 'countdown') {
+      const startsAt = activeBattle?.start_at || activeBattle?.match_starts_at;
+      const remaining = startsAt ? Math.max(0, Math.floor((new Date(startsAt).getTime() - Date.now()) / 1000)) : 0;
+      timer.textContent = `STARTS ${remaining}s`;
+      timer.style.color = '#f59e0b';
+      if (remaining <= 0) {
+        activeBattle.status = 'in_progress';
+        renderBattleSidebar();
+      }
+      return;
+    }
+
+    const endAt = getHudEndAt();
+    if (!endAt) {
+      timer.textContent = '--:--:--';
+      return;
+    }
+    const remaining = Math.max(0, Math.floor((new Date(endAt).getTime() - Date.now()) / 1000));
+    timer.textContent = formatBattleTime(remaining);
+    timer.style.color = remaining < 300 ? '#f87171' : '#a1a1aa';
+  }
+
+  function renderBattleSidebar() {
+    if (!activeBattle || !['in_progress', 'countdown'].includes(activeBattle.status) || !isProblemPage() || !battleProblems.length) {
+      removeBattleSidebar();
+      return;
+    }
+
+    rememberCurrentProblem();
+    let sidebar = document.getElementById('ls-battle-sidebar');
+    // LeetCode uses client-side navigation and periodically replaces page
+    // containers. Reattach the existing sidebar when its host node disappears.
+    if (sidebar && !sidebar.isConnected) sidebar = null;
+    if (!sidebar) {
+      if (sidebarCollapsed == null) {
+        try {
+          const saved = localStorage.getItem('ls_battle_sidebar_collapsed');
+          sidebarCollapsed = saved !== null ? saved === 'true' : false;
+        } catch {
+          sidebarCollapsed = false;
+        }
+        try {
+          if (window.innerWidth < 900 && localStorage.getItem('ls_battle_sidebar_collapsed') == null) {
+            sidebarCollapsed = true;
+          }
+        } catch {}
+      }
+
+      if (!document.getElementById('ls-battle-sidebar-style')) {
+        const style = document.createElement('style');
+        style.id = 'ls-battle-sidebar-style';
+        style.textContent = `
+          #ls-battle-sidebar{position:fixed!important;z-index:2147483640!important;top:56px!important;right:12px!important;bottom:16px!important;width:286px;display:flex;flex-direction:column;overflow:hidden;background:#111318!important;border:1px solid #30343d!important;border-radius:14px!important;color:#e5e7eb!important;box-shadow:0 12px 36px rgba(0,0,0,0.7)!important;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;transition:width .18s ease;pointer-events:auto!important}
+          #ls-battle-sidebar *{box-sizing:border-box}
+          #ls-battle-sidebar .ls-bs-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px;border-bottom:1px solid #292d35;background:#15181e}
+          #ls-battle-sidebar .ls-bs-title{font-weight:750;letter-spacing:.04em;color:#f3f4f6;font-size:11px}
+          #ls-battle-sidebar .ls-bs-timer{font:700 12px ui-monospace,SFMono-Regular,monospace;color:#a1a1aa}
+          #ls-battle-sidebar .ls-bs-toggle{flex:none;border:1px solid #3b414c;border-radius:7px;background:#1b1f27;color:#d1d5db;padding:5px 8px;cursor:pointer;font-size:11px}
+          #ls-battle-sidebar .ls-bs-list{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px;flex:1}
+          #ls-battle-sidebar .ls-bs-item{display:block;padding:10px;border:1px solid #2b3039;border-radius:10px;background:#171a20;color:inherit;text-decoration:none;transition:border-color .12s,background .12s}
+          #ls-battle-sidebar .ls-bs-item:hover{border-color:#636b79;background:#1d222b}
+          #ls-battle-sidebar .ls-bs-item.current{border-color:#ef4444!important;background:#291719!important;box-shadow:inset 3px 0 #ef4444!important}
+          #ls-battle-sidebar .ls-bs-top{display:flex;align-items:center;gap:7px;min-width:0}
+          #ls-battle-sidebar .ls-bs-number{color:#9ca3af;font:700 10px ui-monospace,monospace;white-space:nowrap}
+          #ls-battle-sidebar .ls-bs-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
+          #ls-battle-sidebar .ls-bs-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:7px;color:#9ca3af;font-size:10px}
+          #ls-battle-sidebar .ls-bs-state{font-weight:700;color:#d1d5db}
+          #ls-battle-sidebar .ls-bs-state.solved{color:#4ade80}
+          #ls-battle-sidebar .ls-bs-state.progress{color:#fbbf24}
+          #ls-battle-sidebar .ls-bs-current{color:#f87171;font-size:9px;font-weight:800;letter-spacing:.06em}
+          #ls-battle-sidebar .ls-bs-opp{display:block;margin-top:4px;color:#fbbf24;font-size:9px}
+          #ls-battle-sidebar.collapsed{width:auto!important;bottom:auto!important;background:#18181b!important;border:1.5px solid #ef4444!important;border-radius:20px!important;padding:4px 8px!important;box-shadow:0 6px 20px rgba(239,68,68,0.3)!important}
+          #ls-battle-sidebar.collapsed .ls-bs-title,#ls-battle-sidebar.collapsed .ls-bs-timer,#ls-battle-sidebar.collapsed .ls-bs-list{display:none!important}
+          #ls-battle-sidebar.collapsed .ls-bs-head{justify-content:center;padding:0!important;border:0!important;background:transparent!important}
+          #ls-battle-sidebar.collapsed .ls-bs-toggle{width:auto!important;border:none!important;background:transparent!important;color:#f87171!important;font-weight:bold!important;font-size:11px!important;padding:4px 6px!important}
+          @media(min-width:1150px){html.ls-battle-sidebar-open body{margin-right:310px!important}}
+          @media(max-width:700px){#ls-battle-sidebar{right:6px!important;bottom:6px!important;top:56px!important;width:min(286px,84vw)!important}}
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+
+      sidebar = document.createElement('aside');
+      sidebar.id = 'ls-battle-sidebar';
+      (document.body || document.documentElement).appendChild(sidebar);
+      if (sidebarTimer) clearInterval(sidebarTimer);
+      sidebarTimer = setInterval(updateBattleSidebarTimer, 1000);
+    }
+
+    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    document.documentElement.classList.toggle('ls-battle-sidebar-open', !sidebarCollapsed);
+    sidebar.replaceChildren();
+
+    const head = document.createElement('div');
+    head.className = 'ls-bs-head';
+    const title = document.createElement('span');
+    title.className = 'ls-bs-title';
+    title.textContent = activeBattle.status === 'countdown' ? '⚔ STARTING SOON' : '⚔ BATTLE PROBLEMS';
+    const timer = document.createElement('span');
+    timer.className = 'ls-bs-timer';
+    timer.id = 'ls-battle-sidebar-timer';
+    const toggle = document.createElement('button');
+    toggle.className = 'ls-bs-toggle';
+    toggle.type = 'button';
+    toggle.textContent = sidebarCollapsed ? '⚔️ Battle Problems ‹' : '›';
+    toggle.setAttribute('aria-label', sidebarCollapsed ? 'Expand battle problem list' : 'Collapse battle problem list');
+    toggle.addEventListener('click', () => {
+      sidebarCollapsed = !sidebarCollapsed;
+      try { localStorage.setItem('ls_battle_sidebar_collapsed', String(sidebarCollapsed)); } catch {}
+      renderBattleSidebar();
+    });
+    head.append(title, timer, toggle);
+    sidebar.appendChild(head);
+
+    const list = document.createElement('nav');
+    list.className = 'ls-bs-list';
+    list.setAttribute('aria-label', 'Battle problems');
+    const currentSlug = getCurrentSlug();
+    const visited = getVisitedProblems();
+    const opponentName = activeBattle.challenger_username?.toLowerCase() === myUsername?.toLowerCase()
+      ? activeBattle.challenged_username : activeBattle.challenger_username;
+
+    for (const problem of battleProblems) {
+      const slug = problem.problem_slug;
+      const mySolve = myResults.find(result => result.problem_slug === slug);
+      const opponentSolve = oppResults.find(result => result.problem_slug === slug);
+      const mine = !!mySolve;
+      const opponentSolved = !!opponentSolve;
+      const isCurrent = slug === currentSlug;
+      const status = mine || opponentSolved ? 'Solved' : visited.has(slug) ? 'In Progress' : 'Not Started';
+      const item = document.createElement('a');
+      item.className = `ls-bs-item${isCurrent ? ' current' : ''}`;
+      item.href = `https://leetcode.com/problems/${encodeURIComponent(slug)}/`;
+      item.setAttribute('aria-current', isCurrent ? 'page' : 'false');
+
+      const top = document.createElement('div');
+      top.className = 'ls-bs-top';
+      const number = document.createElement('span');
+      number.className = 'ls-bs-number';
+      number.textContent = `#${problem.sequence_number}`;
+      const name = document.createElement('span');
+      name.className = 'ls-bs-name';
+      name.textContent = problem.problem_title || slug;
+      top.append(number, name);
+
+      const meta = document.createElement('div');
+      meta.className = 'ls-bs-meta';
+      const difficulty = document.createElement('span');
+      difficulty.textContent = problem.difficulty || 'Medium';
+      const state = document.createElement('span');
+      state.className = `ls-bs-state${mine || opponentSolved ? ' solved' : visited.has(slug) ? ' progress' : ''}`;
+      state.textContent = status;
+      meta.append(difficulty, state);
+      if (isCurrent) {
+        const current = document.createElement('span');
+        current.className = 'ls-bs-current';
+        current.textContent = 'CURRENT';
+        meta.appendChild(current);
+      }
+      item.append(top, meta);
+
+      if (mine || opponentSolved) {
+        const solvedBy = document.createElement('span');
+        solvedBy.className = 'ls-bs-opp';
+        solvedBy.textContent = mine && opponentSolved ? 'You and opponent solved' : mine ? 'Solved by you' : `Solved by ${opponentName || 'opponent'}`;
+        item.appendChild(solvedBy);
+        for (const [label, solve] of [['You', mySolve], [opponentName || 'Opponent', opponentSolve]]) {
+          if (!solve || (solve.runtime_ms == null && solve.memory_mb == null)) continue;
+          const metrics = document.createElement('span');
+          metrics.className = 'ls-bs-opp';
+          metrics.textContent = `${label}: ${solve.runtime_ms == null ? 'Runtime unavailable' : `${solve.runtime_ms} ms`} · ${solve.memory_mb == null ? 'Memory unavailable' : `${solve.memory_mb} MB`}`;
+          item.appendChild(metrics);
+        }
+      }
+      list.appendChild(item);
+    }
+    sidebar.appendChild(list);
+    updateBattleSidebarTimer();
+  }
+
+  function removeBattleSidebar() {
+    document.getElementById('ls-battle-sidebar')?.remove();
+    document.documentElement.classList.remove('ls-battle-sidebar-open');
+    if (sidebarTimer) { clearInterval(sidebarTimer); sidebarTimer = null; }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -190,10 +480,6 @@
 
   function iAmSolvedThisProblem(slug) {
     return myResults.some(r => r.problem_slug === slug);
-  }
-
-  function oppSolvedThisProblem(slug) {
-    return oppResults.some(r => r.problem_slug === slug);
   }
 
   function getCurrentProblemInfo() {
@@ -457,9 +743,61 @@
   // AUTO-REDIRECT TO NEXT PROBLEM
   // ─────────────────────────────────────────────────────────
 
-  async function handleAcceptedSolve(stats, code, language) {
+  function pendingSolveKey(solve) {
+    return `ls_battle_pending_solve_${solve.battleId}_${solve.problemSlug}`;
+  }
+
+  async function loadPendingBattleSolves() {
+    if (pendingBattleSolvesLoaded) return;
+    pendingBattleSolvesLoaded = true;
+    try {
+      const values = await chrome.storage.local.get(null);
+      pendingBattleSolves = Object.entries(values)
+        .filter(([key]) => key.startsWith('ls_battle_pending_solve_'))
+        .map(([, solve]) => solve)
+        .filter(solve => solve?.battleId && solve?.problemSlug && Date.now() - solve.queuedAt < 24 * 60 * 60 * 1000);
+    } catch {}
+  }
+
+  async function submitQueuedBattleSolve(solve) {
+    const response = await safeMessage({
+      type: 'BATTLE_SOLVED_V2',
+      battleId: solve.battleId,
+      problemSlug: solve.problemSlug,
+      submissionId: solve.submissionId,
+      timeTakenMs: 0,
+      runtimeMs: solve.runtimeMs,
+      memoryMb: solve.memoryMb,
+      language: solve.language
+    });
+    if (response?.success) {
+      pendingBattleSolves = pendingBattleSolves.filter(item => pendingSolveKey(item) !== pendingSolveKey(solve));
+      try { await chrome.storage.local.remove(pendingSolveKey(solve)); } catch {}
+    } else if (/already finalized|deadline has passed|problem not in this battle/i.test(response?.error || '')) {
+      pendingBattleSolves = pendingBattleSolves.filter(item => pendingSolveKey(item) !== pendingSolveKey(solve));
+      try { await chrome.storage.local.remove(pendingSolveKey(solve)); } catch {}
+    }
+    return response;
+  }
+
+  async function flushPendingBattleSolves() {
+    if (flushingBattleSolves) return;
+    flushingBattleSolves = true;
+    try {
+    await loadPendingBattleSolves();
+    for (const solve of pendingBattleSolves) {
+      if (solve.battleId !== activeBattle?.id) continue;
+      const response = await submitQueuedBattleSolve(solve);
+      if (!response?.success && !/already finalized|deadline has passed|problem not in this battle/i.test(response?.error || '')) break;
+    }
+    } finally {
+      flushingBattleSolves = false;
+    }
+  }
+
+  async function handleAcceptedSolve(stats, code, language, acceptedSlug = getCurrentSlug(), submissionId = getLatestSubmissionId()) {
     if (!activeBattle?.id || redirectPending) return;
-    const slug = getCurrentSlug();
+    const slug = acceptedSlug;
     if (!slug) return;
 
     // Check if this slug is in our battle problems
@@ -480,28 +818,19 @@
     showBattleToast('✅ Accepted! Reporting solve…', 'success');
 
     // Report to service worker
-    const startMs = activeBattle.start_at || activeBattle.match_starts_at
-      ? new Date(activeBattle.start_at || activeBattle.match_starts_at).getTime()
-      : Date.now();
-    const timeTakenMs = Math.max(0, Date.now() - startMs);
-
-    let submissionId = null;
-    const subLink = document.querySelector('a[href*="/submissions/detail/"]');
-    if (subLink) {
-      const m = subLink.href.match(/detail\/(\d+)/);
-      if (m) submissionId = m[1];
-    }
-
-    const resp = await safeMessage({
-      type: 'BATTLE_SOLVED_V2',
+    const pendingSolve = {
       battleId: activeBattle.id,
       problemSlug: slug,
       submissionId,
-      timeTakenMs,
-      runtimeMs: stats?.runtime || null,
-      memoryMb: stats?.memory || null,
-      language: normalizeLanguage(language)
-    });
+      runtimeMs: stats?.runtime ?? null,
+      memoryMb: stats?.memory ?? null,
+      language: normalizeLanguage(language),
+      queuedAt: Date.now()
+    };
+    await loadPendingBattleSolves();
+    pendingBattleSolves = [...pendingBattleSolves.filter(item => pendingSolveKey(item) !== pendingSolveKey(pendingSolve)), pendingSolve];
+    try { await chrome.storage.local.set({ [pendingSolveKey(pendingSolve)]: pendingSolve }); } catch {}
+    const resp = await submitQueuedBattleSolve(pendingSolve);
 
     // Also send legacy SUBMISSION_ACCEPTED for streak tracking
     safeMessage({ type: 'SUBMISSION_ACCEPTED', problemSlug: slug, title: slug }).catch(() => {});
@@ -510,10 +839,15 @@
       // Update local state
       myResults = [...myResults, { problem_slug: slug }];
       updateHudScores();
+      renderBattleSidebar();
 
-      if (resp.next_problem_slug) {
-        const nextUrl = resp.next_problem_url || `https://leetcode.com/problems/${resp.next_problem_slug}/`;
-        showBattleToast(`⏭ Next problem: ${resp.next_problem_slug}`, 'info');
+      const nextProblem = resp.next_problem_slug
+        ? battleProblems.find(problem => problem.problem_slug === resp.next_problem_slug)
+        : battleProblems.find(problem => problem.problem_slug !== slug && !myResults.some(result => result.problem_slug === problem.problem_slug));
+      if (!resp.battle_complete && nextProblem) {
+        const nextSlug = resp.next_problem_slug || nextProblem.problem_slug;
+        const nextUrl = resp.next_problem_url || nextProblem.problem_url || `https://leetcode.com/problems/${nextSlug}/`;
+        showBattleToast(`⏭ Next problem: ${nextProblem.problem_title || nextSlug}`, 'info');
         setTimeout(() => {
           redirectPending = false;
           window.location.href = nextUrl;
@@ -534,48 +868,115 @@
   // SUBMISSION OBSERVER
   // ─────────────────────────────────────────────────────────
 
+  function stopPendingSubmission() {
+    pendingSubmissionObserver?.disconnect();
+    pendingSubmissionObserver = null;
+    clearTimeout(pendingSubmissionTimeout);
+    pendingSubmissionTimeout = null;
+    clearInterval(pendingSubmissionPoll);
+    pendingSubmissionPoll = null;
+    pendingSubmission = null;
+  }
+
+  async function checkPendingSubmission() {
+    if (!pendingSubmission) return;
+    const currentText = getSubmissionResultText();
+    const submissionId = getLatestSubmissionId();
+    const resultChanged = currentText !== pendingSubmission.previousResultText;
+    const isNewSubmission = submissionId && submissionId !== pendingSubmission.previousSubmissionId;
+    if (resultChanged || isNewSubmission) pendingSubmission.sawResultChange = true;
+
+    // Track intermediate transitions (e.g. "Judging" or "Pending")
+    if (/\b(?:Judging|Pending)\b/i.test(currentText) || currentText === '') {
+      pendingSubmission.previousResultText = currentText;
+      pendingSubmission.sawResultChange = true;
+      return;
+    }
+
+    // Explicitly reject and stop on ANY failed verdict (Wrong Answer, TLE, etc.)
+    if (isSubmissionFailed()) {
+      const firstLine = currentText.split('\n')[0] || 'Wrong Answer';
+      showBattleToast(`❌ ${firstLine} — try again`, 'warn');
+      stopPendingSubmission();
+      return;
+    }
+
+    if (!isSubmissionAccepted() || !isFreshAcceptedResult({
+      accepted: true,
+      submissionId,
+      previousSubmissionId: pendingSubmission.previousSubmissionId,
+      resultText: currentText,
+      previousResultText: pendingSubmission.previousResultText,
+      // Submission links can update before the verdict panel. A changed ID
+      // alone must never authorize a solve based on stale visible text.
+      sawResultChange: pendingSubmission.sawResultChange
+    })) return;
+
+    const acceptedSubmission = pendingSubmission;
+    if (submissionId && reportedSubmissionIds.has(submissionId)) {
+      stopPendingSubmission();
+      return;
+    }
+    if (submissionId) reportedSubmissionIds.add(submissionId);
+    stopPendingSubmission();
+
+    const stats = extractPerformanceStats();
+    const effectiveSubId = submissionId || `sub_${Date.now()}`;
+    if (activeBattle?.status === 'in_progress' && battleProblems.some(p => p.problem_slug === acceptedSubmission.problemSlug)) {
+      await handleAcceptedSolve(stats, acceptedSubmission.code, acceptedSubmission.language, acceptedSubmission.problemSlug, effectiveSubId);
+    } else {
+      safeMessage({ type: 'SUBMISSION_ACCEPTED', problemSlug: acceptedSubmission.problemSlug, title: document.title }).catch(() => {});
+      showBattleToast('✅ Submission accepted!', 'success');
+    }
+  }
+
+  function startSubmissionAttempt() {
+    if (!isProblemPage() || pendingSubmission) return;
+    pendingSubmission = {
+      problemSlug: getCurrentSlug(),
+      previousSubmissionId: getLatestSubmissionId(),
+      previousResultText: getSubmissionResultText(),
+      sawResultChange: false,
+      language: getSelectedLanguage(),
+      code: extractCode()
+    };
+    pendingSubmissionObserver = new MutationObserver(checkPendingSubmission);
+    pendingSubmissionObserver.observe(document.body, { subtree: true, childList: true, characterData: true });
+    // LeetCode replaces parts of the result panel during SPA renders. Polling
+    // alongside the observer catches verdict updates that don't change text nodes.
+    pendingSubmissionPoll = setInterval(checkPendingSubmission, 750);
+    pendingSubmissionTimeout = setTimeout(stopPendingSubmission, 5 * 60 * 1000);
+  }
+
+  function isSubmitControl(element) {
+    const control = element.closest?.('button, [role="button"], [data-e2e-locator]');
+    if (!control) return false;
+    const label = [control.textContent, control.getAttribute('aria-label'), control.getAttribute('data-e2e-locator')]
+      .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    // NEVER match Run Code buttons!
+    if (/\b(?:run|run\s*code|testcase)\b/i.test(label) && !/\bsubmit\b/i.test(label)) return false;
+    return /\bsubmit\b/i.test(label);
+  }
+
   function initSubmissionObserver() {
     if (submissionObserving) return;
     submissionObserving = true;
 
-    document.addEventListener('click', (event) => {
-      const button = event.target.closest?.('button');
-      if (!button || !/^Submit$/i.test(button.textContent.trim())) return;
+    document.addEventListener('click', event => {
+      if (isSubmitControl(event.target)) startSubmissionAttempt();
+    }, true);
 
-      battleAttemptCount++;
-      const language = getSelectedLanguage();
-      const code = extractCode();
+    document.addEventListener('submit', event => {
+      const submitter = event.submitter || event.target.querySelector?.('button[type="submit"]');
+      if (submitter && /^Submit$/i.test(submitter.textContent.trim())) startSubmissionAttempt();
+    }, true);
 
-      let checkInterval = null;
-      let timeoutId = null;
-
-      const stop = () => {
-        clearInterval(checkInterval);
-        clearTimeout(timeoutId);
-        checkInterval = null;
-        timeoutId = null;
-      };
-
-      checkInterval = setInterval(async () => {
-        if (isSubmissionAccepted()) {
-          stop();
-          const stats = extractPerformanceStats();
-
-          // If we have an active battle, handle battle solve (which also sends SUBMISSION_ACCEPTED)
-          if (activeBattle && activeBattle.status === 'in_progress') {
-            await handleAcceptedSolve(stats, code, language);
-          } else {
-            // No battle: just notify service worker for streak tracking
-            safeMessage({ type: 'SUBMISSION_ACCEPTED', problemSlug: getCurrentSlug(), title: document.title }).catch(() => {});
-            showBattleToast('✅ Submission accepted!', 'success');
-          }
-        } else if (isSubmissionFailed()) {
-          stop();
-        }
-      }, 1000);
-
-      // 5 minute safety timeout
-      timeoutId = setTimeout(stop, 5 * 60 * 1000);
+    // Support LeetCode keyboard shortcut for submit (Ctrl/Cmd + ')
+    // DO NOT hook Ctrl+Enter or Cmd+Enter — on LeetCode that runs sample test cases!
+    document.addEventListener('keydown', event => {
+      if ((event.ctrlKey || event.metaKey) && (event.key === '\'' || event.code === 'Quote')) {
+        startSubmissionAttempt();
+      }
     }, true);
   }
 
@@ -584,7 +985,8 @@
   // ─────────────────────────────────────────────────────────
 
   async function checkBattleStatus() {
-    if (!isExtensionContextValid()) return;
+    if (!isExtensionContextValid() || battleStatusCheckInFlight) return;
+    battleStatusCheckInFlight = true;
     try {
       const stored = await chrome.storage.local.get('my_leetcode_username');
       myUsername = stored.my_leetcode_username || myUsername;
@@ -599,12 +1001,23 @@
 
         // Fetch full v2 state if we have a battle ID
         if (battle.id) {
-          const stateResp = await safeMessage({
+          const stateResp = resp?.state ? { success: true, state: resp.state } : await safeMessage({
             type: 'BATTLE_GET_STATE_V2',
             battleId: battle.id
           });
 
           if (stateResp?.success && stateResp.state) {
+            if (stateResp.state.battle) {
+              const stateBattle = stateResp.state.battle;
+              const startsAt = stateBattle.start_at || stateBattle.match_starts_at;
+              // Preserve the countdown transition derived by getActiveBattle.
+              activeBattle = {
+                ...stateBattle,
+                status: battle.status === 'in_progress' || (
+                  stateBattle.status === 'countdown' && startsAt && Date.parse(startsAt) <= Date.now()
+                ) ? 'in_progress' : stateBattle.status
+              };
+            }
             battleProblems = stateResp.state.problems || [];
             const allResults = stateResp.state.results || [];
             const newMyResults = allResults.filter(r => r.username?.toLowerCase() === myUsername?.toLowerCase());
@@ -614,20 +1027,11 @@
             myResults = newMyResults;
             oppResults = newOppResults;
 
-            // Check if we should redirect to first problem (battle just started / page navigated away)
-            if (battle.status === 'in_progress' && !isProblemPage() && battleProblems.length > 0) {
-              const nextUnsolved = battleProblems.find(p =>
-                !myResults.some(r => r.problem_slug === p.problem_slug)
-              );
-              if (nextUnsolved && !redirectPending) {
-                redirectPending = true;
-                window.location.href = nextUnsolved.problem_url;
-                return;
-              }
-            }
+            // Route from any other LeetCode page to this battle's next unsolved problem.
+            if (redirectToNextUnsolvedBattleProblem()) return;
 
             // Inject or update HUD on problem pages
-            if (isProblemPage()) {
+            if (isProblemPage() && activeBattle.status === 'in_progress') {
               if (!hudInjected) {
                 injectBattleHUD();
               } else {
@@ -658,7 +1062,7 @@
         // Battle is in countdown but we're on LeetCode — show minimal info
         activeBattle = battle;
         removeHUD();
-      } else {
+    } else {
         // No active battle
         activeBattle = null;
         battleProblems = [];
@@ -667,16 +1071,71 @@
         if (hudInjected) removeHUD();
       }
 
-      // Auto-redirect from non-battle page when battle is in_progress
-      if (activeBattle?.status === 'in_progress' && !isProblemPage() && battleProblems.length > 0) {
-        const nextUnsolved = battleProblems.find(p => !myResults.some(r => r.problem_slug === p.problem_slug));
-        if (nextUnsolved && !redirectPending) {
-          redirectPending = true;
-          window.location.href = nextUnsolved.problem_url;
-        }
-      }
+      if (activeBattle && !['countdown', 'in_progress'].includes(activeBattle.status) && hudInjected) removeHUD();
+
+      // Also cover legacy state responses and navigation back to an already-solved page.
+      redirectToNextUnsolvedBattleProblem();
+
+      if (activeBattle?.status === 'in_progress') flushPendingBattleSolves().catch(() => {});
+      renderBattleSidebar();
     } catch (e) {
       // Service worker may not be ready
+    } finally {
+      battleStatusCheckInFlight = false;
+      if (isExtensionContextValid()) {
+        const delay = activeBattle ? 5000 : 15000;
+        clearTimeout(battleStatusPollTimeout);
+        battleStatusPollTimeout = setTimeout(checkBattleStatus, delay);
+      }
+    }
+  }
+
+  function applyBattleData(data) {
+    if (data && ['in_progress', 'countdown'].includes(data.status)) {
+      const startsAt = data.match_starts_at || data.start_at;
+      activeBattle = {
+        id: data.battleId,
+        status: data.status === 'in_progress' || (
+          data.status === 'countdown' && startsAt && Date.parse(startsAt) <= Date.now()
+        ) ? 'in_progress' : data.status,
+        match_starts_at: startsAt,
+        match_deadline: data.match_deadline || data.end_at,
+        start_at: startsAt,
+        end_at: data.match_deadline || data.end_at,
+        duration_minutes: data.duration_minutes || 30
+      };
+      battleProblems = data.problems || [];
+      const allResults = data.results || [];
+      myResults = allResults.filter(r => r.username?.toLowerCase() === myUsername?.toLowerCase());
+      oppResults = allResults.filter(r => r.username?.toLowerCase() !== myUsername?.toLowerCase());
+
+      if (isProblemPage()) {
+        renderBattleSidebar();
+        if (activeBattle.status === 'in_progress') {
+          redirectToNextUnsolvedBattleProblem();
+          if (!hudInjected) injectBattleHUD();
+          else updateHudScores();
+        }
+      } else if (activeBattle.status === 'in_progress') {
+        redirectToNextUnsolvedBattleProblem();
+      }
+    } else if (!data || ['completed', 'forfeited', 'cancelled', 'expired'].includes(data?.status)) {
+      activeBattle = null;
+      battleProblems = [];
+      myResults = [];
+      oppResults = [];
+      removeBattleSidebar();
+      removeHUD();
+    }
+  }
+
+  function ensureSidebarAttached() {
+    if (!activeBattle || !['in_progress', 'countdown'].includes(activeBattle.status) || !isProblemPage() || !battleProblems.length) {
+      return;
+    }
+    const sidebar = document.getElementById('ls-battle-sidebar');
+    if (!sidebar || !sidebar.isConnected) {
+      renderBattleSidebar();
     }
   }
 
@@ -691,18 +1150,24 @@
     if (url === lastUrl) return;
     lastUrl = url;
 
-    // Reset per-page state (but keep activeBattle)
-    submissionObserving = false;
+    // Reset per-page state (keep activeBattle)
     redirectPending = false;
     hudInjected = false;
     document.body.style.marginTop = '';
 
     if (isProblemPage()) {
       initSubmissionObserver();
-      // Re-check battle status after navigation settles
-      setTimeout(checkBattleStatus, 2000);
+      if (activeBattle && ['in_progress', 'countdown'].includes(activeBattle.status)) {
+        renderBattleSidebar();
+        if (activeBattle.status === 'in_progress') {
+          redirectToNextUnsolvedBattleProblem();
+          injectBattleHUD();
+        }
+      }
+      setTimeout(checkBattleStatus, 500);
     } else {
       removeHUD();
+      removeBattleSidebar();
     }
   }
 
@@ -718,11 +1183,43 @@
   // INIT
   // ─────────────────────────────────────────────────────────
 
-  function init() {
+  async function init() {
     initSubmissionObserver();
+
+    // 1. Storage listener for real-time, zero-latency sync across all LeetCode tabs
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      try {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area === 'local' && changes.active_battle_data) {
+            applyBattleData(changes.active_battle_data.newValue);
+          }
+          if (area === 'local' && changes.my_leetcode_username?.newValue) {
+            myUsername = changes.my_leetcode_username.newValue;
+          }
+        });
+      } catch {}
+    }
+
+    // 2. Fast local hydration from storage (instant render on Brave, Chrome, Edge)
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const stored = await chrome.storage.local.get(['active_battle_data', 'my_leetcode_username']);
+        if (stored.my_leetcode_username) myUsername = stored.my_leetcode_username;
+        if (stored.active_battle_data) {
+          applyBattleData(stored.active_battle_data);
+        }
+      } catch {}
+    }
+
+    // 3. Full server check & poll loop
     checkBattleStatus();
-    // Poll every 5s while on any LeetCode page
-    setInterval(checkBattleStatus, 5000);
+
+    // 4. SPA resilience: ensure sidebar stays attached if LeetCode React unmounts it
+    setInterval(ensureSidebarAttached, 1500);
+
+    maybeShowEnoReminder(safeMessage).catch(error => {
+      console.warn('[LeetStreak] Could not start Eno reminder:', error);
+    });
   }
 
   init();

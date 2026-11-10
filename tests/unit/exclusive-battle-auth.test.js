@@ -23,7 +23,6 @@ import {
 } from '../../src/shared/supabase-client.js';
 import {
   getOwnProfile,
-  saveOwnProfile,
   getAllFriends
 } from '../../src/shared/storage.js';
 

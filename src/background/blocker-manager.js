@@ -14,7 +14,7 @@
  */
 
 import { getFriend } from '../shared/storage.js';
-import { timestampToDateString, hasSolvedToday } from '../shared/streak-calculator.js';
+import { timestampToDateString, getConfirmedAcceptedSolveToday } from '../shared/streak-calculator.js';
 
 // ==========================================
 // 1. CONFIGURATION & RULE SETS
@@ -345,6 +345,17 @@ export async function isBlockerActive() {
       return { active: false, reason: 'HARDCORE_DISABLED', todayStr, streak: 0 };
     }
 
+    // The accepted-submission listener records this date immediately. Trust
+    // that same-day marker before consulting a possibly stale profile cache.
+    if (settings.last_solve_date === todayStr) {
+      return {
+        active: false,
+        reason: 'SOLVED_TODAY_LOCAL_MARKER',
+        todayStr,
+        streak: settings.own_profile?.stats?.streak || 0
+      };
+    }
+
     // Check actual profile data from LeetCode
     const username = settings.my_leetcode_username;
     let profile = settings.own_profile;
@@ -367,23 +378,14 @@ export async function isBlockerActive() {
 
     if (profile) {
       const streak = profile.stats?.streak || 0;
-      const solved = hasSolvedToday(profile.allAcceptedSubmissions, profile.submissionCalendar, timezone);
-      if (solved) {
+      const solved = getConfirmedAcceptedSolveToday(profile, timezone);
+      if (solved === true) {
         // Legitimate accepted solve today: cache it and unlock!
         await chrome.storage.local.set({ last_solve_date: todayStr });
         return { active: false, reason: 'SOLVED_TODAY_CANONICAL', todayStr, streak };
       } else {
-        // User has NOT solved today! Invalidate any stale cached last_solve_date
-        if (settings.last_solve_date === todayStr) {
-          await chrome.storage.local.remove('last_solve_date');
-        }
         return { active: true, reason: 'UNSOLVED_TODAY', todayStr, streak };
       }
-    }
-
-    // If no profile data exists yet, check if there is a cached last_solve_date
-    if (settings.last_solve_date === todayStr) {
-      return { active: false, reason: 'SOLVED_TODAY_CACHE', todayStr, streak: 0 };
     }
 
     // Default to active (locked) if hardcore mode is on and no solved records exist for today

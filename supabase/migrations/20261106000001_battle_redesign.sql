@@ -861,24 +861,6 @@ END;
 $$;
 
 -- ─────────────────────────────────────────────────────────────
--- 14. Demo user "joy" — preserve/update with new participant-compatible state
--- ─────────────────────────────────────────────────────────────
-
--- Joy's presence: permanently online (10 year TTL)
-INSERT INTO public.user_presence (user_id, username, last_seen, status, in_battle)
-VALUES (
-    'a0000000-0000-0000-0000-000000000001',
-    'joy',
-    now() + interval '10 years',
-    'online',
-    false
-)
-ON CONFLICT (user_id) DO UPDATE SET
-    last_seen = now() + interval '10 years',
-    status    = 'online',
-    in_battle = false;
-
--- ─────────────────────────────────────────────────────────────
 -- 15. Presence RPCs (Heartbeat & Multi-user status resolution)
 -- ─────────────────────────────────────────────────────────────
 

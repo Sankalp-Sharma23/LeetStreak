@@ -62,7 +62,6 @@ function FriendCard({
   onClick, 
   isCurrentUser, 
   myUsername, 
-  mySubmissionCalendar, 
   rank = 0, 
   sortBy = 'total', 
   onRequireAuth,
@@ -359,6 +358,11 @@ function FriendCard({
               {isCurrentUser && (
                 <span className="px-2 py-0.5 bg-accent text-inverted text-[10px] font-bold rounded-full">YOU</span>
               )}
+              {friend.friend_id && !isCurrentUser && (
+                <span className="text-[9px] font-mono text-text-muted/70 bg-surfaceHover/50 px-1.5 py-0.5 rounded border border-surfaceHover/40" title={`Friend ID: ${friend.friend_id}`}>
+                  ID: {friend.friend_id.slice(0, 8)}
+                </span>
+              )}
               {/* LeetCode Profile Link */}
               <a
                 href={`https://leetcode.com/${profile.username}`}
@@ -558,7 +562,7 @@ function FriendCard({
                 {roastSuccess && (
                   <div className="absolute inset-0 bg-green-500/90 z-10 flex flex-col items-center justify-center animate-fade-in backdrop-blur-sm">
                     <div className="text-white text-3xl mb-1 animate-bounce">🔥</div>
-                    <div className="text-white font-bold text-sm">Roast Delivered!</div>
+                    <div className="text-white font-bold text-sm">Roast Sent!</div>
                   </div>
                 )}
                 

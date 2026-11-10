@@ -2,6 +2,7 @@ import { describe, test, expect, jest } from '@jest/globals';
 import {
   evaluateUrl,
   generateDNRRules,
+  isBlockerActive,
   sanitizeReturnUrl,
   sweepOpenTabs,
   DEFAULT_BLOCKED_DOMAINS,
@@ -10,6 +11,71 @@ import {
 } from '../../src/background/blocker-manager.js';
 
 describe('Hardcore Mode Blocker - Network & Rule Logic', () => {
+  test('does not re-lock after an accepted solve was recorded earlier that local day', async () => {
+    const originalChrome = global.chrome;
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-09T18:31:00.000Z')); // 12:01 a.m. in India
+    const local = {
+      get: jest.fn().mockResolvedValue({
+        hardcore_mode_enabled: true,
+        my_leetcode_username: 'Coder',
+        user_timezone: 'Asia/Kolkata',
+        last_solve_date: '2026-11-10',
+        own_profile: {
+          stats: { streak: 5 },
+          allAcceptedSubmissions: [],
+          submissionCalendar: '{}'
+        }
+      }),
+      set: jest.fn().mockResolvedValue(),
+      remove: jest.fn().mockResolvedValue()
+    };
+    global.chrome = { storage: { local } };
+
+    try {
+      const state = await isBlockerActive();
+      expect(state.active).toBe(false);
+      expect(state.reason).toBe('SOLVED_TODAY_LOCAL_MARKER');
+      expect(local.remove).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+      if (originalChrome === undefined) delete global.chrome;
+      else global.chrome = originalChrome;
+    }
+  });
+
+  test('does not unlock from submission-calendar activity when accepted history is unavailable', async () => {
+    const originalChrome = global.chrome;
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-10T12:00:00.000Z'));
+    const today = Math.floor(Date.UTC(2026, 10, 10, 0, 0, 0) / 1000);
+    const local = {
+      get: jest.fn().mockResolvedValue({
+        hardcore_mode_enabled: true,
+        my_leetcode_username: 'Coder',
+        user_timezone: 'UTC',
+        own_profile: {
+          stats: { streak: 2 },
+          acceptedSubmissionsAvailable: false,
+          allAcceptedSubmissions: [],
+          submissionCalendar: { [today]: 3 }
+        }
+      }),
+      set: jest.fn().mockResolvedValue(),
+      remove: jest.fn().mockResolvedValue()
+    };
+    global.chrome = { storage: { local } };
+
+    try {
+      const state = await isBlockerActive();
+      expect(state.active).toBe(true);
+      expect(state.reason).toBe('UNSOLVED_TODAY');
+      expect(local.set).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+      if (originalChrome === undefined) delete global.chrome;
+      else global.chrome = originalChrome;
+    }
+  });
+
   describe('1. URL Evaluation & Distraction Detection', () => {
     test('identifies default blocked domains (Instagram, TikTok, Reddit, Netflix, WhatsApp)', () => {
       expect(evaluateUrl('https://instagram.com/p/123').isDistraction).toBe(true);

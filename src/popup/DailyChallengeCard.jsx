@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { PartyPopper, Sparkles, Star, Zap } from 'lucide-react';
 import { getDailyChallenge, getChallengeProgress, updateChallengeProgress } from '../shared/daily-challenge';
 
@@ -19,45 +19,49 @@ export default function DailyChallengeCard({ userStats }) {
   const [progress, setProgress] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+  const completedRef = useRef(false);
 
   // Generate confetti data once to avoid re-rendering issues
   const confettiIcons = useMemo(() => generateConfettiIcons(), []);
 
-  // Declare functions before useEffect to avoid temporal dead zone
-  async function loadChallenge() {
-    const dailyChallenge = await getDailyChallenge(userStats);
-    const { progress: currentProgress, completed: isCompleted } = await getChallengeProgress();
-    
-    setChallenge(dailyChallenge);
-    setProgress(currentProgress);
-    setCompleted(isCompleted);
-  }
-
-  async function updateProgress() {
-    const { progress: newProgress, completed: isCompleted } = await updateChallengeProgress(userStats);
-    
-    // Show confetti if just completed
-    if (isCompleted && !completed) {
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 3000);
-    }
-    
-    setProgress(newProgress);
-    setCompleted(isCompleted);
-  }
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (userStats) {
-      loadChallenge(); // eslint-disable-line react-hooks/set-state-in-effect
-    }
+    let active = true;
+    const loadChallenge = async () => {
+      try {
+        const dailyChallenge = await getDailyChallenge(userStats);
+        const { progress: currentProgress, completed: isCompleted } = await getChallengeProgress();
+        if (!active) return;
+        completedRef.current = isCompleted;
+        setChallenge(dailyChallenge);
+        setProgress(currentProgress);
+        setCompleted(isCompleted);
+      } catch (error) {
+        console.error('Could not load daily challenge:', error);
+      }
+    };
+    if (userStats) loadChallenge();
+    return () => { active = false; };
   }, [userStats]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (userStats && challenge) {
-      updateProgress(); // eslint-disable-line react-hooks/set-state-in-effect
-    }
+    let active = true;
+    const updateProgress = async () => {
+      try {
+        const { progress: newProgress, completed: isCompleted } = await updateChallengeProgress(userStats);
+        if (!active) return;
+        if (isCompleted && !completedRef.current) {
+          setShowConfetti(true);
+          setTimeout(() => setShowConfetti(false), 3000);
+        }
+        completedRef.current = isCompleted;
+        setProgress(newProgress);
+        setCompleted(isCompleted);
+      } catch (error) {
+        console.error('Could not update daily challenge progress:', error);
+      }
+    };
+    if (userStats && challenge) updateProgress();
+    return () => { active = false; };
   }, [userStats, challenge]);
 
   async function resetChallenge() {
@@ -68,6 +72,7 @@ export default function DailyChallengeCard({ userStats }) {
         challengeCompleted: false
       });
       setProgress(0);
+      completedRef.current = false;
       setCompleted(false);
     } catch (error) {
       console.error('Error resetting challenge:', error);

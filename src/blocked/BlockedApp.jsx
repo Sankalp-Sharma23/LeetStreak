@@ -1,10 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Flame,
   ShieldAlert,
   ExternalLink,
-  CheckCircle2,
-  ArrowRight,
   Code2,
   Lock,
   Sparkles,
@@ -69,12 +67,28 @@ const MOTIVATIONAL_ROASTS = [
 export default function BlockedApp() {
   const [blockedUrl, setBlockedUrl] = useState('');
   const [siteLabel, setSiteLabel] = useState('');
-  const [username, setUsername] = useState('');
   const [streak, setStreak] = useState(0);
   const [isSolvedToday, setIsSolvedToday] = useState(false);
-  const [countdown, setCountdown] = useState(null);
   const [roastIndex, setRoastIndex] = useState(() => Math.floor(Math.random() * MOTIVATIONAL_ROASTS.length));
+  const [friendRoast, setFriendRoast] = useState(null);
   const [isChecking, setIsChecking] = useState(false);
+
+  const triggerUnlockedFlow = useCallback((targetUrl) => {
+    setIsSolvedToday(true);
+    const safeUrl = sanitizeReturnUrl(targetUrl || blockedUrl);
+    if (safeUrl) {
+      window.location.replace(safeUrl);
+      return;
+    }
+
+    if (typeof chrome !== 'undefined' && chrome.tabs?.getCurrent && chrome.tabs?.remove) {
+      chrome.tabs.getCurrent(tab => {
+        if (tab?.id != null) chrome.tabs.remove(tab.id);
+      });
+    } else {
+      window.close();
+    }
+  }, [blockedUrl]);
 
   useEffect(() => {
     // 1. Parse target URL from query parameters
@@ -93,6 +107,7 @@ export default function BlockedApp() {
     const loadState = async () => {
       try {
         if (typeof chrome !== 'undefined' && chrome.storage) {
+          let targetUrl = urlParam || '';
           // If URL wasn't in query params, inspect session storage for this tab
           if (!urlParam && chrome.storage.session && chrome.tabs && chrome.tabs.getCurrent) {
             const currentTab = await new Promise(r => chrome.tabs.getCurrent(r));
@@ -100,6 +115,7 @@ export default function BlockedApp() {
               const sessionData = await chrome.storage.session.get(`blocked_tab_${currentTab.id}`);
               const entry = sessionData?.[`blocked_tab_${currentTab.id}`];
               if (entry?.url) {
+                targetUrl = entry.url;
                 setBlockedUrl(entry.url);
                 if (entry.label && !labelParam) setSiteLabel(entry.label);
               }
@@ -108,14 +124,26 @@ export default function BlockedApp() {
 
           // Read local settings
           const data = await chrome.storage.local.get([
-            'my_leetcode_username',
             'last_solve_date',
             'user_timezone',
             'own_profile',
-            'hardcore_mode_enabled'
+            'hardcore_mode_enabled',
+            'unread_notifications'
           ]);
 
-          setUsername(data.my_leetcode_username || 'Coder');
+          const unreadRoasts = (data.unread_notifications || []).filter(n => n.type === 'roast');
+          if (unreadRoasts.length > 0) {
+            const r = unreadRoasts[0];
+            let sender = r.senderUsername || r.username;
+            let text = r.roastContent;
+            if (!sender || !text) {
+              const m = (r.message || '').match(/^(.*?)\s+roasted you:\s*"(.*?)"/i);
+              sender = sender || m?.[1] || 'Your friend';
+              text = text || m?.[2] || r.message;
+            }
+            setFriendRoast({ sender, text });
+          }
+
           const currentStreak = data.own_profile?.stats?.streak || 0;
           setStreak(currentStreak);
 
@@ -124,7 +152,7 @@ export default function BlockedApp() {
           setIsSolvedToday(solved);
 
           if (!data.hardcore_mode_enabled || solved) {
-            triggerUnlockedFlow(urlParam);
+            triggerUnlockedFlow(targetUrl);
           }
         }
       } catch (err) {
@@ -156,37 +184,10 @@ export default function BlockedApp() {
       chrome.storage.onChanged.addListener(handleStorageChange);
       return () => chrome.storage.onChanged.removeListener(handleStorageChange);
     }
-  }, []);
+  }, [blockedUrl, triggerUnlockedFlow]);
 
   const cycleRoast = () => {
     setRoastIndex((prev) => (prev + 1) % MOTIVATIONAL_ROASTS.length);
-  };
-
-  const triggerUnlockedFlow = (targetUrl) => {
-    setIsSolvedToday(true);
-    const safeUrl = sanitizeReturnUrl(targetUrl || blockedUrl);
-    if (safeUrl) {
-      setCountdown(2);
-      const timer = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            window.location.href = safeUrl;
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-  };
-
-  const handleManualReturn = () => {
-    const safeUrl = sanitizeReturnUrl(blockedUrl);
-    if (safeUrl) {
-      window.location.href = safeUrl;
-    } else {
-      window.history.back();
-    }
   };
 
   const handleSolveClick = () => {
@@ -235,15 +236,13 @@ export default function BlockedApp() {
   const formattedQuote = currentRoast.quote.replace(/{site}/g, targetSiteName);
   const formattedSubtext = currentRoast.subtext ? currentRoast.subtext.replace(/{site}/g, targetSiteName) : '';
 
+  if (isSolvedToday) return null;
+
   return (
     <div className="w-full bg-[#1F1F23] border border-[#3F3F46] rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden transition-all duration-300">
       {/* Decorative ambient top glow */}
       <div
-        className={`absolute top-0 left-0 right-0 h-1.5 ${
-          isSolvedToday
-            ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500'
-            : 'bg-gradient-to-r from-red-500 via-amber-500 to-red-500'
-        }`}
+        className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-red-500 via-amber-500 to-red-500"
       />
 
       {/* Top Header Badge & Meta Bar */}
@@ -270,50 +269,7 @@ export default function BlockedApp() {
         )}
       </div>
 
-      {isSolvedToday ? (
-        /* SOLVED / UNLOCKED STATE */
-        <div className="space-y-6 text-center animate-fade-in py-4">
-          <div className="w-20 h-20 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 shadow-xl shadow-emerald-500/10">
-            <CheckCircle2 className="w-10 h-10" />
-          </div>
 
-          <div>
-            <h1 className="text-3xl font-black text-white tracking-tight mb-2">
-              Restrictions Lifted For Today!
-            </h1>
-            <p className="text-sm sm:text-base text-[#A1A1AA] max-w-lg mx-auto leading-relaxed">
-              Awesome work, <span className="text-white font-semibold">{username}</span>. You solved your accepted challenge for today. Distracting websites are unlocked until midnight.
-            </p>
-          </div>
-
-          {countdown !== null && countdown > 0 && (
-            <p className="text-xs sm:text-sm font-semibold text-emerald-400 animate-pulse">
-              Redirecting back to <span className="font-mono text-white">{displaySite || 'site'}</span> in {countdown}s...
-            </p>
-          )}
-
-          <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
-            {sanitizeReturnUrl(blockedUrl) && (
-              <button
-                onClick={handleManualReturn}
-                className="min-h-[48px] px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-[#18181B] font-bold text-sm rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
-              >
-                <span>Continue to {displaySite || 'Site'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            )}
-
-            <button
-              onClick={handleSolveClick}
-              className="min-h-[48px] px-6 py-3 bg-[#27272A] hover:bg-[#3F3F46] text-white font-semibold text-sm rounded-xl border border-[#3F3F46] transition-all flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Code2 className="w-4 h-4 text-amber-400" />
-              <span>More LeetCode Problems</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* LOCKED / HERO ROAST HIGHLIGHT STATE */
         <div className="space-y-6">
           {/* THE HERO ROAST SPOTLIGHT - THE MAIN HIGHLIGHT */}
           <div className="relative p-6 sm:p-8 bg-gradient-to-b from-[#18181B] to-[#141416] border-2 border-amber-500/40 rounded-2xl overflow-hidden shadow-2xl shadow-amber-500/10">
@@ -327,7 +283,7 @@ export default function BlockedApp() {
               <div className="flex items-center gap-2">
                 <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
                 <span className="text-[11px] font-mono font-bold tracking-widest uppercase text-amber-400">
-                  REALITY CHECK #{roastIndex + 1}
+                  {friendRoast ? `DIRECT ROAST FROM @${friendRoast.sender.toUpperCase()}` : `REALITY CHECK #${roastIndex + 1}`}
                 </span>
               </div>
 
@@ -345,14 +301,14 @@ export default function BlockedApp() {
             {/* THE MASSIVE ROAST QUOTE - BOLD AND UNMISSABLE */}
             <blockquote className="relative z-10 my-3">
               <p className="text-xl sm:text-2xl md:text-3xl font-black text-white tracking-tight leading-snug">
-                "{formattedQuote}"
+                "{friendRoast ? friendRoast.text : formattedQuote}"
               </p>
             </blockquote>
 
             {/* Subtext punchline */}
-            {formattedSubtext && (
+            {(friendRoast || formattedSubtext) && (
               <p className="relative z-10 text-xs sm:text-sm text-amber-300/80 font-medium leading-relaxed mt-3">
-                {formattedSubtext}
+                {friendRoast ? `Don't let @${friendRoast.sender} laugh at your streak. Solve 1 problem now and prove them wrong.` : formattedSubtext}
               </p>
             )}
           </div>
@@ -414,7 +370,6 @@ export default function BlockedApp() {
             </p>
           )}
         </div>
-      )}
     </div>
   );
 }
