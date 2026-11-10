@@ -815,7 +815,16 @@ async function handleFetchStats(forceRefresh = false) {
 async function handleFetchOwnProfile(forceRefresh = false) {
   try {
     const storageData = await chrome.storage.local.get(['my_leetcode_username', 'user_timezone']);
-    const myUsername = storageData.my_leetcode_username;
+    let myUsername = storageData.my_leetcode_username;
+    if (!myUsername) {
+      try {
+        const detected = await handleGetLoggedInUser();
+        if (detected?.success && detected.username) {
+          myUsername = detected.username;
+          await chrome.storage.local.set({ my_leetcode_username: myUsername });
+        }
+      } catch {}
+    }
     if (!myUsername) {
       return { success: false, error: 'No LeetCode username configured' };
     }

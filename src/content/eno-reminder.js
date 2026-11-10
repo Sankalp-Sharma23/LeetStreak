@@ -1,4 +1,4 @@
-import { getConfirmedAcceptedSolveToday, timestampToDateString } from '../shared/streak-calculator.js';
+import { hasSolvedToday, timestampToDateString } from '../shared/streak-calculator.js';
 
 const REMINDER_KEY = 'eno_reminder_shown_date';
 const FPS = 19;
@@ -7,29 +7,73 @@ const SEGMENTS = [38, 57, 10, 66, 95, 133, 95, 95];
 export async function maybeShowEnoReminder(sendMessage) {
   if (typeof chrome === 'undefined' || !chrome.storage?.local || !chrome.runtime?.id) return;
 
+  const baseUrl = chrome.runtime.getURL('eno/');
+  const assets = Object.fromEntries(
+    ['walk-left.png', 'walk-right.png', 'front-wave.png', 'bow.png', 'seat.png', 'typing.png']
+      .map(name => [name, `${baseUrl}${name}`])
+  );
+
+  // Expose manual trigger for debugging/preview anytime: window.__leetStreakTriggerEno()
+  if (typeof window !== 'undefined') {
+    window.__leetStreakTriggerEno = async () => {
+      console.log('[LeetStreak Eno] Manual trigger requested.');
+      try {
+        await Promise.all(Object.values(assets).map(loadImage));
+        playEnoReminder(assets, 'force-preview');
+      } catch (err) {
+        console.error('[LeetStreak Eno] Failed to load mascot images:', err);
+      }
+    };
+  }
+
   const settings = await chrome.storage.local.get([
     REMINDER_KEY,
     'last_solve_date',
     'user_timezone'
   ]);
   const today = timestampToDateString(Math.floor(Date.now() / 1000), settings.user_timezone);
-  if (settings[REMINDER_KEY] === today || settings.last_solve_date === today) return;
 
-  const response = await sendMessage({ type: 'FETCH_OWN_PROFILE' });
-  const profile = response?.ownProfile;
-  if (!response?.success || !profile) return;
-  if (getConfirmedAcceptedSolveToday(profile, settings.user_timezone) !== false) return;
+  if (settings[REMINDER_KEY] === today) {
+    console.log(`[LeetStreak Eno] Already shown today (${today}). Run window.__leetStreakTriggerEno() in console to preview.`);
+    return;
+  }
+  if (settings.last_solve_date === today) {
+    console.log(`[LeetStreak Eno] Already solved today (${today}) according to last_solve_date.`);
+    return;
+  }
 
-  const baseUrl = chrome.runtime.getURL('eno/');
-  const assets = Object.fromEntries(
-    ['walk-left.png', 'walk-right.png', 'front-wave.png', 'bow.png', 'seat.png', 'typing.png']
-      .map(name => [name, `${baseUrl}${name}`])
-  );
-  await Promise.all(Object.values(assets).map(loadImage));
+  let solvedToday = false;
+  try {
+    const response = await sendMessage({ type: 'FETCH_OWN_PROFILE' });
+    const profile = response?.ownProfile;
+    if (profile) {
+      solvedToday = hasSolvedToday(
+        profile.allAcceptedSubmissions || [],
+        profile.submissionCalendar || {},
+        settings.user_timezone
+      );
+    }
+  } catch (err) {
+    console.warn('[LeetStreak Eno] Profile check failed, checking fallback:', err);
+  }
+
+  if (solvedToday) {
+    console.log(`[LeetStreak Eno] Solved today (${today}), skipping reminder.`);
+    return;
+  }
+
+  try {
+    await Promise.all(Object.values(assets).map(loadImage));
+  } catch (imgErr) {
+    console.warn('[LeetStreak Eno] Could not load mascot assets:', imgErr);
+    return;
+  }
 
   const current = await chrome.storage.local.get([REMINDER_KEY, 'last_solve_date']);
   if (current[REMINDER_KEY] === today || current.last_solve_date === today) return;
   await chrome.storage.local.set({ [REMINDER_KEY]: today });
+
+  console.log('[LeetStreak Eno] Starting streak reminder animation!');
   playEnoReminder(assets, today);
 }
 
