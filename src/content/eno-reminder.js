@@ -13,9 +13,9 @@ export async function maybeShowEnoReminder(sendMessage) {
       .map(name => [name, `${baseUrl}${name}`])
   );
 
-  // Expose manual trigger for debugging/preview anytime: window.__leetStreakTriggerEno()
+  // Expose manual trigger for debugging/preview anytime
   if (typeof window !== 'undefined') {
-    window.__leetStreakTriggerEno = async () => {
+    const triggerNow = async () => {
       console.log('[LeetStreak Eno] Manual trigger requested.');
       try {
         await Promise.all(Object.values(assets).map(loadImage));
@@ -24,6 +24,18 @@ export async function maybeShowEnoReminder(sendMessage) {
         console.error('[LeetStreak Eno] Failed to load mascot images:', err);
       }
     };
+
+    window.__leetStreakTriggerEno = triggerNow;
+
+    // Listen for postMessage from the main page console (top context)
+    window.addEventListener('message', async (event) => {
+      if (event.data === 'LEETSTREAK_TRIGGER_ENO' || event.data?.type === 'LEETSTREAK_TRIGGER_ENO') {
+        try {
+          await chrome.storage.local.remove(REMINDER_KEY);
+        } catch {}
+        triggerNow();
+      }
+    });
   }
 
   const settings = await chrome.storage.local.get([
