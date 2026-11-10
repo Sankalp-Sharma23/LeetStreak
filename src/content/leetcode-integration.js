@@ -15,8 +15,7 @@ import { maybeShowEnoReminder } from './eno-reminder.js';
  * 3. Render a battle HUD bar (countdown, scores, opponent progress)
  * 4. Show opponent-solved toast notifications
  * 5. Report accepted solves to service worker
- *
- * Removed: "Add to Queue", "Code Screenshot" button injection
+ * 6. "Add to Queue" button injection right of the Submit button
  */
 
 (function () {
@@ -981,6 +980,194 @@ import { maybeShowEnoReminder } from './eno-reminder.js';
   }
 
   // ─────────────────────────────────────────────────────────
+  // PROBLEM QUEUE BUTTON INJECTION
+  // ─────────────────────────────────────────────────────────
+
+  function findSubmitButton() {
+    const direct = document.querySelector('button[data-e2e-locator="console-submit-button"]');
+    if (direct) return direct;
+
+    const allButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
+    return allButtons.find(btn => {
+      const text = (btn.textContent || '').trim();
+      const aria = btn.getAttribute('aria-label') || '';
+      const locator = btn.getAttribute('data-e2e-locator') || '';
+      if (/\b(?:run|run\s*code|testcase|test)\b/i.test(text) && !/\bsubmit\b/i.test(text)) return false;
+      return /\bsubmit\b/i.test(text) || /\bsubmit\b/i.test(aria) || /\bsubmit\b/i.test(locator);
+    });
+  }
+
+  function extractProblemDetails() {
+    const slug = getCurrentSlug() || '';
+    
+    // 1. Title
+    const titleEl = document.querySelector('[data-cy="question-title"]') ||
+                    document.querySelector('div[class*="text-title"]') ||
+                    document.querySelector('.text-title-large');
+    let rawTitle = titleEl ? titleEl.textContent.trim() : '';
+    if (!rawTitle) {
+      rawTitle = document.title.replace(/- LeetCode.*/i, '').trim();
+    }
+    if (!rawTitle && slug) {
+      rawTitle = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+
+    // 2. Number
+    const numMatch = rawTitle.match(/^(\d+)\.\s*(.*)$/);
+    const number = numMatch ? numMatch[1] : '';
+    const title = numMatch ? numMatch[2] : rawTitle;
+
+    // 3. Difficulty
+    let difficulty = 'Medium';
+    const diffEl = document.querySelector('div[diff]') ||
+                   document.querySelector('[class*="text-difficulty"]') ||
+                   document.querySelector('span[class*="text-olive"], span[class*="text-yellow"], span[class*="text-pink"], span[class*="text-red"]');
+    if (diffEl) {
+      const text = diffEl.textContent.trim();
+      if (/easy/i.test(text)) difficulty = 'Easy';
+      else if (/hard/i.test(text)) difficulty = 'Hard';
+      else if (/medium/i.test(text)) difficulty = 'Medium';
+    }
+
+    return {
+      id: slug,
+      title: title || slug,
+      slug,
+      difficulty,
+      number,
+      url: window.location.href,
+      status: 'pending',
+      addedAt: Date.now()
+    };
+  }
+
+  async function checkIsProblemInQueue(slug) {
+    if (!slug || typeof chrome === 'undefined' || !chrome.storage?.local) return false;
+    try {
+      const res = await chrome.storage.local.get('problem_queue');
+      const queue = res.problem_queue || [];
+      return queue.some(p => p.slug === slug || p.id === slug);
+    } catch {
+      return false;
+    }
+  }
+
+  function updateQueueButtonUI(button, inQueue) {
+    if (inQueue) {
+      button.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <span>In Queue</span>
+      `;
+      button.title = 'This problem is in your LeetStreak queue';
+      button.style.background = 'rgba(16, 185, 129, 0.15)';
+      button.style.color = '#10b981';
+      button.style.borderColor = 'rgba(16, 185, 129, 0.35)';
+    } else {
+      button.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>Add to Queue</span>
+      `;
+      button.title = 'Add this problem to your LeetStreak queue';
+      button.style.background = 'rgba(255, 161, 22, 0.12)';
+      button.style.color = '#ffa116';
+      button.style.borderColor = 'rgba(255, 161, 22, 0.35)';
+    }
+  }
+
+  function ensureQueueButtonAttached() {
+    if (!isProblemPage()) {
+      document.getElementById('leetstreak-queue-btn')?.remove();
+      return;
+    }
+    const slug = getCurrentSlug();
+    if (!slug) return;
+
+    const existing = document.getElementById('leetstreak-queue-btn');
+    if (existing && existing.isConnected) {
+      if (existing.dataset.slug !== slug) {
+        existing.dataset.slug = slug;
+        checkIsProblemInQueue(slug).then(inQ => updateQueueButtonUI(existing, inQ));
+      }
+      return;
+    }
+
+    const submitBtn = findSubmitButton();
+    if (!submitBtn) return;
+
+    const queueBtn = document.createElement('button');
+    queueBtn.id = 'leetstreak-queue-btn';
+    queueBtn.type = 'button';
+    queueBtn.dataset.slug = slug;
+    queueBtn.style.cssText = [
+      'display: inline-flex',
+      'align-items: center',
+      'gap: 5px',
+      'height: 32px',
+      'padding: 0 10px',
+      'margin-left: 8px',
+      'border-radius: 6px',
+      'font-size: 12px',
+      'font-weight: 600',
+      'font-family: inherit',
+      'cursor: pointer',
+      'transition: all 0.2s ease',
+      'background: rgba(255, 161, 22, 0.12)',
+      'color: #ffa116',
+      'border: 1px solid rgba(255, 161, 22, 0.35)',
+      'vertical-align: middle',
+      'white-space: nowrap',
+      'user-select: none',
+      'z-index: 10'
+    ].join(';');
+
+    queueBtn.addEventListener('mouseenter', () => {
+      queueBtn.style.filter = 'brightness(1.15)';
+      queueBtn.style.transform = 'translateY(-1px)';
+    });
+    queueBtn.addEventListener('mouseleave', () => {
+      queueBtn.style.filter = 'none';
+      queueBtn.style.transform = 'none';
+    });
+
+    queueBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const inQueue = await checkIsProblemInQueue(slug);
+      if (inQueue) {
+        showBattleToast('ℹ️ This problem is already in your queue', 'info');
+        return;
+      }
+
+      const prob = extractProblemDetails();
+      const resp = await safeMessage({
+        type: 'ADD_TO_QUEUE',
+        problemData: prob
+      });
+
+      if (resp?.success) {
+        showBattleToast('📋 Added to your Problem Queue!', 'success');
+        updateQueueButtonUI(queueBtn, true);
+      } else if (resp?.alreadyExists) {
+        showBattleToast('ℹ️ Already in your Problem Queue', 'info');
+        updateQueueButtonUI(queueBtn, true);
+      } else {
+        showBattleToast(`❌ ${resp?.error || 'Could not add to queue'}`, 'error');
+      }
+    });
+
+    updateQueueButtonUI(queueBtn, false);
+    checkIsProblemInQueue(slug).then(inQ => updateQueueButtonUI(queueBtn, inQ));
+
+    submitBtn.insertAdjacentElement('afterend', queueBtn);
+  }
+
+  // ─────────────────────────────────────────────────────────
   // BATTLE STATUS POLLING
   // ─────────────────────────────────────────────────────────
 
@@ -1157,6 +1344,7 @@ import { maybeShowEnoReminder } from './eno-reminder.js';
 
     if (isProblemPage()) {
       initSubmissionObserver();
+      ensureQueueButtonAttached();
       if (activeBattle && ['in_progress', 'countdown'].includes(activeBattle.status)) {
         renderBattleSidebar();
         if (activeBattle.status === 'in_progress') {
@@ -1168,6 +1356,7 @@ import { maybeShowEnoReminder } from './eno-reminder.js';
     } else {
       removeHUD();
       removeBattleSidebar();
+      document.getElementById('leetstreak-queue-btn')?.remove();
     }
   }
 
@@ -1185,6 +1374,7 @@ import { maybeShowEnoReminder } from './eno-reminder.js';
 
   async function init() {
     initSubmissionObserver();
+    ensureQueueButtonAttached();
 
     // 1. Storage listener for real-time, zero-latency sync across all LeetCode tabs
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
@@ -1214,8 +1404,9 @@ import { maybeShowEnoReminder } from './eno-reminder.js';
     // 3. Full server check & poll loop
     checkBattleStatus();
 
-    // 4. SPA resilience: ensure sidebar stays attached if LeetCode React unmounts it
+    // 4. SPA resilience: ensure sidebar & queue button stay attached if LeetCode React unmounts them
     setInterval(ensureSidebarAttached, 1500);
+    setInterval(ensureQueueButtonAttached, 1500);
 
     maybeShowEnoReminder(safeMessage).catch(error => {
       console.warn('[LeetStreak] Could not start Eno reminder:', error);
